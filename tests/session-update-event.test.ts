@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applySessionUpdate } from '../src/renderer/utils/session-update';
+import { applySessionUpdate } from '~/lib/session-update';
 
 describe('applySessionUpdate', () => {
   it('updates title in session list', () => {

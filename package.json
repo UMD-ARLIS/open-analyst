@@ -3,13 +3,11 @@
   "version": "2.0.0",
   "description": "Remote-first analyst application with headless agent runtime",
   "scripts": {
-    "dev": "npm run dev:stack",
-    "dev:web": "vite --host 0.0.0.0 --port 5173",
+    "dev": "react-router dev",
+    "build": "react-router build",
+    "start": "react-router-serve build/server/index.js",
+    "dev:legacy": "sh -c 'node scripts/headless-server.js & vite --host 0.0.0.0 --port 5173'",
     "serve:headless": "node scripts/headless-server.js",
-    "dev:stack": "sh -c 'node scripts/headless-server.js & vite --host 0.0.0.0 --port 5173'",
-    "build": "vite build",
-    "build:container": "vite build",
-    "preview": "vite preview",
     "lint": "eslint src --ext .ts,.tsx",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "test": "vitest"
@@ -19,6 +17,8 @@
     "@anthropic-ai/claude-code": "^2.1.42",
     "@anthropic-ai/sdk": "^0.74.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
+    "@react-router/dev": "^7.13.0",
+    "@react-router/node": "^7.13.0",
     "@types/ws": "^8.18.1",
     "archiver": "^7.0.1",
     "cheerio": "^1.2.0",
@@ -33,12 +33,14 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^9.0.1",
+    "react-router": "^7.13.0",
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "uuid": "^11.0.3",
     "ws": "^8.19.0",
-    "zustand": "^5.0.2"
+    "zustand": "^5.0.2",
+    "isbot": "^5"
   },
   "devDependencies": {
     "@types/archiver": "^6.0.4",
@@ -65,5 +67,6 @@
   "optionalDependencies": {
     "bufferutil": "^4.1.0",
     "utf-8-validate": "^6.0.6"
-  }
+  },
+  "packageManager": "pnpm@10.28.0+sha512.05df71d1421f21399e053fde567cea34d446fa02c76571441bfc1c7956e98e363088982d940465fd34480d4d90a0668bc12362f8aa88000a64e83d0b0e47be48"
 }

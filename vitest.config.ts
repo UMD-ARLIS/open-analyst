@@ -5,7 +5,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['src/**/*.{test,spec}.{js,ts}', 'tests/**/*.{test,spec}.{js,ts}'],
+    include: ['src/**/*.{test,spec}.{js,ts}', 'app/**/*.{test,spec}.{js,ts}', 'tests/**/*.{test,spec}.{js,ts}'],
     exclude: ['node_modules', 'dist', '.claude'],
     coverage: {
       provider: 'v8',
@@ -24,7 +24,9 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      '~': path.resolve(__dirname, './app'),
       '@': path.resolve(__dirname, './src'),
+      '@renderer': path.resolve(__dirname, './src/renderer'),
     },
   },
 });

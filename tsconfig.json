@@ -20,12 +20,13 @@
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
     "paths": {
+      "~/*": ["app/*"],
       "@/*": ["src/*"],
       "@main/*": ["src/main/*"],
       "@renderer/*": ["src/renderer/*"],
       "react-i18next": ["src/renderer/shims/react-i18next.ts"]
     }
   },
-  "include": ["src"],
+  "include": ["app", "src"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
