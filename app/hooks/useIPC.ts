@@ -6,13 +6,14 @@ import {
 } from '~/lib/browser-config';
 import {
   headlessChat,
+  headlessChatStream,
   headlessGetProjects,
   headlessGetWorkingDir,
   headlessSetWorkingDir,
   headlessGetTools,
   headlessGetCollections,
 } from '~/lib/headless-api';
-import type { HeadlessTraceStep } from '~/lib/headless-api';
+import type { HeadlessTraceStep, StreamEvent } from '~/lib/headless-api';
 
 function contentBlocksToText(content: ContentBlock[]): string {
   return content
@@ -67,7 +68,7 @@ export function useIPC() {
   }, [addTraceStep]);
 
   const startSession = useCallback(
-    async (title: string, promptOrContent: string | ContentBlock[], cwd?: string, options?: { deepResearch?: boolean }) => {
+    async (title: string, promptOrContent: string | ContentBlock[], cwd?: string, options?: { deepResearch?: boolean; streaming?: boolean }) => {
       setLoading(true);
       let sessionId = '';
       let mockStepId = '';
@@ -128,25 +129,77 @@ export function useIPC() {
             : collections[0]?.id;
         }
 
-        const result = await headlessChat(chatMessages, prompt, projectId, {
-          collectionId: selectedCollectionId,
-          deepResearch: Boolean(options?.deepResearch),
-        });
+        const useStreaming = options?.streaming !== false; // default to streaming
 
-        if (result.runId) {
-          linkSessionToRun(sessionId, result.runId);
-        }
-        if (result.traces.length > 0) {
-          applyHeadlessTraces(sessionId, result.traces);
-        }
+        if (useStreaming) {
+          // SSE streaming mode
+          let streamedText = '';
+          const streamResult = await headlessChatStream(chatMessages, prompt, projectId, {
+            collectionId: selectedCollectionId,
+            deepResearch: Boolean(options?.deepResearch),
+          }, (event: StreamEvent) => {
+            if (event.type === 'text_delta' && event.text) {
+              streamedText += event.text;
+              // Update partial message in real-time
+              const partials = useAppStore.getState().partialMessagesBySession || {};
+              useAppStore.setState({
+                partialMessagesBySession: { ...partials, [sessionId]: streamedText },
+              });
+            } else if (event.type === 'tool_call_start') {
+              addTraceStep(sessionId, {
+                id: `trace-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                type: 'tool_call',
+                status: 'running',
+                title: event.toolName || 'Tool',
+                toolName: event.toolName,
+                toolInput: event.toolInput,
+                timestamp: Date.now(),
+              });
+            } else if (event.type === 'tool_call_end') {
+              // Tool call completed — trace step already added with 'running', UI can update
+            } else if (event.type === 'error') {
+              // Will be handled below
+            }
+          });
 
-        addMessage(sessionId, {
-          id: `msg-assistant-${Date.now()}`,
-          sessionId,
-          role: 'assistant',
-          content: [{ type: 'text', text: result.text || '' }],
-          timestamp: Date.now(),
-        });
+          if (streamResult.runId) {
+            linkSessionToRun(sessionId, streamResult.runId);
+          }
+
+          addMessage(sessionId, {
+            id: `msg-assistant-${Date.now()}`,
+            sessionId,
+            role: 'assistant',
+            content: [{ type: 'text', text: streamResult.text || '' }],
+            timestamp: Date.now(),
+          });
+
+          // Clear partial message
+          const partials = useAppStore.getState().partialMessagesBySession || {};
+          const { [sessionId]: _, ...rest } = partials;
+          useAppStore.setState({ partialMessagesBySession: rest });
+        } else {
+          // Non-streaming mode (original)
+          const result = await headlessChat(chatMessages, prompt, projectId, {
+            collectionId: selectedCollectionId,
+            deepResearch: Boolean(options?.deepResearch),
+          });
+
+          if (result.runId) {
+            linkSessionToRun(sessionId, result.runId);
+          }
+          if (result.traces.length > 0) {
+            applyHeadlessTraces(sessionId, result.traces);
+          }
+
+          addMessage(sessionId, {
+            id: `msg-assistant-${Date.now()}`,
+            sessionId,
+            role: 'assistant',
+            content: [{ type: 'text', text: result.text || '' }],
+            timestamp: Date.now(),
+          });
+        }
 
         updateSession(sessionId, { status: 'idle' });
         clearActiveTurn(sessionId, mockStepId);
@@ -176,6 +229,7 @@ export function useIPC() {
       activeProjectId,
       addMessage,
       addSession,
+      addTraceStep,
       activateNextTurn,
       applyHeadlessTraces,
       clearActiveTurn,
@@ -189,7 +243,7 @@ export function useIPC() {
   );
 
   const continueSession = useCallback(
-    async (sessionId: string, promptOrContent: string | ContentBlock[], options?: { deepResearch?: boolean }) => {
+    async (sessionId: string, promptOrContent: string | ContentBlock[], options?: { deepResearch?: boolean; streaming?: boolean }) => {
       setLoading(true);
 
       const content: ContentBlock[] = typeof promptOrContent === 'string'
@@ -214,6 +268,7 @@ export function useIPC() {
       });
 
       let mockStepId = '';
+      const useStreaming = options?.streaming !== false; // default to streaming
       try {
         updateSession(sessionId, { status: 'running' });
         mockStepId = `mock-step-${Date.now()}`;
@@ -234,25 +289,67 @@ export function useIPC() {
             : collections[0]?.id;
         }
 
-        const result = await headlessChat(chatMessages, prompt, projectId, {
-          collectionId: selectedCollectionId,
-          deepResearch: Boolean(options?.deepResearch),
-        });
+        if (useStreaming) {
+          let streamedText = '';
+          const streamResult = await headlessChatStream(chatMessages, prompt, projectId, {
+            collectionId: selectedCollectionId,
+            deepResearch: Boolean(options?.deepResearch),
+          }, (event: StreamEvent) => {
+            if (event.type === 'text_delta' && event.text) {
+              streamedText += event.text;
+              const partials = useAppStore.getState().partialMessagesBySession || {};
+              useAppStore.setState({
+                partialMessagesBySession: { ...partials, [sessionId]: streamedText },
+              });
+            } else if (event.type === 'tool_call_start') {
+              addTraceStep(sessionId, {
+                id: `trace-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                type: 'tool_call',
+                status: 'running',
+                title: event.toolName || 'Tool',
+                toolName: event.toolName,
+                timestamp: Date.now(),
+              });
+            }
+          });
 
-        if (result.runId) {
-          linkSessionToRun(sessionId, result.runId);
-        }
-        if (result.traces.length > 0) {
-          applyHeadlessTraces(sessionId, result.traces);
-        }
+          if (streamResult.runId) {
+            linkSessionToRun(sessionId, streamResult.runId);
+          }
 
-        addMessage(sessionId, {
-          id: `msg-assistant-${Date.now()}`,
-          sessionId,
-          role: 'assistant',
-          content: [{ type: 'text', text: result.text || '' }],
-          timestamp: Date.now(),
-        });
+          addMessage(sessionId, {
+            id: `msg-assistant-${Date.now()}`,
+            sessionId,
+            role: 'assistant',
+            content: [{ type: 'text', text: streamResult.text || '' }],
+            timestamp: Date.now(),
+          });
+
+          // Clear partial message
+          const partials = useAppStore.getState().partialMessagesBySession || {};
+          const { [sessionId]: _, ...rest } = partials;
+          useAppStore.setState({ partialMessagesBySession: rest });
+        } else {
+          const result = await headlessChat(chatMessages, prompt, projectId, {
+            collectionId: selectedCollectionId,
+            deepResearch: Boolean(options?.deepResearch),
+          });
+
+          if (result.runId) {
+            linkSessionToRun(sessionId, result.runId);
+          }
+          if (result.traces.length > 0) {
+            applyHeadlessTraces(sessionId, result.traces);
+          }
+
+          addMessage(sessionId, {
+            id: `msg-assistant-${Date.now()}`,
+            sessionId,
+            role: 'assistant',
+            content: [{ type: 'text', text: result.text || '' }],
+            timestamp: Date.now(),
+          });
+        }
 
         updateSession(sessionId, { status: 'idle' });
         clearActiveTurn(sessionId, mockStepId);
@@ -277,6 +374,7 @@ export function useIPC() {
     [
       activeProjectId,
       addMessage,
+      addTraceStep,
       activateNextTurn,
       applyHeadlessTraces,
       clearActiveTurn,

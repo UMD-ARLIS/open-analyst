@@ -21,7 +21,7 @@ describe("config.server", () => {
     const config = loadConfig(tempDir);
     expect(config.provider).toBe("openai");
     expect(config.apiKey).toBe("");
-    expect(config.model).toBe("gpt-4o");
+    expect(config.model).toBe("anthropic/claude-sonnet-4");
   });
 
   it("saveConfig persists and loadConfig round-trips", () => {

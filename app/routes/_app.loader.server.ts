@@ -10,6 +10,6 @@ export async function loader() {
     projects,
     activeProjectId: activeProject?.id ?? null,
     workingDir: config.workingDir || "",
-    isConfigured: Boolean(config.apiKey?.trim()),
+    isConfigured: true,
   };
 }

@@ -1,10 +1,6 @@
-// Stub for chat agent logic — delegates to the original headless server's
-// runAgentChat. The full port of tool handlers (web_fetch, web_search,
-// arxiv_search, etc.) will be done in a later phase.
-//
-// For now this module just re-exports a compatible interface.
-
 import type { HeadlessConfig } from "./types";
+import { createAgentProvider } from "./agent/index.server";
+import { getProjectWorkspace } from "./filesystem.server";
 
 interface ChatMessage {
   role: string;
@@ -26,16 +22,33 @@ interface ChatResult {
 }
 
 export async function runAgentChat(
-  _config: HeadlessConfig,
-  _messages: ChatMessage[],
-  _options: ChatOptions = {}
+  config: HeadlessConfig,
+  messages: ChatMessage[],
+  options: ChatOptions = {}
 ): Promise<ChatResult> {
-  // TODO: Port tool handlers and OpenAI SDK integration
-  // For now, return a placeholder indicating the chat endpoint is wired up
-  // but the agent loop is not yet available in the RR7 app.
-  return {
-    text: "Chat endpoint is connected but the agent loop has not been ported to RR7 yet.",
-    traces: [],
-    toolCalls: [],
-  };
+  const provider = createAgentProvider(config);
+  const projectId = options.projectId || "";
+  const workingDir = projectId
+    ? getProjectWorkspace(projectId)
+    : config.workingDir || process.cwd();
+
+  try {
+    const result = await provider.chat(
+      messages.map((m) => ({
+        role: m.role as "user" | "assistant" | "system",
+        content: m.content,
+      })),
+      {
+        projectId,
+        workingDir,
+        collectionId: options.collectionId,
+        collectionName: options.collectionName || "Task Sources",
+        deepResearch: options.deepResearch,
+      }
+    );
+
+    return { text: result.text, traces: result.traces, toolCalls: [] };
+  } finally {
+    await provider.dispose?.();
+  }
 }

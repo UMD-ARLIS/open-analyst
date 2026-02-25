@@ -61,7 +61,7 @@ export function WelcomeView() {
     setError(null);
     try {
       const title = text.slice(0, 60) + (text.length > 60 ? '...' : '');
-      const session = await startSession(title, content, workingDir || undefined);
+      const session = await startSession(title, content, workingDir || undefined, { streaming: true });
       setPrompt('');
       if (session?.id && activeProjectId) {
         navigate(`/projects/${activeProjectId}/sessions/${session.id}`);

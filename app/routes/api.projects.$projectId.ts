@@ -1,5 +1,5 @@
 import { createProjectStore } from "~/lib/project-store.server";
-import { loadConfig, saveConfig } from "~/lib/config.server";
+import { saveConfig } from "~/lib/config.server";
 import type { Route } from "./+types/api.projects.$projectId";
 
 export async function loader({ params }: Route.LoaderArgs) {
@@ -35,12 +35,11 @@ export async function action({ request, params }: Route.ActionArgs) {
     try {
       const deleted = store.deleteProject(projectId);
       const activeProject = store.getActiveProject();
-      const cfg = loadConfig();
-      cfg.activeProjectId = activeProject ? activeProject.id : "";
-      saveConfig(cfg);
+      const newActiveId = activeProject ? activeProject.id : "";
+      saveConfig({ activeProjectId: newActiveId });
       return Response.json({
         ...deleted,
-        activeProjectId: cfg.activeProjectId,
+        activeProjectId: newActiveId,
       });
     } catch (err) {
       return Response.json(

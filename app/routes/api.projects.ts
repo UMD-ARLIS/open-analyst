@@ -1,5 +1,5 @@
 import { createProjectStore } from "~/lib/project-store.server";
-import { loadConfig, saveConfig } from "~/lib/config.server";
+import { saveConfig } from "~/lib/config.server";
 import type { Route } from "./+types/api.projects";
 
 export async function loader() {
@@ -21,9 +21,7 @@ export async function action({ request }: Route.ActionArgs) {
     description: body.description,
     datastores: body.datastores,
   });
-  const cfg = loadConfig();
-  cfg.activeProjectId = project.id;
-  saveConfig(cfg);
+  saveConfig({ activeProjectId: project.id });
   return Response.json(
     { project, activeProjectId: project.id },
     { status: 201 }

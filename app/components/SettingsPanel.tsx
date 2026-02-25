@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useFetcher } from 'react-router';
 import {
   AlertCircle,
@@ -16,10 +16,8 @@ import {
 import { useAppStore } from '~/lib/store';
 import type { AppConfig, Skill } from '~/lib/types';
 import {
-  FALLBACK_PRESETS,
   getBrowserConfig,
   saveBrowserConfig,
-  testApiConnectionBrowser,
 } from '~/lib/browser-config';
 import {
   headlessGetCredentials,
@@ -28,6 +26,7 @@ import {
   headlessGetMcpServerStatus,
   headlessGetMcpServers,
   headlessGetMcpTools,
+  headlessGetModels,
   headlessGetSkills,
   headlessLogsIsEnabled,
   headlessValidateSkillPath,
@@ -142,61 +141,31 @@ export function SettingsPanel({ isOpen, onClose, initialTab = 'api', initialData
 }
 
 function APISettingsTab() {
-  const inferBedrockRegion = (url?: string): string => {
-    const value = String(url || '').toLowerCase();
-    const runtimeMatch = value.match(/bedrock-runtime\.([a-z0-9-]+)\.amazonaws\.com/);
-    if (runtimeMatch?.[1]) return runtimeMatch[1];
-    const mantleMatch = value.match(/bedrock-mantle\.([a-z0-9-]+)\.api\.aws/);
-    return mantleMatch?.[1] || 'us-east-1';
-  };
   const setAppConfig = useAppStore((state) => state.setAppConfig);
   const setIsConfigured = useAppStore((state) => state.setIsConfigured);
   const fetcher = useFetcher();
   const [config, setConfig] = useState<AppConfig>(() => getBrowserConfig());
-  const [provider, setProvider] = useState<'openrouter' | 'anthropic' | 'openai' | 'custom' | 'bedrock'>(config.provider || 'openrouter');
-  const [apiKey, setApiKey] = useState(config.apiKey || '');
-  const [baseUrl, setBaseUrl] = useState(config.baseUrl || FALLBACK_PRESETS[config.provider || 'openrouter']?.baseUrl || '');
   const [model, setModel] = useState(config.model || '');
   const [customModel, setCustomModel] = useState('');
   const [useCustomModel, setUseCustomModel] = useState(false);
-  const [bedrockRegion, setBedrockRegion] = useState(config.bedrockRegion || inferBedrockRegion(config.baseUrl));
+  const [models, setModels] = useState<Array<{ id: string; name: string }>>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [testing, setTesting] = useState(false);
-
-  const models = useMemo(() => FALLBACK_PRESETS[provider]?.models || [], [provider]);
 
   useEffect(() => {
-    const preset = FALLBACK_PRESETS[provider];
-    if (!preset) return;
-    if (provider === 'custom') {
-      if (!baseUrl.trim()) setBaseUrl(preset.baseUrl);
-    } else if (provider === 'bedrock') {
-      const region = bedrockRegion.trim().toLowerCase() || 'us-east-1';
-      setBaseUrl(`https://bedrock-mantle.${region}.api.aws/v1`);
-    } else {
-      setBaseUrl(preset.baseUrl);
-    }
-    if (preset.models?.[0]?.id) {
-      const current = useCustomModel ? customModel : model;
-      if (!current || !preset.models.some((m) => m.id === current)) {
-        setModel(preset.models[0].id);
-        setUseCustomModel(false);
-      }
-    }
-  }, [provider]);
-
-  useEffect(() => {
-    if (provider !== 'bedrock') return;
-    const region = bedrockRegion.trim().toLowerCase() || 'us-east-1';
-    setBaseUrl(`https://bedrock-mantle.${region}.api.aws/v1`);
-  }, [provider, bedrockRegion]);
+    headlessGetModels()
+      .then((list) => {
+        setModels(list);
+        if (list.length > 0 && !model) {
+          setModel(list[0].id);
+        }
+      })
+      .catch((e) => setError(`Failed to load models: ${e instanceof Error ? e.message : String(e)}`))
+      .finally(() => setLoading(false));
+  }, []);
 
   const saveConfig = () => {
-    if (!apiKey.trim()) {
-      setError('API key is required.');
-      return;
-    }
     const resolvedModel = (useCustomModel ? customModel : model).trim();
     if (!resolvedModel) {
       setError('Model is required.');
@@ -204,16 +173,10 @@ function APISettingsTab() {
     }
     const next: AppConfig = {
       ...config,
-      provider,
-      apiKey: apiKey.trim(),
-      baseUrl: baseUrl.trim(),
-      bedrockRegion: bedrockRegion.trim().toLowerCase() || 'us-east-1',
       model: resolvedModel,
-      customProtocol: provider === 'anthropic' ? 'anthropic' : 'openai',
-      openaiMode: 'responses',
     };
     setError('');
-    fetcher.submit(next as unknown as Record<string, string>, {
+    fetcher.submit({ model: resolvedModel } as Record<string, string>, {
       method: "POST",
       action: "/api/config",
       encType: "application/json",
@@ -226,50 +189,24 @@ function APISettingsTab() {
     setTimeout(() => setSuccess(''), 2000);
   };
 
-  const testConfig = async () => {
-    setTesting(true);
-    setError('');
-    setSuccess('');
-    try {
-      const resolvedModel = (useCustomModel ? customModel : model).trim();
-      const result = await testApiConnectionBrowser({
-        provider,
-        apiKey,
-        baseUrl,
-        bedrockRegion: bedrockRegion.trim().toLowerCase() || 'us-east-1',
-        model: resolvedModel,
-        customProtocol: provider === 'anthropic' ? 'anthropic' : 'openai',
-      });
-      if (!result.ok) {
-        setError(result.details || 'API test failed.');
-      } else {
-        setSuccess('Connection successful.');
-      }
-    } finally {
-      setTesting(false);
-    }
-  };
-
   return (
     <div className="space-y-3">
       {error && <Banner tone="error" text={error} />}
       {success && <Banner tone="success" text={success} />}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <label className="text-sm">Provider
-          <select className="input mt-1" value={provider} onChange={(e) => setProvider(e.target.value as any)}>
-            <option value="openrouter">OpenRouter</option>
-            <option value="openai">OpenAI</option>
-            <option value="anthropic">Anthropic</option>
-            <option value="bedrock">Bedrock</option>
-            <option value="custom">Custom</option>
-          </select>
-        </label>
-        <label className="text-sm">Model (Preset)
-          <select className="input mt-1" value={model} onChange={(e) => { setModel(e.target.value); setUseCustomModel(false); }}>
-            {models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </select>
-        </label>
-      </div>
+      <p className="text-sm text-text-secondary">
+        Models are served through the LiteLLM gateway. API credentials are configured via server environment variables.
+      </p>
+      <label className="text-sm">Model
+        <select
+          className="input mt-1"
+          value={model}
+          onChange={(e) => { setModel(e.target.value); setUseCustomModel(false); }}
+          disabled={loading}
+        >
+          {loading && <option>Loading models...</option>}
+          {models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
+      </label>
       <label className="text-sm">Custom Model (optional)
         <input
           className="input mt-1"
@@ -282,28 +219,7 @@ function APISettingsTab() {
           }}
         />
       </label>
-      {provider === 'bedrock' && (
-        <label className="text-sm">AWS Region
-          <input
-            className="input mt-1"
-            value={bedrockRegion}
-            onChange={(e) => setBedrockRegion(e.target.value)}
-            placeholder="us-east-1"
-          />
-        </label>
-      )}
-      <label className="text-sm">Base URL
-        <input
-          className="input mt-1"
-          value={baseUrl}
-          onChange={(e) => setBaseUrl(e.target.value)}
-        />
-      </label>
-      <label className="text-sm">API Key
-        <input className="input mt-1" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
-      </label>
       <div className="flex gap-2">
-        <button className="btn btn-secondary" onClick={() => void testConfig()} disabled={testing}>{testing ? 'Testing...' : 'Test'}</button>
         <button className="btn btn-primary" onClick={() => void saveConfig()}>
           <Save className="w-4 h-4" />
           <span>Save</span>

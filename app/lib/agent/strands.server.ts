@@ -1,0 +1,134 @@
+import type {
+  AgentProvider,
+  AgentChatMessage,
+  AgentChatOptions,
+  AgentChatResult,
+  AgentEvent,
+} from "./interface";
+import type { HeadlessConfig } from "../types";
+import { env } from "~/lib/env.server";
+
+export class StrandsProvider implements AgentProvider {
+  readonly name = "strands";
+  private config: HeadlessConfig;
+
+  constructor(config: HeadlessConfig) {
+    this.config = config;
+  }
+
+  private buildPayload(
+    messages: AgentChatMessage[],
+    options: AgentChatOptions,
+    extra?: Record<string, unknown>
+  ) {
+    return {
+      messages,
+      project_id: options.projectId,
+      working_dir: options.workingDir,
+      collection_id: options.collectionId || "",
+      collection_name: options.collectionName || "Task Sources",
+      deep_research: options.deepResearch || false,
+      model_id: this.config.model,
+      litellm_base_url: env.LITELLM_BASE_URL,
+      litellm_api_key: env.LITELLM_API_KEY,
+      api_base_url: `http://localhost:${process.env.PORT || 5173}`,
+      ...extra,
+    };
+  }
+
+  async chat(
+    messages: AgentChatMessage[],
+    options: AgentChatOptions
+  ): Promise<AgentChatResult> {
+    const res = await fetch(`${env.STRANDS_URL}/invocations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(this.buildPayload(messages, options)),
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`Agent backend error: ${res.status} ${body}`);
+    }
+
+    const data = (await res.json()) as Record<string, unknown>;
+    return {
+      text: String(data.text || ""),
+      traces: Array.isArray(data.traces) ? data.traces : [],
+    };
+  }
+
+  async *stream(
+    messages: AgentChatMessage[],
+    options: AgentChatOptions
+  ): AsyncIterable<AgentEvent> {
+    const res = await fetch(`${env.STRANDS_URL}/invocations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(
+        this.buildPayload(messages, options, { stream: true })
+      ),
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      yield {
+        type: "error",
+        error: `Agent backend error: ${res.status} ${body}`,
+        timestamp: Date.now(),
+      };
+      return;
+    }
+
+    const reader = res.body?.getReader();
+    if (!reader) {
+      yield { type: "error", error: "No response body", timestamp: Date.now() };
+      return;
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // BedrockAgentCoreApp SSE format: "data: {json}\n\n"
+      // Split on double-newline to get complete events
+      const events = buffer.split("\n\n");
+      buffer = events.pop() || "";
+
+      for (const eventBlock of events) {
+        const line = eventBlock.trim();
+        if (!line.startsWith("data: ")) continue;
+
+        try {
+          const data = JSON.parse(line.slice(6));
+          const now = Date.now();
+          const eventType = data.type as string;
+
+          if (eventType === "text_delta") {
+            yield { type: "text_delta", text: data.text || "", timestamp: now };
+          } else if (eventType === "reasoning_delta") {
+            yield { type: "thinking", text: data.text || "", timestamp: now };
+          } else if (eventType === "tool_call_start") {
+            yield {
+              type: "tool_call_start",
+              toolName: data.toolName,
+              toolStatus: "running",
+              timestamp: now,
+            };
+          } else if (eventType === "agent_end") {
+            yield { type: "agent_end", timestamp: now };
+          } else if (data.error) {
+            yield { type: "error", error: data.error, timestamp: now };
+          }
+        } catch {
+          // skip malformed events
+        }
+      }
+    }
+  }
+}

@@ -1,10 +1,7 @@
 import { createProjectStore } from "~/lib/project-store.server";
 import { loadConfig } from "~/lib/config.server";
+import { getProjectWorkspace } from "~/lib/filesystem.server";
 import type { Route } from "./+types/api.chat";
-
-// Note: runAgentChat is heavy (OpenAI SDK, tool handlers, etc.)
-// For now, we import the original headless server's chat logic.
-// This will be properly ported in a future phase.
 
 export async function action({ request }: Route.ActionArgs) {
   if (request.method !== "POST") {
@@ -32,6 +29,9 @@ export async function action({ request }: Route.ActionArgs) {
     );
   }
 
+  // Ensure workspace directory exists for this project
+  getProjectWorkspace(projectId);
+
   const store = createProjectStore();
   const chatMessages = messages.length
     ? messages
@@ -46,8 +46,6 @@ export async function action({ request }: Route.ActionArgs) {
   });
 
   try {
-    // Lazy-import the chat runner from the original server to avoid
-    // pulling in all tool dependencies at module load time
     const { runAgentChat } = await import("~/lib/chat.server");
     const result = await runAgentChat(cfg, chatMessages, {
       projectId,

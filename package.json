@@ -8,6 +8,9 @@
     "start": "react-router-serve build/server/index.js",
     "dev:legacy": "sh -c 'node scripts/headless-server.js & vite --host 0.0.0.0 --port 5173'",
     "serve:headless": "node scripts/headless-server.js",
+    "dev:agent": "cd services/strands-agent && uv run python src/main.py",
+    "dev:all": "concurrently \"pnpm dev\" \"pnpm dev:agent\"",
+    "test:agent": "cd services/strands-agent && uv run pytest tests/ -v",
     "lint": "eslint src --ext .ts,.tsx",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "test": "vitest"
@@ -19,12 +22,14 @@
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@react-router/dev": "^7.13.0",
     "@react-router/node": "^7.13.0",
+    "@t3-oss/env-core": "^0.13.10",
     "@types/ws": "^8.18.1",
     "archiver": "^7.0.1",
     "cheerio": "^1.2.0",
     "chokidar": "^4.0.1",
     "dotenv": "^17.3.1",
     "glob": "^10.3.10",
+    "isbot": "^5",
     "katex": "^0.16.27",
     "lucide-react": "^0.468.0",
     "ngrok": "^5.0.0-beta.2",
@@ -39,8 +44,8 @@
     "remark-math": "^6.0.0",
     "uuid": "^11.0.3",
     "ws": "^8.19.0",
-    "zustand": "^5.0.2",
-    "isbot": "^5"
+    "zod": "^4.3.6",
+    "zustand": "^5.0.2"
   },
   "devDependencies": {
     "@types/archiver": "^6.0.4",
@@ -52,6 +57,7 @@
     "@typescript-eslint/parser": "^8.55.0",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
+    "concurrently": "^9.2.1",
     "esbuild": "^0.27.3",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",

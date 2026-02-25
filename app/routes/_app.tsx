@@ -70,7 +70,8 @@ export default function AppLayout() {
   const handleConfigSave = useCallback(
     async (newConfig: Partial<AppConfig>) => {
       const saved = saveBrowserConfig(newConfig);
-      await headlessSaveConfig(saved);
+      // Only send the changed fields to the server config, not the full browser config
+      await headlessSaveConfig(newConfig);
       setAppConfig(saved);
       revalidate();
     },

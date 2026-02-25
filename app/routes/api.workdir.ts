@@ -17,7 +17,6 @@ export async function action({ request }: Route.ActionArgs) {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
   const body = await request.json();
-  const cfg = loadConfig();
   const inputPath = String(body.path || "").trim();
   const workingDirType = String(
     body.workingDirType || (inputPath.startsWith("s3://") ? "s3" : "local")
@@ -28,6 +27,7 @@ export async function action({ request }: Route.ActionArgs) {
       { status: 400 }
     );
   }
+  let updates: Record<string, string>;
   if (workingDirType === "local") {
     const resolved = path.resolve(inputPath);
     if (!fs.existsSync(resolved)) {
@@ -36,18 +36,14 @@ export async function action({ request }: Route.ActionArgs) {
         { status: 400 }
       );
     }
-    cfg.workingDir = resolved;
-    cfg.workingDirType = "local";
-    cfg.s3Uri = "";
+    updates = { workingDir: resolved, workingDirType: "local", s3Uri: "" };
   } else {
-    cfg.workingDir = inputPath;
-    cfg.workingDirType = "s3";
-    cfg.s3Uri = inputPath;
+    updates = { workingDir: inputPath, workingDirType: "s3", s3Uri: inputPath };
   }
-  saveConfig(cfg);
+  saveConfig(updates);
   return Response.json({
     success: true,
-    path: cfg.workingDir,
-    workingDirType: cfg.workingDirType,
+    path: updates.workingDir,
+    workingDirType: updates.workingDirType,
   });
 }

@@ -15,12 +15,13 @@ const DEFAULT_CONFIG: HeadlessConfig = {
   apiKey: "",
   baseUrl: "https://api.openai.com/v1",
   bedrockRegion: "us-east-1",
-  model: "gpt-4o",
+  model: "anthropic/claude-sonnet-4",
   openaiMode: "chat",
   workingDir: process.cwd(),
   workingDirType: "local",
   s3Uri: "",
   activeProjectId: "",
+  agentBackend: "strands",
 };
 
 function inferBedrockRegion(baseUrl: string): string {
@@ -71,11 +72,12 @@ export function loadConfig(configDir?: string): HeadlessConfig {
 }
 
 export function saveConfig(
-  config: Partial<HeadlessConfig>,
+  updates: Partial<HeadlessConfig>,
   configDir?: string
 ): void {
   const dir = ensureConfigDir(configDir);
-  const normalized = normalizeConfig(config);
+  const current = loadConfig(configDir);
+  const normalized = normalizeConfig({ ...current, ...updates });
   saveJsonFile(path.join(dir, CONFIG_FILENAME), normalized);
 }
 

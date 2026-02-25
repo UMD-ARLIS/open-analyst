@@ -1,0 +1,64 @@
+"""Tests for web_tools.py — web fetch and search (mocked httpx)."""
+
+import os
+import sys
+from unittest.mock import patch, MagicMock
+
+import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+from tools.web_tools import web_fetch, web_search
+
+
+def _mock_response(text="", status_code=200, content_type="text/html", content=b""):
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.is_success = 200 <= status_code < 300
+    resp.headers = {"content-type": content_type}
+    resp.text = text
+    resp.content = content or text.encode()
+    return resp
+
+
+class TestWebSearch:
+    @patch("tools.web_tools.httpx.get")
+    def test_formats_response(self, mock_get):
+        mock_get.return_value = _mock_response(
+            text="",
+            content_type="application/json",
+        )
+        # Make .json() work
+        mock_get.return_value.json.return_value = {
+            "Heading": "Python",
+            "AbstractText": "Python is a programming language.",
+            "RelatedTopics": [
+                {"Text": "Python tutorial", "FirstURL": "https://example.com/python"},
+            ],
+        }
+
+        result = web_search(query="python programming")
+        assert "Query: python programming" in result
+        assert "DuckDuckGo" in result
+        assert "Python is a programming language" in result
+        assert "Python tutorial" in result
+
+    def test_empty_query_raises(self):
+        with pytest.raises(ValueError, match="query is required"):
+            web_search(query="")
+
+
+class TestWebFetch:
+    @patch("tools.web_tools.httpx.get")
+    def test_extracts_html(self, mock_get):
+        html = "<html><head><title>Test Page</title></head><body><p>Hello world</p></body></html>"
+        mock_get.return_value = _mock_response(text=html, content_type="text/html; charset=utf-8")
+
+        result = web_fetch(url="https://example.com/page")
+        assert "URL: https://example.com/page" in result
+        assert "Status: 200" in result
+        assert "Hello world" in result
+
+    def test_empty_url_raises(self):
+        with pytest.raises(ValueError, match="url is required"):
+            web_fetch(url="")

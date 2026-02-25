@@ -11,8 +11,8 @@ export async function action({ request }: Route.ActionArgs) {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
   const body = await request.json();
-  const cfg = { ...loadConfig(), ...body };
-  saveConfig(cfg);
+  saveConfig(body);
+  const cfg = loadConfig();
   return Response.json({
     success: true,
     config: { ...cfg, apiKey: maskApiKey(cfg.apiKey) },

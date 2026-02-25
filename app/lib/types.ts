@@ -96,6 +96,7 @@ export interface HeadlessConfig {
   s3Uri: string;
   activeProjectId: string;
   devLogsEnabled?: boolean;
+  agentBackend?: string;
   [key: string]: unknown;
 }
 

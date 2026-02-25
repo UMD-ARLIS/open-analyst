@@ -20,6 +20,11 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+export async function headlessGetModels(): Promise<Array<{ id: string; name: string }>> {
+  const result = await requestJson<{ models?: Array<{ id: string; name: string }> }>('/models');
+  return Array.isArray(result.models) ? result.models : [];
+}
+
 export async function headlessSaveConfig(config: Partial<AppConfig>): Promise<void> {
   await requestJson('/config', {
     method: 'POST',
@@ -71,6 +76,87 @@ export async function headlessChat(
     runId: result.runId,
     projectId: result.projectId,
   };
+}
+
+export interface StreamEvent {
+  type: string;
+  text?: string;
+  toolName?: string;
+  toolInput?: Record<string, unknown>;
+  toolOutput?: string;
+  toolStatus?: 'running' | 'completed' | 'error';
+  error?: string;
+  runId?: string;
+  timestamp?: number;
+}
+
+export async function headlessChatStream(
+  messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
+  prompt: string,
+  projectId?: string,
+  options?: { collectionId?: string; collectionName?: string; deepResearch?: boolean },
+  onEvent?: (event: StreamEvent) => void,
+): Promise<{ text: string; runId?: string }> {
+  const res = await fetch(`${getHeadlessApiBase()}/api/chat/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messages,
+      prompt,
+      projectId,
+      collectionId: options?.collectionId,
+      collectionName: options?.collectionName,
+      deepResearch: Boolean(options?.deepResearch),
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `HTTP ${res.status}`);
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('No response body');
+
+  const decoder = new TextDecoder();
+  let fullText = '';
+  let runId: string | undefined;
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    let currentEvent = '';
+    for (const line of lines) {
+      if (line.startsWith('event: ')) {
+        currentEvent = line.slice(7).trim();
+      } else if (line.startsWith('data: ') && currentEvent) {
+        try {
+          const data = JSON.parse(line.slice(6)) as StreamEvent;
+          data.type = currentEvent;
+
+          if (currentEvent === 'text_delta' && data.text) {
+            fullText += data.text;
+          }
+          if (currentEvent === 'done' && data.runId) {
+            runId = data.runId;
+          }
+
+          onEvent?.(data);
+        } catch {
+          // Skip malformed events
+        }
+        currentEvent = '';
+      }
+    }
+  }
+
+  return { text: fullText, runId };
 }
 
 export async function headlessGetTools(): Promise<Array<{ name: string; description: string }>> {
