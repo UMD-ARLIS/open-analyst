@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { Outlet, useLoaderData, useRevalidator } from 'react-router';
-import { useAppStore, hydrateFromLocalStorage } from '~/lib/store';
+import { useAppStore } from '~/lib/store';
 import { useIPC } from '~/hooks/useIPC';
 import { Sidebar } from '~/components/Sidebar';
 import { ContextPanel } from '~/components/ContextPanel';
@@ -48,10 +48,6 @@ export default function AppLayout() {
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
-
-    // Hydrate client-only maps (sessionProjectMap, etc.) from localStorage.
-    // Must happen after initial render so SSR hydration matches.
-    hydrateFromLocalStorage();
 
     listSessions();
 

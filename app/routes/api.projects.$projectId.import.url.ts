@@ -1,4 +1,4 @@
-import { createProjectStore } from "~/lib/project-store.server";
+import { createDocument } from "~/lib/db/queries/documents.server";
 import type { Route } from "./+types/api.projects.$projectId.import.url";
 
 function validateHttpUrl(raw: string): string {
@@ -29,8 +29,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   const contentType = fetchRes.headers.get("content-type") || "unknown";
   const content = await fetchRes.text();
   const title = String(body.title || url);
-  const store = createProjectStore();
-  const document = store.createDocument(params.projectId, {
+  const document = await createDocument(params.projectId, {
     collectionId: body.collectionId,
     title,
     sourceType: "url",

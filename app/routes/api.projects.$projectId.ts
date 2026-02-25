@@ -1,10 +1,14 @@
-import { createProjectStore } from "~/lib/project-store.server";
-import { saveConfig } from "~/lib/config.server";
+import {
+  getProject,
+  updateProject,
+  deleteProject,
+  listProjects,
+} from "~/lib/db/queries/projects.server";
+import { upsertSettings } from "~/lib/db/queries/settings.server";
 import type { Route } from "./+types/api.projects.$projectId";
 
 export async function loader({ params }: Route.LoaderArgs) {
-  const store = createProjectStore();
-  const project = store.getProject(params.projectId);
+  const project = await getProject(params.projectId);
   if (!project) {
     return Response.json(
       { error: `Project not found: ${params.projectId}` },
@@ -15,13 +19,12 @@ export async function loader({ params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const store = createProjectStore();
   const projectId = params.projectId;
 
   if (request.method === "PATCH") {
     const body = await request.json();
     try {
-      const project = store.updateProject(projectId, body);
+      const project = await updateProject(projectId, body);
       return Response.json({ project });
     } catch (err) {
       return Response.json(
@@ -33,13 +36,13 @@ export async function action({ request, params }: Route.ActionArgs) {
 
   if (request.method === "DELETE") {
     try {
-      const deleted = store.deleteProject(projectId);
-      const activeProject = store.getActiveProject();
-      const newActiveId = activeProject ? activeProject.id : "";
-      saveConfig({ activeProjectId: newActiveId });
+      const deleted = await deleteProject(projectId);
+      const projects = await listProjects();
+      const newActiveId = projects[0]?.id || null;
+      await upsertSettings({ activeProjectId: newActiveId });
       return Response.json({
         ...deleted,
-        activeProjectId: newActiveId,
+        activeProjectId: newActiveId ?? "",
       });
     } catch (err) {
       return Response.json(

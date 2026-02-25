@@ -1,15 +1,15 @@
-import { createProjectStore } from "~/lib/project-store.server";
-import { loadConfig } from "~/lib/config.server";
+import { listProjects } from "~/lib/db/queries/projects.server";
+import { getSettings } from "~/lib/db/queries/settings.server";
 
 export async function loader() {
-  const store = createProjectStore();
-  const projects = store.listProjects();
-  const activeProject = store.getActiveProject();
-  const config = loadConfig();
+  const [projects, settings] = await Promise.all([
+    listProjects(),
+    getSettings(),
+  ]);
   return {
     projects,
-    activeProjectId: activeProject?.id ?? null,
-    workingDir: config.workingDir || "",
+    activeProjectId: settings.activeProjectId ?? null,
+    workingDir: settings.workingDir || "",
     isConfigured: true,
   };
 }

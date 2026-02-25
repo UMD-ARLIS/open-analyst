@@ -1,4 +1,4 @@
-import { createProjectStore } from "~/lib/project-store.server";
+import { queryDocuments } from "~/lib/db/queries/documents.server";
 import type { Route } from "./+types/api.projects.$projectId.rag.query";
 
 export async function action({ request, params }: Route.ActionArgs) {
@@ -10,8 +10,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   if (!query) {
     return Response.json({ error: "query is required" }, { status: 400 });
   }
-  const store = createProjectStore();
-  const result = store.queryDocuments(params.projectId, query, {
+  const result = await queryDocuments(params.projectId, query, {
     limit: body.limit,
     collectionId: body.collectionId,
   });

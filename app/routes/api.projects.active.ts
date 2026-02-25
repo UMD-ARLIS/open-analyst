@@ -1,5 +1,5 @@
-import { createProjectStore } from "~/lib/project-store.server";
-import { saveConfig } from "~/lib/config.server";
+import { getProject } from "~/lib/db/queries/projects.server";
+import { upsertSettings } from "~/lib/db/queries/settings.server";
 import type { Route } from "./+types/api.projects.active";
 
 export async function action({ request }: Route.ActionArgs) {
@@ -14,8 +14,13 @@ export async function action({ request }: Route.ActionArgs) {
       { status: 400 }
     );
   }
-  const store = createProjectStore();
-  store.setActiveProject(projectId);
-  saveConfig({ activeProjectId: projectId });
+  const project = await getProject(projectId);
+  if (!project) {
+    return Response.json(
+      { error: `Project not found: ${projectId}` },
+      { status: 404 }
+    );
+  }
+  await upsertSettings({ activeProjectId: projectId });
   return Response.json({ success: true, activeProjectId: projectId });
 }

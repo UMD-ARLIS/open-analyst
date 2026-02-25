@@ -2,7 +2,7 @@ import { isLogsEnabled, setLogsEnabled } from "~/lib/logs.server";
 import type { Route } from "./+types/api.logs.enabled";
 
 export async function loader() {
-  return Response.json({ enabled: isLogsEnabled() });
+  return Response.json({ enabled: await isLogsEnabled() });
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -10,6 +10,6 @@ export async function action({ request }: Route.ActionArgs) {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
   const body = await request.json();
-  const result = setLogsEnabled(body.enabled !== false);
+  const result = await setLogsEnabled(body.enabled !== false);
   return Response.json(result);
 }

@@ -1,13 +1,13 @@
-import { createProjectStore } from "~/lib/project-store.server";
-import { saveConfig } from "~/lib/config.server";
+import {
+  createProject,
+  listProjects,
+} from "~/lib/db/queries/projects.server";
+import { upsertSettings } from "~/lib/db/queries/settings.server";
 import type { Route } from "./+types/api.projects";
 
 export async function loader() {
-  const store = createProjectStore();
-  return Response.json({
-    activeProject: store.getActiveProject(),
-    projects: store.listProjects(),
-  });
+  const projects = await listProjects();
+  return Response.json({ projects });
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -15,13 +15,12 @@ export async function action({ request }: Route.ActionArgs) {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
   const body = await request.json();
-  const store = createProjectStore();
-  const project = store.createProject({
+  const project = await createProject({
     name: body.name,
     description: body.description,
     datastores: body.datastores,
   });
-  saveConfig({ activeProjectId: project.id });
+  await upsertSettings({ activeProjectId: project.id });
   return Response.json(
     { project, activeProjectId: project.id },
     { status: 201 }

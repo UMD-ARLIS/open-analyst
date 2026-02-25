@@ -9,6 +9,6 @@ export async function loader() {
     mcpServers: listMcpServers(),
     mcpPresets: getMcpPresets(),
     skills: listSkills(),
-    logsEnabled: isLogsEnabled(),
+    logsEnabled: await isLogsEnabled(),
   };
 }

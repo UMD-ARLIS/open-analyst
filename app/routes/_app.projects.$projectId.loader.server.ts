@@ -1,12 +1,12 @@
 import { redirect } from "react-router";
-import { createProjectStore } from "~/lib/project-store.server";
+import { getProject } from "~/lib/db/queries/projects.server";
+import { upsertSettings } from "~/lib/db/queries/settings.server";
 
 export async function loader({ params }: { params: { projectId: string } }) {
-  const store = createProjectStore();
-  const project = store.getProject(params.projectId);
+  const project = await getProject(params.projectId);
   if (!project) {
     throw redirect("/");
   }
-  store.setActiveProject(params.projectId);
+  await upsertSettings({ activeProjectId: params.projectId });
   return { projectId: params.projectId };
 }

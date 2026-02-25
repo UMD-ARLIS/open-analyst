@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { createProjectStore } from "~/lib/project-store.server";
+import { createDocument } from "~/lib/db/queries/documents.server";
 import { getConfigDir } from "~/lib/helpers.server";
 import type { Route } from "./+types/api.projects.$projectId.import.file";
 
@@ -94,12 +94,12 @@ export async function action({ request, params }: Route.ActionArgs) {
       content = "";
     }
   }
-  const store = createProjectStore();
-  const document = store.createDocument(projectId, {
+  const document = await createDocument(projectId, {
     collectionId: body.collectionId,
     title: body.title || filename,
     sourceType: "file",
     sourceUri: `file://${capturePath}`,
+    storageUri: capturePath,
     content: content || `[Binary file stored at ${capturePath}]`,
     metadata: {
       filename,

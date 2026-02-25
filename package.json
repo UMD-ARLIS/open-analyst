@@ -13,7 +13,10 @@
     "test:agent": "cd services/strands-agent && uv run pytest tests/ -v",
     "lint": "eslint src --ext .ts,.tsx",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
-    "test": "vitest"
+    "test": "vitest",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.77",
@@ -28,6 +31,7 @@
     "cheerio": "^1.2.0",
     "chokidar": "^4.0.1",
     "dotenv": "^17.3.1",
+    "drizzle-orm": "^0.45.1",
     "glob": "^10.3.10",
     "isbot": "^5",
     "katex": "^0.16.27",
@@ -35,6 +39,7 @@
     "ngrok": "^5.0.0-beta.2",
     "openai": "^6.22.0",
     "pdf-parse": "^2.4.5",
+    "pg": "^8.18.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^9.0.1",
@@ -50,6 +55,7 @@
   "devDependencies": {
     "@types/archiver": "^6.0.4",
     "@types/node": "^20.10.0",
+    "@types/pg": "^8.16.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@types/uuid": "^10.0.0",
@@ -58,6 +64,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "concurrently": "^9.2.1",
+    "drizzle-kit": "^0.31.9",
     "esbuild": "^0.27.3",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",

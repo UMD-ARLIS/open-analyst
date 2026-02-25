@@ -1,15 +1,13 @@
-import fs from "fs";
-import { createProjectStore } from "~/lib/project-store.server";
+import { listProjects } from "~/lib/db/queries/projects.server";
+import { getSettings } from "~/lib/db/queries/settings.server";
 
 export async function loader() {
-  const store = createProjectStore();
-  const storePath = store.STORE_PATH;
-  if (!fs.existsSync(storePath)) {
-    return new Response("{}", {
-      headers: { "Content-Type": "text/plain; charset=utf-8" },
-    });
-  }
-  return new Response(fs.readFileSync(storePath, "utf8"), {
+  const [projects, settings] = await Promise.all([
+    listProjects(),
+    getSettings(),
+  ]);
+  const debug = { projects, settings };
+  return new Response(JSON.stringify(debug, null, 2), {
     headers: { "Content-Type": "text/plain; charset=utf-8" },
   });
 }

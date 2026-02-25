@@ -1,9 +1,11 @@
-import { createProjectStore } from "~/lib/project-store.server";
+import {
+  listCollections,
+  createCollection,
+} from "~/lib/db/queries/documents.server";
 import type { Route } from "./+types/api.projects.$projectId.collections";
 
 export async function loader({ params }: Route.LoaderArgs) {
-  const store = createProjectStore();
-  const collections = store.listCollections(params.projectId);
+  const collections = await listCollections(params.projectId);
   return Response.json({ collections });
 }
 
@@ -12,8 +14,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
   const body = await request.json();
-  const store = createProjectStore();
-  const collection = store.createCollection(params.projectId, {
+  const collection = await createCollection(params.projectId, {
     name: body.name,
     description: body.description,
   });

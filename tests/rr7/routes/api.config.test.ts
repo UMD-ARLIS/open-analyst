@@ -1,35 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createTempDataDir, cleanupTempDataDir } from "../setup";
 import { loader, action } from "../../../app/routes/api.config";
 import { createMockActionArgs, getJsonResponse } from "./helpers";
 
 describe("api.config", () => {
-  let tempDir: string;
-
-  beforeEach(() => {
-    tempDir = createTempDataDir();
-  });
-
-  afterEach(() => {
-    cleanupTempDataDir(tempDir);
-  });
-
-  it("GET returns config with masked key", async () => {
+  it("GET returns settings shape", async () => {
     const response = await loader();
     const data = (await getJsonResponse(response)) as Record<string, unknown>;
-    expect(data.provider).toBe("openai");
-    expect(data.apiKey).toBe("");
+    // DB-backed settings returns SettingsData shape
+    expect(data).toHaveProperty("model");
+    expect(data).toHaveProperty("agentBackend");
+    expect(data).toHaveProperty("devLogsEnabled");
   });
 
   it("POST saves config", async () => {
     const args = createMockActionArgs("POST", "/api/config", {
-      provider: "anthropic",
-      apiKey: "sk-test",
+      model: "anthropic/claude-sonnet-4",
+      agentBackend: "strands",
     });
     const response = await action(args as never);
-    const data = (await getJsonResponse(response)) as { success: boolean; config: Record<string, unknown> };
+    const data = (await getJsonResponse(response)) as {
+      success: boolean;
+      config: Record<string, unknown>;
+    };
     expect(data.success).toBe(true);
-    expect(data.config.provider).toBe("anthropic");
-    expect(data.config.apiKey).toBe("***");
+    expect(data.config.model).toBe("anthropic/claude-sonnet-4");
   });
 });

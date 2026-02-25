@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { ensureConfigDir, getConfigDir } from "./helpers.server";
-import { loadConfig, saveConfig } from "./config.server";
+import { getSettings, upsertSettings } from "./db/queries/settings.server";
 
 const LOGS_DIRNAME = "logs";
 const HEADLESS_LOG_FILENAME = "headless.log";
@@ -47,18 +47,15 @@ export function listLogs(
   return { files, directory: dir };
 }
 
-export function isLogsEnabled(configDir?: string): boolean {
-  const cfg = loadConfig(configDir);
-  return cfg.devLogsEnabled !== false;
+export async function isLogsEnabled(): Promise<boolean> {
+  const settings = await getSettings();
+  return settings.devLogsEnabled !== false;
 }
 
-export function setLogsEnabled(
+export async function setLogsEnabled(
   enabled: boolean,
-  configDir?: string
-): { success: boolean; enabled: boolean } {
-  const cfg = loadConfig(configDir);
-  cfg.devLogsEnabled = enabled;
-  saveConfig(cfg, configDir);
+): Promise<{ success: boolean; enabled: boolean }> {
+  await upsertSettings({ devLogsEnabled: enabled });
   return { success: true, enabled };
 }
 
@@ -98,16 +95,15 @@ export function clearLogs(
   return { success: true, deletedCount };
 }
 
-export function appendLog(
+export async function appendLog(
   level: string,
   message: string,
   metadata: Record<string, unknown> = {},
-  configDir?: string
-): void {
+): Promise<void> {
   try {
-    const cfg = loadConfig(configDir);
-    if (cfg.devLogsEnabled === false) return;
-    const dir = ensureLogsDir(configDir);
+    const settings = await getSettings();
+    if (settings.devLogsEnabled === false) return;
+    const dir = ensureLogsDir();
     const logPath = path.join(dir, HEADLESS_LOG_FILENAME);
     const line = JSON.stringify({
       ts: new Date().toISOString(),

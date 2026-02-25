@@ -1,11 +1,14 @@
 import { redirect } from "react-router";
-import { createProjectStore } from "~/lib/project-store.server";
+import { getSettings } from "~/lib/db/queries/settings.server";
+import { getProject } from "~/lib/db/queries/projects.server";
 
 export async function loader() {
-  const store = createProjectStore();
-  const active = store.getActiveProject();
-  if (active) {
-    throw redirect(`/projects/${active.id}`);
+  const settings = await getSettings();
+  if (settings.activeProjectId) {
+    const project = await getProject(settings.activeProjectId);
+    if (project) {
+      throw redirect(`/projects/${project.id}`);
+    }
   }
   return { noProjects: true };
 }

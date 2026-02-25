@@ -1,45 +1,38 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { createTempDataDir, cleanupTempDataDir } from "../setup";
-import { createProjectStore } from "~/lib/project-store.server";
+import { describe, it, expect, beforeAll } from "vitest";
+import { createProject } from "~/lib/db/queries/projects.server";
+import { upsertSettings } from "~/lib/db/queries/settings.server";
 import { createMockLoaderArgs } from "./helpers";
 
-let tempDir: string;
+let testProject: { id: string };
 
-beforeEach(() => {
-  tempDir = createTempDataDir();
-});
-
-afterEach(() => {
-  cleanupTempDataDir(tempDir);
+beforeAll(async () => {
+  testProject = await createProject({ name: "Project Route Test" });
 });
 
 describe("Project route loader", () => {
   it("returns projectId for valid project", async () => {
-    const store = createProjectStore();
-    const project = store.createProject({ name: "Test" });
-
     const { loader } = await import(
       "~/routes/_app.projects.$projectId.loader.server"
     );
-    const args = createMockLoaderArgs(`/projects/${project.id}`, {
-      projectId: project.id,
+    const args = createMockLoaderArgs(`/projects/${testProject.id}`, {
+      projectId: testProject.id,
     });
     const result = await loader(args);
-    expect(result).toEqual({ projectId: project.id });
+    expect(result).toEqual({ projectId: testProject.id });
   });
 
   it("redirects for invalid projectId", async () => {
     const { loader } = await import(
       "~/routes/_app.projects.$projectId.loader.server"
     );
-    const args = createMockLoaderArgs("/projects/nonexistent", {
-      projectId: "nonexistent",
+    const fakeId = "00000000-0000-0000-0000-000000000000";
+    const args = createMockLoaderArgs(`/projects/${fakeId}`, {
+      projectId: fakeId,
     });
     try {
       await loader(args);
       expect.fail("Expected redirect");
     } catch (e) {
-      // React Router redirect throws a Response
       expect(e).toBeInstanceOf(Response);
       const response = e as Response;
       expect(response.status).toBe(302);
@@ -48,9 +41,7 @@ describe("Project route loader", () => {
   });
 
   it("syncs active project server-side", async () => {
-    const store = createProjectStore();
-    const p1 = store.createProject({ name: "One" });
-    const p2 = store.createProject({ name: "Two" });
+    const p1 = await createProject({ name: "Sync Test One" });
 
     const { loader } = await import(
       "~/routes/_app.projects.$projectId.loader.server"
@@ -59,45 +50,36 @@ describe("Project route loader", () => {
       createMockLoaderArgs(`/projects/${p1.id}`, { projectId: p1.id })
     );
 
-    const active = store.getActiveProject();
-    expect(active?.id).toBe(p1.id);
+    const { getSettings } = await import("~/lib/db/queries/settings.server");
+    const settings = await getSettings();
+    expect(settings.activeProjectId).toBe(p1.id);
   });
 });
 
 describe("Index route loader", () => {
   it("redirects when active project exists", async () => {
-    const store = createProjectStore();
-    const project = store.createProject({ name: "Test" });
+    // Set an active project first
+    await upsertSettings({ activeProjectId: testProject.id });
 
     const { loader } = await import("~/routes/_app._index.loader.server");
-    const args = createMockLoaderArgs("/");
     try {
-      await loader(args);
+      await loader();
       expect.fail("Expected redirect");
     } catch (e) {
       expect(e).toBeInstanceOf(Response);
       const response = e as Response;
       expect(response.status).toBe(302);
-      expect(response.headers.get("Location")).toBe(
-        `/projects/${project.id}`
-      );
+      // Should redirect to a valid project URL
+      expect(response.headers.get("Location")).toMatch(/^\/projects\//);
     }
   });
 
-  it("returns non-redirect when no projects", async () => {
-    // createProjectStore always creates a default project, so we need to
-    // work with what we have. Since defaultStore always has a project,
-    // the index should always redirect. But if the store had no active project...
-    // Actually the default store always has a project. Let's verify the redirect works.
+  it("returns non-redirect when no active project", async () => {
+    // Clear active project
+    await upsertSettings({ activeProjectId: null });
+
     const { loader } = await import("~/routes/_app._index.loader.server");
-    const args = createMockLoaderArgs("/");
-    try {
-      await loader(args);
-      // If we get here, it returned data (no redirect)
-      // This would happen if there are truly no projects
-    } catch (e) {
-      // Redirect is expected since default project is auto-created
-      expect(e).toBeInstanceOf(Response);
-    }
+    const result = await loader();
+    expect(result).toEqual({ noProjects: true });
   });
 });

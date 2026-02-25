@@ -1,14 +1,14 @@
 import fs from "fs";
 import path from "path";
-import { loadConfig, saveConfig } from "~/lib/config.server";
+import { getSettings, upsertSettings } from "~/lib/db/queries/settings.server";
 import type { Route } from "./+types/api.workdir";
 
 export async function loader() {
-  const cfg = loadConfig();
+  const settings = await getSettings();
   return Response.json({
-    workingDir: cfg.workingDir,
-    workingDirType: cfg.workingDirType || "local",
-    s3Uri: cfg.s3Uri || "",
+    workingDir: settings.workingDir,
+    workingDirType: settings.workingDirType || "local",
+    s3Uri: settings.s3Uri || "",
   });
 }
 
@@ -27,7 +27,7 @@ export async function action({ request }: Route.ActionArgs) {
       { status: 400 }
     );
   }
-  let updates: Record<string, string>;
+  let updates: Partial<{ workingDir: string; workingDirType: string; s3Uri: string }>;
   if (workingDirType === "local") {
     const resolved = path.resolve(inputPath);
     if (!fs.existsSync(resolved)) {
@@ -40,7 +40,7 @@ export async function action({ request }: Route.ActionArgs) {
   } else {
     updates = { workingDir: inputPath, workingDirType: "s3", s3Uri: inputPath };
   }
-  saveConfig(updates);
+  await upsertSettings(updates);
   return Response.json({
     success: true,
     path: updates.workingDir,

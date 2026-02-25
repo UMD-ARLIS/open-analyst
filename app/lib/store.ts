@@ -6,8 +6,8 @@ interface ProjectSummary {
   id: string;
   name: string;
   description?: string;
-  createdAt?: number;
-  updatedAt?: number;
+  createdAt?: number | string;
+  updatedAt?: number | string;
 }
 
 export interface SessionPlanSnapshot {
@@ -22,128 +22,64 @@ export interface SessionPlanSnapshot {
   updatedAt: number;
 }
 
-const PROJECTS_STORAGE_KEY = 'open-analyst.projects.state.v1';
-
-function loadProjectState(): {
-  projects: ProjectSummary[];
-  activeProjectId: string | null;
-  sessionProjectMap: Record<string, string>;
-  sessionRunMap: Record<string, string>;
-  sessionPlanMap: Record<string, SessionPlanSnapshot>;
-  activeCollectionByProject: Record<string, string>;
-} {
-  if (typeof window === 'undefined' || !window.localStorage) {
-    return { projects: [], activeProjectId: null, sessionProjectMap: {}, sessionRunMap: {}, sessionPlanMap: {}, activeCollectionByProject: {} };
-  }
-  try {
-    const raw = window.localStorage.getItem(PROJECTS_STORAGE_KEY);
-    if (!raw) return { projects: [], activeProjectId: null, sessionProjectMap: {}, sessionRunMap: {}, sessionPlanMap: {}, activeCollectionByProject: {} };
-    const parsed = JSON.parse(raw) as {
-      projects?: ProjectSummary[];
-      activeProjectId?: string | null;
-      sessionProjectMap?: Record<string, string>;
-      sessionRunMap?: Record<string, string>;
-      sessionPlanMap?: Record<string, SessionPlanSnapshot>;
-      activeCollectionByProject?: Record<string, string>;
-    };
-    return {
-      projects: Array.isArray(parsed.projects) ? parsed.projects : [],
-      activeProjectId: typeof parsed.activeProjectId === 'string' ? parsed.activeProjectId : null,
-      sessionProjectMap:
-        parsed.sessionProjectMap && typeof parsed.sessionProjectMap === 'object'
-          ? parsed.sessionProjectMap
-          : {},
-      sessionRunMap:
-        parsed.sessionRunMap && typeof parsed.sessionRunMap === 'object'
-          ? parsed.sessionRunMap
-          : {},
-      sessionPlanMap:
-        parsed.sessionPlanMap && typeof parsed.sessionPlanMap === 'object'
-          ? parsed.sessionPlanMap
-          : {},
-      activeCollectionByProject:
-        parsed.activeCollectionByProject && typeof parsed.activeCollectionByProject === 'object'
-          ? parsed.activeCollectionByProject
-          : {},
-    };
-  } catch {
-    return { projects: [], activeProjectId: null, sessionProjectMap: {}, sessionRunMap: {}, sessionPlanMap: {}, activeCollectionByProject: {} };
-  }
-}
-
-function persistProjectState(next: {
-  projects: ProjectSummary[];
-  activeProjectId: string | null;
-  sessionProjectMap: Record<string, string>;
-  sessionRunMap: Record<string, string>;
-  sessionPlanMap: Record<string, SessionPlanSnapshot>;
-  activeCollectionByProject: Record<string, string>;
-}) {
-  if (typeof window === 'undefined' || !window.localStorage) return;
-  try {
-    window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(next));
-  } catch {
-    // Ignore persistence errors
-  }
-}
-
 interface AppState {
   // Sessions
   sessions: Session[];
   activeSessionId: string | null;
-  
+
   // Messages
   messagesBySession: Record<string, Message[]>;
   partialMessagesBySession: Record<string, string>;
   pendingTurnsBySession: Record<string, string[]>;
   activeTurnsBySession: Record<string, { stepId: string; userMessageId: string } | null>;
-  
+
   // Trace steps
   traceStepsBySession: Record<string, TraceStep[]>;
-  
+
   // UI state
   isLoading: boolean;
   sidebarCollapsed: boolean;
   contextPanelCollapsed: boolean;
-  
+
   // Permission
   pendingPermission: PermissionRequest | null;
-  
+
   // User Question (AskUserQuestion)
   pendingQuestion: UserQuestionRequest | null;
-  
+
   // Settings
   settings: Settings;
-  
+
   // App Config (API settings)
   appConfig: AppConfig | null;
   isConfigured: boolean;
   showConfigModal: boolean;
-  
+
   // Working directory
   workingDir: string | null;
 
-  // Project model
+  // Project model (ephemeral — authoritative data in DB)
   projects: ProjectSummary[];
   activeProjectId: string | null;
   sessionProjectMap: Record<string, string>;
   sessionRunMap: Record<string, string>;
+  sessionPlanMap: Record<string, SessionPlanSnapshot>;
   activeCollectionByProject: Record<string, string>;
-  
+
   // Sandbox setup
   sandboxSetupProgress: SandboxSetupProgress | null;
   isSandboxSetupComplete: boolean;
-  
+
   // Sandbox sync (per-session)
   sandboxSyncStatus: SandboxSyncStatus | null;
-  
+
   // Actions
   setSessions: (sessions: Session[]) => void;
   addSession: (session: Session) => void;
   updateSession: (sessionId: string, updates: Partial<Session>) => void;
   removeSession: (sessionId: string) => void;
   setActiveSession: (sessionId: string | null) => void;
-  
+
   addMessage: (sessionId: string, message: Message) => void;
   setMessages: (sessionId: string, messages: Message[]) => void;
   setPartialMessage: (sessionId: string, partial: string) => void;
@@ -154,25 +90,25 @@ interface AppState {
   clearPendingTurns: (sessionId: string) => void;
   clearQueuedMessages: (sessionId: string) => void;
   cancelQueuedMessages: (sessionId: string) => void;
-  
+
   addTraceStep: (sessionId: string, step: TraceStep) => void;
   updateTraceStep: (sessionId: string, stepId: string, updates: Partial<TraceStep>) => void;
   setTraceSteps: (sessionId: string, steps: TraceStep[]) => void;
-  
+
   setLoading: (loading: boolean) => void;
   toggleSidebar: () => void;
   toggleContextPanel: () => void;
-  
+
   setPendingPermission: (permission: PermissionRequest | null) => void;
   setPendingQuestion: (question: UserQuestionRequest | null) => void;
-  
+
   updateSettings: (updates: Partial<Settings>) => void;
-  
+
   // Config actions
   setAppConfig: (config: AppConfig | null) => void;
   setIsConfigured: (configured: boolean) => void;
   setShowConfigModal: (show: boolean) => void;
-  
+
   // Working directory actions
   setWorkingDir: (path: string | null) => void;
 
@@ -185,11 +121,11 @@ interface AppState {
   linkSessionToRun: (sessionId: string, runId: string) => void;
   setSessionPlanSnapshot: (sessionId: string, snapshot: SessionPlanSnapshot) => void;
   setProjectActiveCollection: (projectId: string, collectionId: string) => void;
-  
+
   // Sandbox setup actions
   setSandboxSetupProgress: (progress: SandboxSetupProgress | null) => void;
   setSandboxSetupComplete: (complete: boolean) => void;
-  
+
   // Sandbox sync actions
   setSandboxSyncStatus: (status: SandboxSyncStatus | null) => void;
 }
@@ -222,15 +158,6 @@ const defaultSettings: Settings = {
   maxContextTokens: 180000,
 };
 
-// NOTE: Do NOT call loadProjectState() at module scope.
-// On the server, localStorage is unavailable so it returns empty state.
-// On the client, it would return persisted state from localStorage.
-// This server/client mismatch causes hydration failures.
-// Instead, the layout loader provides projects data via useLoaderData,
-// and the bridge useEffect in _app.tsx syncs it into Zustand.
-// Client-only state (sessionProjectMap, sessionRunMap, etc.) is
-// hydrated in a one-time useEffect below via hydrateFromLocalStorage().
-
 export const useAppStore = create<AppState>((set) => ({
   // Initial state — always empty for SSR compatibility.
   // The layout loader bridge populates projects/activeProjectId.
@@ -260,10 +187,10 @@ export const useAppStore = create<AppState>((set) => ({
   sandboxSetupProgress: null,
   isSandboxSetupComplete: false,
   sandboxSyncStatus: null,
-  
+
   // Session actions
   setSessions: (sessions) => set({ sessions }),
-  
+
   addSession: (session) =>
     set((state) => ({
       sessions: [session, ...state.sessions],
@@ -273,12 +200,12 @@ export const useAppStore = create<AppState>((set) => ({
       activeTurnsBySession: { ...state.activeTurnsBySession, [session.id]: null },
       traceStepsBySession: { ...state.traceStepsBySession, [session.id]: [] },
     })),
-  
+
   updateSession: (sessionId, updates) =>
     set((state) => ({
       sessions: applySessionUpdate(state.sessions, sessionId, updates),
     })),
-  
+
   removeSession: (sessionId) =>
     set((state) => {
       const { [sessionId]: _, ...restMessages } = state.messagesBySession;
@@ -289,14 +216,6 @@ export const useAppStore = create<AppState>((set) => ({
       const { [sessionId]: __sessionProject, ...restSessionProjectMap } = state.sessionProjectMap;
       const { [sessionId]: __sessionRun, ...restSessionRunMap } = state.sessionRunMap;
       const { [sessionId]: __sessionPlan, ...restSessionPlanMap } = state.sessionPlanMap;
-      persistProjectState({
-        projects: state.projects,
-        activeProjectId: state.activeProjectId,
-        sessionProjectMap: restSessionProjectMap,
-        sessionRunMap: restSessionRunMap,
-        sessionPlanMap: restSessionPlanMap,
-        activeCollectionByProject: state.activeCollectionByProject,
-      });
       return {
         sessions: state.sessions.filter((s) => s.id !== sessionId),
         messagesBySession: restMessages,
@@ -310,9 +229,9 @@ export const useAppStore = create<AppState>((set) => ({
         activeSessionId: state.activeSessionId === sessionId ? null : state.activeSessionId,
       };
     }),
-  
+
   setActiveSession: (sessionId) => set({ activeSessionId: sessionId }),
-  
+
   // Message actions
   addMessage: (sessionId, message) =>
     set((state) => {
@@ -365,7 +284,7 @@ export const useAppStore = create<AppState>((set) => ({
           : state.partialMessagesBySession,
       };
     }),
-  
+
   setMessages: (sessionId, messages) =>
     set((state) => ({
       messagesBySession: {
@@ -373,7 +292,7 @@ export const useAppStore = create<AppState>((set) => ({
         [sessionId]: messages,
       },
     })),
-  
+
   setPartialMessage: (sessionId, partial) =>
     set((state) => ({
       partialMessagesBySession: {
@@ -381,7 +300,7 @@ export const useAppStore = create<AppState>((set) => ({
         [sessionId]: (state.partialMessagesBySession[sessionId] || '') + partial,
       },
     })),
-  
+
   clearPartialMessage: (sessionId) =>
     set((state) => ({
       partialMessagesBySession: {
@@ -496,7 +415,7 @@ export const useAppStore = create<AppState>((set) => ({
         },
       };
     }),
-  
+
   // Trace actions
   addTraceStep: (sessionId, step) =>
     set((state) => ({
@@ -505,7 +424,7 @@ export const useAppStore = create<AppState>((set) => ({
         [sessionId]: [...(state.traceStepsBySession[sessionId] || []), step],
       },
     })),
-  
+
   updateTraceStep: (sessionId, stepId, updates) =>
     set((state) => ({
       traceStepsBySession: {
@@ -523,46 +442,40 @@ export const useAppStore = create<AppState>((set) => ({
         [sessionId]: steps,
       },
     })),
-  
+
   // UI actions
   setLoading: (loading) => set({ isLoading: loading }),
   toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
   toggleContextPanel: () => set((state) => ({ contextPanelCollapsed: !state.contextPanelCollapsed })),
-  
+
   // Permission actions
   setPendingPermission: (permission) => set({ pendingPermission: permission }),
-  
+
   // Question actions (AskUserQuestion)
   setPendingQuestion: (question) => set({ pendingQuestion: question }),
-  
+
   // Settings actions
   updateSettings: (updates) =>
     set((state) => ({
       settings: { ...state.settings, ...updates },
     })),
-  
+
   // Config actions
   setAppConfig: (config) => set({ appConfig: config }),
   setIsConfigured: (configured) => set({ isConfigured: configured }),
   setShowConfigModal: (show) => set({ showConfigModal: show }),
-  
+
   // Working directory actions
   setWorkingDir: (path) => set({ workingDir: path }),
 
+  // Project actions — ephemeral in-memory, no localStorage persistence.
+  // Authoritative project data lives in the DB and is loaded via route loaders.
   setProjects: (projects) =>
     set((state) => {
       const nextActive =
         state.activeProjectId && projects.some((project) => project.id === state.activeProjectId)
           ? state.activeProjectId
           : projects[0]?.id || null;
-      persistProjectState({
-        projects,
-        activeProjectId: nextActive,
-        sessionProjectMap: state.sessionProjectMap,
-        sessionRunMap: state.sessionRunMap,
-        sessionPlanMap: state.sessionPlanMap,
-        activeCollectionByProject: state.activeCollectionByProject,
-      });
       return { projects, activeProjectId: nextActive };
     }),
 
@@ -573,14 +486,6 @@ export const useAppStore = create<AppState>((set) => ({
         ? state.projects.map((item) => (item.id === project.id ? { ...item, ...project } : item))
         : [project, ...state.projects];
       const activeProjectId = state.activeProjectId || project.id;
-      persistProjectState({
-        projects,
-        activeProjectId,
-        sessionProjectMap: state.sessionProjectMap,
-        sessionRunMap: state.sessionRunMap,
-        sessionPlanMap: state.sessionPlanMap,
-        activeCollectionByProject: state.activeCollectionByProject,
-      });
       return { projects, activeProjectId };
     }),
 
@@ -588,117 +493,35 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => {
       const projects = state.projects.filter((project) => project.id !== projectId);
       const activeProjectId = state.activeProjectId === projectId ? projects[0]?.id || null : state.activeProjectId;
-      persistProjectState({
-        projects,
-        activeProjectId,
-        sessionProjectMap: state.sessionProjectMap,
-        sessionRunMap: state.sessionRunMap,
-        sessionPlanMap: state.sessionPlanMap,
-        activeCollectionByProject: state.activeCollectionByProject,
-      });
       return { projects, activeProjectId };
     }),
 
-  setActiveProjectId: (projectId) =>
-    set((state) => {
-      persistProjectState({
-        projects: state.projects,
-        activeProjectId: projectId,
-        sessionProjectMap: state.sessionProjectMap,
-        sessionRunMap: state.sessionRunMap,
-        sessionPlanMap: state.sessionPlanMap,
-        activeCollectionByProject: state.activeCollectionByProject,
-      });
-      return { activeProjectId: projectId };
-    }),
+  setActiveProjectId: (projectId) => set({ activeProjectId: projectId }),
 
   linkSessionToProject: (sessionId, projectId) =>
-    set((state) => {
-      const sessionProjectMap = {
-        ...state.sessionProjectMap,
-        [sessionId]: projectId,
-      };
-      persistProjectState({
-        projects: state.projects,
-        activeProjectId: state.activeProjectId,
-        sessionProjectMap,
-        sessionRunMap: state.sessionRunMap,
-        sessionPlanMap: state.sessionPlanMap,
-        activeCollectionByProject: state.activeCollectionByProject,
-      });
-      return { sessionProjectMap };
-    }),
+    set((state) => ({
+      sessionProjectMap: { ...state.sessionProjectMap, [sessionId]: projectId },
+    })),
 
   linkSessionToRun: (sessionId, runId) =>
-    set((state) => {
-      const sessionRunMap = {
-        ...state.sessionRunMap,
-        [sessionId]: runId,
-      };
-      persistProjectState({
-        projects: state.projects,
-        activeProjectId: state.activeProjectId,
-        sessionProjectMap: state.sessionProjectMap,
-        sessionRunMap,
-        sessionPlanMap: state.sessionPlanMap,
-        activeCollectionByProject: state.activeCollectionByProject,
-      });
-      return { sessionRunMap };
-    }),
+    set((state) => ({
+      sessionRunMap: { ...state.sessionRunMap, [sessionId]: runId },
+    })),
 
   setSessionPlanSnapshot: (sessionId, snapshot) =>
-    set((state) => {
-      const sessionPlanMap = {
-        ...state.sessionPlanMap,
-        [sessionId]: snapshot,
-      };
-      persistProjectState({
-        projects: state.projects,
-        activeProjectId: state.activeProjectId,
-        sessionProjectMap: state.sessionProjectMap,
-        sessionRunMap: state.sessionRunMap,
-        sessionPlanMap,
-        activeCollectionByProject: state.activeCollectionByProject,
-      });
-      return { sessionPlanMap };
-    }),
+    set((state) => ({
+      sessionPlanMap: { ...state.sessionPlanMap, [sessionId]: snapshot },
+    })),
 
   setProjectActiveCollection: (projectId, collectionId) =>
-    set((state) => {
-      const activeCollectionByProject = {
-        ...state.activeCollectionByProject,
-        [projectId]: collectionId,
-      };
-      persistProjectState({
-        projects: state.projects,
-        activeProjectId: state.activeProjectId,
-        sessionProjectMap: state.sessionProjectMap,
-        sessionRunMap: state.sessionRunMap,
-        sessionPlanMap: state.sessionPlanMap,
-        activeCollectionByProject,
-      });
-      return { activeCollectionByProject };
-    }),
-  
+    set((state) => ({
+      activeCollectionByProject: { ...state.activeCollectionByProject, [projectId]: collectionId },
+    })),
+
   // Sandbox setup actions
   setSandboxSetupProgress: (progress) => set({ sandboxSetupProgress: progress }),
   setSandboxSetupComplete: (complete) => set({ isSandboxSetupComplete: complete }),
-  
+
   // Sandbox sync actions
   setSandboxSyncStatus: (status) => set({ sandboxSyncStatus: status }),
 }));
-
-/**
- * Hydrate client-only maps (sessionProjectMap, sessionRunMap, etc.)
- * from localStorage. Call once on client mount (useEffect in _app.tsx).
- * Does NOT overwrite projects/activeProjectId — those come from the loader.
- */
-export function hydrateFromLocalStorage() {
-  const persisted = loadProjectState();
-  useAppStore.setState({
-    sessionProjectMap: persisted.sessionProjectMap,
-    sessionRunMap: persisted.sessionRunMap,
-    sessionPlanMap: persisted.sessionPlanMap,
-    activeCollectionByProject: persisted.activeCollectionByProject,
-  });
-}

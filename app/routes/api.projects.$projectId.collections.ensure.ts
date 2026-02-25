@@ -1,4 +1,4 @@
-import { createProjectStore } from "~/lib/project-store.server";
+import { ensureCollection } from "~/lib/db/queries/documents.server";
 import type { Route } from "./+types/api.projects.$projectId.collections.ensure";
 
 export async function action({ request, params }: Route.ActionArgs) {
@@ -15,8 +15,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     );
   }
 
-  const store = createProjectStore();
-  const collection = store.ensureCollection(
+  const collection = await ensureCollection(
     params.projectId,
     name,
     String(body.description || "")

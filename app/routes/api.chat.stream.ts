@@ -1,7 +1,8 @@
-import { createProjectStore } from "~/lib/project-store.server";
-import { loadConfig } from "~/lib/config.server";
+import { getSettings } from "~/lib/db/queries/settings.server";
+import { createTask, updateTask, appendTaskEvent } from "~/lib/db/queries/tasks.server";
 import { createAgentProvider } from "~/lib/agent/index.server";
 import { getProjectWorkspace } from "~/lib/filesystem.server";
+import type { HeadlessConfig } from "~/lib/types";
 import type { Route } from "./+types/api.chat.stream";
 
 export async function action({ request }: Route.ActionArgs) {
@@ -10,9 +11,9 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   const body = await request.json();
-  const cfg = loadConfig();
+  const settings = await getSettings();
   const projectId = String(
-    body.projectId || cfg.activeProjectId || ""
+    body.projectId || settings.activeProjectId || ""
   ).trim();
 
   if (!projectId) {
@@ -25,14 +26,28 @@ export async function action({ request }: Route.ActionArgs) {
     );
   }
 
+  // Build a minimal HeadlessConfig for the agent provider
+  const cfg: HeadlessConfig = {
+    provider: "openai",
+    apiKey: "",
+    baseUrl: "",
+    bedrockRegion: "us-east-1",
+    model: settings.model,
+    openaiMode: "chat",
+    workingDir: settings.workingDir || process.cwd(),
+    workingDirType: settings.workingDirType,
+    s3Uri: settings.s3Uri || "",
+    activeProjectId: projectId,
+    agentBackend: settings.agentBackend,
+  };
+
   const provider = createAgentProvider(cfg);
   const workingDir = getProjectWorkspace(projectId);
-  const store = createProjectStore();
   const prompt = String(body.prompt || "").trim();
-  const run = store.createRun(projectId, {
+  const task = await createTask(projectId, {
+    title: prompt.slice(0, 500) || "New Task",
     type: "chat",
     status: "running",
-    prompt,
   });
 
   const stream = new ReadableStream({
@@ -57,19 +72,19 @@ export async function action({ request }: Route.ActionArgs) {
           }
         )) {
           send(event.type, event);
-          store.appendRunEvent(projectId, run.id, event.type, {
+          await appendTaskEvent(task.id, event.type, {
             text: event.text,
             toolName: event.toolName,
             toolStatus: event.toolStatus,
             error: event.error,
           });
         }
-        send("done", { runId: run.id });
-        store.updateRun(projectId, run.id, { status: "completed" });
+        send("done", { runId: task.id });
+        await updateTask(task.id, { status: "completed" });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         send("error", { error: msg });
-        store.updateRun(projectId, run.id, { status: "failed", output: msg });
+        await updateTask(task.id, { status: "failed" });
       } finally {
         await provider.dispose?.();
         controller.close();

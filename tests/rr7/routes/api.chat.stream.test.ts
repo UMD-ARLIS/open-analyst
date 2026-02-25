@@ -1,6 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createTempDataDir, cleanupTempDataDir } from "../setup";
-import { createProjectStore } from "~/lib/project-store.server";
+import { describe, it, expect, vi, beforeAll } from "vitest";
+import { createProject } from "~/lib/db/queries/projects.server";
 
 // Mock the agent provider before importing the route
 vi.mock("~/lib/agent/index.server", () => ({
@@ -20,6 +19,13 @@ vi.mock("~/lib/agent/index.server", () => ({
 
 import { action } from "~/routes/api.chat.stream";
 
+let projectId: string;
+
+beforeAll(async () => {
+  const project = await createProject({ name: "Chat Stream Test" });
+  projectId = project.id;
+});
+
 function makeRequest(
   body: Record<string, unknown>,
   method = "POST"
@@ -32,23 +38,7 @@ function makeRequest(
 }
 
 describe("POST /api/chat/stream", () => {
-  let tempDir: string;
-
-  beforeEach(() => {
-    tempDir = createTempDataDir();
-    const store = createProjectStore();
-    store.createProject({ name: "Test Project" });
-  });
-
-  afterEach(() => {
-    cleanupTempDataDir(tempDir);
-  });
-
   it("returns text/event-stream content type", async () => {
-    const store = createProjectStore();
-    const projects = store.listProjects();
-    const projectId = projects[0].id;
-
     const response = await action({
       request: makeRequest({
         projectId,
@@ -63,7 +53,13 @@ describe("POST /api/chat/stream", () => {
     expect(response.headers.get("Cache-Control")).toBe("no-cache");
   });
 
-  it("returns 400 when no projectId", async () => {
+  it("returns 400 when no projectId and no active project", async () => {
+    // Clear active project so fallback doesn't kick in
+    const { upsertSettings } = await import(
+      "~/lib/db/queries/settings.server"
+    );
+    await upsertSettings({ activeProjectId: null });
+
     const response = await action({
       request: makeRequest({ messages: [] }),
       params: {},
@@ -83,11 +79,7 @@ describe("POST /api/chat/stream", () => {
     expect(response.status).toBe(405);
   });
 
-  it("creates Run record", async () => {
-    const store = createProjectStore();
-    const projects = store.listProjects();
-    const projectId = projects[0].id;
-
+  it("creates Task record", async () => {
     const response = await action({
       request: makeRequest({
         projectId,
@@ -98,7 +90,7 @@ describe("POST /api/chat/stream", () => {
       context: {},
     });
 
-    // Consume the stream to trigger run creation events
+    // Consume the stream to trigger task creation events
     const reader = response.body?.getReader();
     if (reader) {
       while (true) {
@@ -107,8 +99,9 @@ describe("POST /api/chat/stream", () => {
       }
     }
 
-    const runs = store.listRuns(projectId);
-    expect(runs.length).toBeGreaterThanOrEqual(1);
-    expect(runs[0].type).toBe("chat");
+    const { listTasks } = await import("~/lib/db/queries/tasks.server");
+    const tasks = await listTasks(projectId);
+    expect(tasks.length).toBeGreaterThanOrEqual(1);
+    expect(tasks[0].type).toBe("chat");
   });
 });

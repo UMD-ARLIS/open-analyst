@@ -1,6 +1,7 @@
-import { createProjectStore } from "~/lib/project-store.server";
-import { loadConfig } from "~/lib/config.server";
+import { getSettings } from "~/lib/db/queries/settings.server";
+import { createTask, updateTask, appendTaskEvent } from "~/lib/db/queries/tasks.server";
 import { getProjectWorkspace } from "~/lib/filesystem.server";
+import type { HeadlessConfig } from "~/lib/types";
 import type { Route } from "./+types/api.chat";
 
 export async function action({ request }: Route.ActionArgs) {
@@ -9,11 +10,11 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   const body = await request.json();
-  const cfg = loadConfig();
+  const settings = await getSettings();
   const messages = Array.isArray(body.messages) ? body.messages : [];
   const prompt = String(body.prompt || "").trim();
   const projectId = String(
-    body.projectId || cfg.activeProjectId || ""
+    body.projectId || settings.activeProjectId || ""
   ).trim();
   const collectionId = String(body.collectionId || "").trim();
   const collectionName = String(body.collectionName || "").trim();
@@ -32,16 +33,30 @@ export async function action({ request }: Route.ActionArgs) {
   // Ensure workspace directory exists for this project
   getProjectWorkspace(projectId);
 
-  const store = createProjectStore();
+  // Build a minimal HeadlessConfig for the agent provider
+  const cfg: HeadlessConfig = {
+    provider: "openai",
+    apiKey: "",
+    baseUrl: "",
+    bedrockRegion: "us-east-1",
+    model: settings.model,
+    openaiMode: "chat",
+    workingDir: settings.workingDir || process.cwd(),
+    workingDirType: settings.workingDirType,
+    s3Uri: settings.s3Uri || "",
+    activeProjectId: projectId,
+    agentBackend: settings.agentBackend,
+  };
+
   const chatMessages = messages.length
     ? messages
     : [{ role: "user", content: prompt }];
-  const run = store.createRun(projectId, {
+  const task = await createTask(projectId, {
+    title: prompt.slice(0, 500) || "New Task",
     type: "chat",
     status: "running",
-    prompt,
   });
-  store.appendRunEvent(projectId, run.id, "chat_requested", {
+  await appendTaskEvent(task.id, "chat_requested", {
     messageCount: chatMessages.length,
   });
 
@@ -52,31 +67,25 @@ export async function action({ request }: Route.ActionArgs) {
       collectionId: collectionId || undefined,
       collectionName: collectionName || "Task Sources",
       deepResearch,
-      onRunEvent: (eventType: string, payload: Record<string, unknown>) => {
-        store.appendRunEvent(projectId, run.id, eventType, payload);
+      onRunEvent: async (eventType: string, payload: Record<string, unknown>) => {
+        await appendTaskEvent(task.id, eventType, payload);
       },
     });
-    store.updateRun(projectId, run.id, {
-      status: "completed",
-      output: result.text || "",
-    });
-    store.appendRunEvent(projectId, run.id, "chat_completed", {
+    await updateTask(task.id, { status: "completed" });
+    await appendTaskEvent(task.id, "chat_completed", {
       traceCount: Array.isArray(result.traces) ? result.traces.length : 0,
     });
     return Response.json({
       ok: true,
       text: result.text,
       traces: result.traces || [],
-      runId: run.id,
+      runId: task.id,
       projectId,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    store.appendRunEvent(projectId, run.id, "chat_failed", { error: msg });
-    store.updateRun(projectId, run.id, {
-      status: "failed",
-      output: msg,
-    });
+    await appendTaskEvent(task.id, "chat_failed", { error: msg });
+    await updateTask(task.id, { status: "failed" });
     return Response.json({ error: msg }, { status: 500 });
   }
 }
