@@ -41,6 +41,18 @@ describe("Project route loader", () => {
     }
   });
 
+  it("returns collections summary", async () => {
+    const { loader } = await import(
+      "~/routes/_app.projects.$projectId.loader.server"
+    );
+    const args = createMockLoaderArgs(`/projects/${testProject.id}`, {
+      projectId: testProject.id,
+    });
+    const result = await loader(args);
+    expect(result).toHaveProperty("collections");
+    expect(Array.isArray(result.collections)).toBe(true);
+  });
+
   it("syncs active project server-side", async () => {
     const p1 = await createProject({ name: "Sync Test One" });
 
