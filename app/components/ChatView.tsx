@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useRevalidator } from 'react-router';
+import { useRevalidator, useSearchParams } from 'react-router';
 import { useAppStore } from '~/lib/store';
 import { useChatStream } from '~/hooks/useChatStream';
 import { MessageCard } from './MessageCard';
 import type { Message } from '~/lib/types';
 import { headlessGetCollections, headlessGetMcpServerStatus, type HeadlessCollection } from '~/lib/headless-api';
+import { KnowledgePanel } from './KnowledgePanel';
 import {
   Send,
   Square,
@@ -13,7 +14,7 @@ import {
   Loader2,
   Plug,
   X,
-  FlaskConical,
+  BookOpen,
 } from 'lucide-react';
 
 interface ChatViewProps {
@@ -37,12 +38,19 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
   } = useAppStore();
   const { streamingText, isStreaming, sendMessage, stop } = useChatStream();
   const { revalidate } = useRevalidator();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [prompt, setPrompt] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeConnectors, setActiveConnectors] = useState<any[]>([]);
   const [showConnectorLabel, setShowConnectorLabel] = useState(true);
-  const [deepResearch, setDeepResearch] = useState(false);
   const [projectCollections, setProjectCollections] = useState<HeadlessCollection[]>([]);
+  const [knowledgePanelOpen, setKnowledgePanelOpen] = useState(
+    searchParams.get('panel') === 'knowledge'
+  );
+
+  // URL-persisted state
+  const deepResearch = searchParams.get('deepResearch') === 'true';
+  const collectionParam = searchParams.get('collection');
   const headerRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const connectorMeasureRef = useRef<HTMLDivElement>(null);
@@ -445,7 +453,7 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
 
     setIsSubmitting(true);
     try {
-      const collectionId = activeCollectionByProject[projectId] || projectCollections[0]?.id;
+      const collectionId = collectionParam || activeCollectionByProject[projectId] || projectCollections[0]?.id;
 
       await sendMessage({
         prompt: currentPrompt.trim(),
@@ -474,7 +482,22 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
     stop();
   };
 
+  const toggleKnowledgePanel = () => {
+    const next = !knowledgePanelOpen;
+    setKnowledgePanelOpen(next);
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        if (next) p.set('panel', 'knowledge');
+        else p.delete('panel');
+        return p;
+      },
+      { replace: true }
+    );
+  };
+
   return (
+    <div className="flex-1 flex overflow-hidden">
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Header */}
       <div
@@ -485,32 +508,45 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
         <h2 ref={titleRef} className="font-medium text-text-primary text-center truncate max-w-lg">
           {taskTitle}
         </h2>
-        {activeConnectors.length > 0 && (
-          <>
-            <div
-              ref={connectorMeasureRef}
-              aria-hidden="true"
-              className="absolute left-0 top-0 -z-10 opacity-0 pointer-events-none"
-            >
-              <div className="flex items-center gap-2 px-2 py-1 rounded-lg border border-purple-500/20">
-                <Plug className="w-3.5 h-3.5" />
-                <span className="text-xs font-medium whitespace-nowrap">
-                  {t('chat.connectorCount', { count: activeConnectors.length })}
+        <div className="flex items-center gap-2 justify-self-end">
+          {activeConnectors.length > 0 && (
+            <>
+              <div
+                ref={connectorMeasureRef}
+                aria-hidden="true"
+                className="absolute left-0 top-0 -z-10 opacity-0 pointer-events-none"
+              >
+                <div className="flex items-center gap-2 px-2 py-1 rounded-lg border border-purple-500/20">
+                  <Plug className="w-3.5 h-3.5" />
+                  <span className="text-xs font-medium whitespace-nowrap">
+                    {t('chat.connectorCount', { count: activeConnectors.length })}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 px-2 py-1 rounded-lg bg-purple-500/10 border border-purple-500/20">
+                <Plug className="w-3.5 h-3.5 text-purple-500" />
+                <span className="text-xs text-purple-500 font-medium">
+                  {showConnectorLabel ? (
+                    t('chat.connectorCount', { count: activeConnectors.length })
+                  ) : (
+                    activeConnectors.length
+                  )}
                 </span>
               </div>
-            </div>
-            <div className="flex items-center gap-2 px-2 py-1 rounded-lg bg-purple-500/10 border border-purple-500/20 justify-self-end">
-              <Plug className="w-3.5 h-3.5 text-purple-500" />
-              <span className="text-xs text-purple-500 font-medium">
-                {showConnectorLabel ? (
-                  t('chat.connectorCount', { count: activeConnectors.length })
-                ) : (
-                  activeConnectors.length
-                )}
-              </span>
-            </div>
-          </>
-        )}
+            </>
+          )}
+          <button
+            onClick={toggleKnowledgePanel}
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+              knowledgePanelOpen
+                ? 'bg-accent-muted text-accent'
+                : 'hover:bg-surface-hover text-text-secondary'
+            }`}
+            aria-label={knowledgePanelOpen ? 'Close knowledge panel' : 'Open knowledge panel'}
+          >
+            <BookOpen className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* Messages */}
@@ -611,6 +647,7 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
                 onClick={handleFileSelect}
                 className="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors"
                 title={t('welcome.attachFiles')}
+                aria-label="Attach files"
               >
                 <Plus className="w-5 h-5" />
               </button>
@@ -638,7 +675,7 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
                 placeholder={t('chat.typeMessage')}
                 disabled={isSubmitting}
                 rows={1}
-                className="flex-1 resize-none bg-transparent border-none outline-none text-text-primary placeholder:text-text-muted text-sm py-1.5"
+                className="flex-1 resize-none bg-transparent border-none outline-none focus-visible:ring-2 focus-visible:ring-accent rounded text-text-primary placeholder:text-text-muted text-sm py-1.5"
               />
 
               <div className="flex items-center gap-2">
@@ -646,39 +683,13 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
                 <span className="px-2 py-1 text-xs text-text-muted">
                   {appConfig?.model || 'No model'}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => setDeepResearch(!deepResearch)}
-                  className={`text-xs px-2 py-1 rounded border flex items-center gap-1 ${
-                    deepResearch
-                      ? 'bg-accent/10 border-accent/40 text-accent'
-                      : 'bg-surface-muted border-border text-text-muted'
-                  }`}
-                  title="Enable deeper multi-step web research for this task"
-                >
-                  <FlaskConical className="w-3.5 h-3.5" />
-                  <span>Deep Research</span>
-                </button>
-                {projectId && projectCollections.length > 0 && (
-                  <select
-                    className="text-xs bg-surface-muted border border-border rounded px-2 py-1 max-w-[180px]"
-                    value={activeCollectionByProject[projectId] || projectCollections[0].id}
-                    onChange={(e) => setProjectActiveCollection(projectId, e.target.value)}
-                    title="Active collection for task source capture"
-                  >
-                    {projectCollections.map((collection) => (
-                      <option key={collection.id} value={collection.id}>
-                        {collection.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
 
                 {isStreaming && (
                   <button
                     type="button"
                     onClick={handleStop}
                     className="w-8 h-8 rounded-lg flex items-center justify-center bg-error/10 text-error hover:bg-error/20 transition-colors"
+                    aria-label="Stop generation"
                   >
                     <Square className="w-4 h-4" />
                   </button>
@@ -687,6 +698,7 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
                     type="submit"
                   disabled={(!prompt.trim() && !textareaRef.current?.value.trim() && pastedImages.length === 0 && attachedFiles.length === 0) || isSubmitting}
                     className="w-8 h-8 rounded-lg flex items-center justify-center bg-accent text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-accent-hover transition-colors"
+                    aria-label="Send message"
                   >
                     <Send className="w-4 h-4" />
                   </button>
@@ -696,12 +708,16 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
             <p className="text-xs text-text-muted text-center mt-2">
               Open Analyst is AI-powered and may make mistakes. Please double-check responses.
             </p>
-            <p className="text-xs text-amber-600 text-center mt-1">
-              Headless mode uses the API service on port 8787 for tools and execution.
-            </p>
           </form>
         </div>
       </div>
+    </div>
+    {knowledgePanelOpen && (
+      <KnowledgePanel
+        projectId={projectId}
+        onClose={toggleKnowledgePanel}
+      />
+    )}
     </div>
   );
 }
