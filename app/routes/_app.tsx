@@ -1,10 +1,10 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { Outlet, useLoaderData, useRevalidator } from 'react-router';
+import { Outlet, useLoaderData, useLocation, useRevalidator } from 'react-router';
 import { useAppStore } from '~/lib/store';
 import { Sidebar } from '~/components/Sidebar';
 import { PermissionDialog } from '~/components/PermissionDialog';
 import { ConfigModal } from '~/components/ConfigModal';
-import { Titlebar } from '~/components/Titlebar';
+import { TopNav } from '~/components/TopNav';
 import { SandboxSyncToast } from '~/components/SandboxSyncToast';
 import type { AppConfig } from '~/lib/types';
 import { getBrowserConfig, saveBrowserConfig } from '~/lib/browser-config';
@@ -30,6 +30,7 @@ export default function AppLayout() {
   const initialized = useRef(false);
   const loaderData = useLoaderData<typeof import('./_app.loader.server').loader>();
   const { revalidate } = useRevalidator();
+  const location = useLocation();
 
   // Bridge: sync loader data into Zustand
   useEffect(() => {
@@ -40,6 +41,11 @@ export default function AppLayout() {
       setIsConfigured(loaderData.isConfigured);
     }
   }, [loaderData, setProjects, setActiveProjectId, setWorkingDir, setIsConfigured]);
+
+  // Revalidate loader data on navigation (handles popstate/back-nav)
+  useEffect(() => {
+    revalidate();
+  }, [location.pathname]);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -73,7 +79,7 @@ export default function AppLayout() {
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-background">
-      <Titlebar />
+      <TopNav />
 
       <div className="flex-1 flex overflow-hidden">
         <Sidebar />
