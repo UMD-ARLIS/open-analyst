@@ -5,7 +5,7 @@ export default [
     index("routes/_app._index.tsx"),
     route("projects/:projectId", "routes/_app.projects.$projectId.tsx"),
     route("projects/:projectId/tasks/:taskId", "routes/_app.projects.$projectId.tasks.$taskId.tsx"),
-    route("projects/:projectId/sessions/:sessionId", "routes/_app.projects.$projectId.sessions.$sessionId.tsx"),
+    route("projects/:projectId/knowledge", "routes/_app.projects.$projectId.knowledge.tsx"),
     route("settings", "routes/_app.settings.tsx"),
   ]),
 
