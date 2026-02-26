@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useLoaderData } from "react-router";
 import { useAppStore } from "~/lib/store";
-import { WelcomeView } from "~/components/WelcomeView";
+import { QuickStartDashboard } from "~/components/QuickStartDashboard";
 
 export { loader } from "./_app.projects.$projectId.loader.server";
 
@@ -13,5 +13,5 @@ export default function ProjectRoute() {
     setActiveProjectId(projectId);
   }, [projectId, setActiveProjectId]);
 
-  return <WelcomeView />;
+  return <QuickStartDashboard />;
 }
