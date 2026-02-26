@@ -38,6 +38,7 @@ interface SettingsInitialData {
   mcpPresets?: Record<string, any>;
   skills?: any[];
   logsEnabled?: boolean;
+  currentModel?: string;
 }
 
 interface SettingsPanelProps {
@@ -119,7 +120,7 @@ export function SettingsPanel({ isOpen, onClose, initialTab = 'api', initialData
           </button>
         </div>
 
-        {activeTab === 'api' && <APISettingsTab />}
+        {activeTab === 'api' && <APISettingsTab currentModel={initialData?.currentModel} />}
         {activeTab === 'sandbox' && <SandboxTab />}
         {activeTab === 'credentials' && <CredentialsTab initialItems={initialData?.credentials} />}
         {activeTab === 'connectors' && <ConnectorsTab initialServers={initialData?.mcpServers} initialPresets={initialData?.mcpPresets} />}
@@ -140,12 +141,13 @@ export function SettingsPanel({ isOpen, onClose, initialTab = 'api', initialData
   );
 }
 
-function APISettingsTab() {
+function APISettingsTab({ currentModel }: { currentModel?: string }) {
   const setAppConfig = useAppStore((state) => state.setAppConfig);
   const setIsConfigured = useAppStore((state) => state.setIsConfigured);
   const fetcher = useFetcher();
   const [config, setConfig] = useState<AppConfig>(() => getBrowserConfig());
-  const [model, setModel] = useState(config.model || '');
+  // Prefer the DB-persisted model, fall back to browser config
+  const [model, setModel] = useState(currentModel || config.model || '');
   const [customModel, setCustomModel] = useState('');
   const [useCustomModel, setUseCustomModel] = useState(false);
   const [models, setModels] = useState<Array<{ id: string; name: string }>>([]);
@@ -157,6 +159,7 @@ function APISettingsTab() {
     headlessGetModels()
       .then((list) => {
         setModels(list);
+        // Only auto-select first model if we have no model at all
         if (list.length > 0 && !model) {
           setModel(list[0].id);
         }

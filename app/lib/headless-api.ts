@@ -94,9 +94,9 @@ export async function headlessChatStream(
   messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
   prompt: string,
   projectId?: string,
-  options?: { collectionId?: string; collectionName?: string; deepResearch?: boolean },
+  options?: { taskId?: string; collectionId?: string; collectionName?: string; deepResearch?: boolean },
   onEvent?: (event: StreamEvent) => void,
-): Promise<{ text: string; runId?: string }> {
+): Promise<{ text: string; runId?: string; taskId?: string }> {
   const res = await fetch(`${getHeadlessApiBase()}/api/chat/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -104,6 +104,7 @@ export async function headlessChatStream(
       messages,
       prompt,
       projectId,
+      taskId: options?.taskId,
       collectionId: options?.collectionId,
       collectionName: options?.collectionName,
       deepResearch: Boolean(options?.deepResearch),
@@ -121,6 +122,7 @@ export async function headlessChatStream(
   const decoder = new TextDecoder();
   let fullText = '';
   let runId: string | undefined;
+  let taskId: string | undefined;
   let buffer = '';
 
   while (true) {
@@ -140,11 +142,15 @@ export async function headlessChatStream(
           const data = JSON.parse(line.slice(6)) as StreamEvent;
           data.type = currentEvent;
 
+          if (currentEvent === 'task_created' && (data as any).taskId) {
+            taskId = (data as any).taskId;
+          }
           if (currentEvent === 'text_delta' && data.text) {
             fullText += data.text;
           }
-          if (currentEvent === 'done' && data.runId) {
-            runId = data.runId;
+          if (currentEvent === 'done') {
+            if (data.runId) runId = data.runId;
+            if ((data as any).taskId) taskId = (data as any).taskId;
           }
 
           onEvent?.(data);
@@ -156,7 +162,7 @@ export async function headlessChatStream(
     }
   }
 
-  return { text: fullText, runId };
+  return { text: fullText, runId, taskId };
 }
 
 export async function headlessGetTools(): Promise<Array<{ name: string; description: string }>> {

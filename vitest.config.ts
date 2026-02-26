@@ -5,7 +5,8 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    setupFiles: ['dotenv/config'],
+    globalSetup: ['./tests/rr7/global-setup.ts'],
+    setupFiles: ['./tests/rr7/tc-env-setup.ts', 'dotenv/config'],
     include: ['src/**/*.{test,spec}.{js,ts}', 'app/**/*.{test,spec}.{js,ts}', 'tests/**/*.{test,spec}.{js,ts}'],
     exclude: ['node_modules', 'dist', '.claude'],
     coverage: {

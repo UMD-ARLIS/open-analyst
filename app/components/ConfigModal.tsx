@@ -12,7 +12,7 @@ interface ConfigModalProps {
 }
 
 export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun }: ConfigModalProps) {
-  const [model, setModel] = useState(initialConfig?.model || 'anthropic/claude-sonnet-4');
+  const [model, setModel] = useState(initialConfig?.model || '');
   const [customModel, setCustomModel] = useState('');
   const [useCustomModel, setUseCustomModel] = useState(false);
   const [models, setModels] = useState<Array<{ id: string; name: string }>>([]);
@@ -27,6 +27,7 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
     headlessGetModels()
       .then((list) => {
         setModels(list);
+        // Auto-select first available model only if we have no model set
         if (list.length > 0 && !model) {
           setModel(list[0].id);
         }
@@ -36,8 +37,8 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
   }, [isOpen]);
 
   useEffect(() => {
-    if (initialConfig) {
-      setModel(initialConfig.model || 'anthropic/claude-sonnet-4');
+    if (initialConfig?.model) {
+      setModel(initialConfig.model);
     }
   }, [initialConfig]);
 

@@ -1,5 +1,11 @@
 import { getSettings } from "~/lib/db/queries/settings.server";
-import { createTask, updateTask, appendTaskEvent } from "~/lib/db/queries/tasks.server";
+import {
+  createTask,
+  getTask,
+  updateTask,
+  appendTaskEvent,
+  createMessage,
+} from "~/lib/db/queries/tasks.server";
 import { createAgentProvider } from "~/lib/agent/index.server";
 import { getProjectWorkspace } from "~/lib/filesystem.server";
 import type { HeadlessConfig } from "~/lib/types";
@@ -44,10 +50,27 @@ export async function action({ request }: Route.ActionArgs) {
   const provider = createAgentProvider(cfg);
   const workingDir = getProjectWorkspace(projectId);
   const prompt = String(body.prompt || "").trim();
-  const task = await createTask(projectId, {
-    title: prompt.slice(0, 500) || "New Task",
-    type: "chat",
-    status: "running",
+
+  // Reuse existing task or create new one
+  let task;
+  if (body.taskId) {
+    const existing = await getTask(body.taskId);
+    if (!existing || existing.projectId !== projectId) {
+      return Response.json({ error: "Task not found" }, { status: 404 });
+    }
+    task = await updateTask(existing.id, { status: "running" });
+  } else {
+    task = await createTask(projectId, {
+      title: prompt.slice(0, 500) || "New Task",
+      type: "chat",
+      status: "running",
+    });
+  }
+
+  // Persist user message
+  await createMessage(task.id, {
+    role: "user",
+    content: [{ type: "text", text: prompt }],
   });
 
   const stream = new ReadableStream({
@@ -59,7 +82,11 @@ export async function action({ request }: Route.ActionArgs) {
         );
       };
 
+      // Emit task_created so the client knows the task ID immediately
+      send("task_created", { taskId: task.id });
+
       try {
+        let fullText = "";
         for await (const event of provider.stream(
           Array.isArray(body.messages) ? body.messages : [],
           {
@@ -72,6 +99,9 @@ export async function action({ request }: Route.ActionArgs) {
           }
         )) {
           send(event.type, event);
+          if (event.type === "text_delta" && event.text) {
+            fullText += event.text;
+          }
           await appendTaskEvent(task.id, event.type, {
             text: event.text,
             toolName: event.toolName,
@@ -79,7 +109,14 @@ export async function action({ request }: Route.ActionArgs) {
             error: event.error,
           });
         }
-        send("done", { runId: task.id });
+
+        // Persist assistant message
+        await createMessage(task.id, {
+          role: "assistant",
+          content: [{ type: "text", text: fullText }],
+        });
+
+        send("done", { taskId: task.id });
         await updateTask(task.id, { status: "completed" });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

@@ -5,11 +5,6 @@ describe('store compatibility', () => {
   it('has the expected state keys with correct defaults', () => {
     const state = useAppStore.getState();
 
-    // Core session state
-    expect(state).toHaveProperty('sessions');
-    expect(state).toHaveProperty('activeSessionId');
-    expect(state).toHaveProperty('messagesBySession');
-
     // Config state
     expect(state).toHaveProperty('isConfigured');
     expect(state).toHaveProperty('appConfig');
@@ -22,12 +17,16 @@ describe('store compatibility', () => {
     // Settings
     expect(state).toHaveProperty('settings');
 
+    // UI state
+    expect(state).toHaveProperty('isLoading');
+    expect(state).toHaveProperty('sidebarCollapsed');
+
     // Actions
-    expect(typeof state.setActiveSession).toBe('function');
     expect(typeof state.setIsConfigured).toBe('function');
     expect(typeof state.setAppConfig).toBe('function');
     expect(typeof state.setProjects).toBe('function');
     expect(typeof state.setActiveProjectId).toBe('function');
     expect(typeof state.setShowConfigModal).toBe('function');
+    expect(typeof state.setLoading).toBe('function');
   });
 });

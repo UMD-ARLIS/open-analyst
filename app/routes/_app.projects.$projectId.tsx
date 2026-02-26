@@ -8,12 +8,10 @@ export { loader } from "./_app.projects.$projectId.loader.server";
 export default function ProjectRoute() {
   const { projectId } = useLoaderData<{ projectId: string }>();
   const setActiveProjectId = useAppStore((s) => s.setActiveProjectId);
-  const setActiveSession = useAppStore((s) => s.setActiveSession);
 
   useEffect(() => {
     setActiveProjectId(projectId);
-    setActiveSession(null);
-  }, [projectId, setActiveProjectId, setActiveSession]);
+  }, [projectId, setActiveProjectId]);
 
   return <WelcomeView />;
 }

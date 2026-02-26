@@ -1,10 +1,15 @@
 """Creates the Strands Agent with model, tools, and system prompt."""
 
+import litellm
 from strands import Agent
 from strands.models import LiteLLMModel
 
 from config import settings
 from tools import create_project_tools
+
+# Bedrock requires conversations to start with a user message.
+# This tells LiteLLM to auto-rewrite system messages for compatibility.
+litellm.modify_params = True
 
 SYSTEM_PROMPT = """You are Open Analyst, an AI research assistant.
 

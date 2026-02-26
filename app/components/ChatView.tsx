@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useRevalidator } from 'react-router';
 import { useAppStore } from '~/lib/store';
-import { useIPC } from '~/hooks/useIPC';
+import { useChatStream } from '~/hooks/useChatStream';
 import { MessageCard } from './MessageCard';
-import type { Message, ContentBlock } from '~/lib/types';
+import type { Message } from '~/lib/types';
 import { headlessGetCollections, headlessGetMcpServerStatus, type HeadlessCollection } from '~/lib/headless-api';
 import {
   Send,
@@ -15,26 +16,32 @@ import {
   FlaskConical,
 } from 'lucide-react';
 
-export function ChatView() {
+interface ChatViewProps {
+  taskId: string;
+  taskTitle: string;
+  projectId: string;
+  initialMessages: Array<{
+    id: string;
+    role: string;
+    content: unknown;
+    timestamp: string | Date;
+  }>;
+}
+
+export function ChatView({ taskId, taskTitle, projectId, initialMessages }: ChatViewProps) {
   const { t } = useTranslation();
   const {
-    activeSessionId,
-    sessions,
-    messagesBySession,
-    partialMessagesBySession,
-    activeTurnsBySession,
-    pendingTurnsBySession,
     appConfig,
-    activeProjectId,
     activeCollectionByProject,
     setProjectActiveCollection,
   } = useAppStore();
-  const { continueSession, stopSession } = useIPC();
+  const { streamingText, isStreaming, sendMessage, stop } = useChatStream();
+  const { revalidate } = useRevalidator();
   const [prompt, setPrompt] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeConnectors, setActiveConnectors] = useState<any[]>([]);
   const [showConnectorLabel, setShowConnectorLabel] = useState(true);
-  const [deepResearchBySession, setDeepResearchBySession] = useState<Record<string, boolean>>({});
+  const [deepResearch, setDeepResearch] = useState(false);
   const [projectCollections, setProjectCollections] = useState<HeadlessCollection[]>([]);
   const headerRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
@@ -53,46 +60,31 @@ export function ChatView() {
   const scrollRequestRef = useRef<number | null>(null);
   const isScrollingRef = useRef(false);
 
-  const activeSession = sessions.find((s) => s.id === activeSessionId);
-  const messages = activeSessionId ? messagesBySession[activeSessionId] || [] : [];
-  const pendingTurns = activeSessionId ? pendingTurnsBySession[activeSessionId] || [] : [];
-  const partialMessage = activeSessionId ? partialMessagesBySession[activeSessionId] || '' : '';
-  const deepResearchEnabled = activeSessionId ? Boolean(deepResearchBySession[activeSessionId]) : false;
-  const activeTurn = activeSessionId ? activeTurnsBySession[activeSessionId] : null;
-  const hasActiveTurn = Boolean(activeTurn);
-  const pendingCount = pendingTurns.length;
-  const canStop = hasActiveTurn || pendingCount > 0;
+  // Convert DB messages to display format
+  const messages: Message[] = useMemo(() => {
+    return initialMessages.map((m) => ({
+      id: m.id,
+      sessionId: taskId,
+      role: m.role as Message['role'],
+      content: Array.isArray(m.content) ? m.content : [{ type: 'text', text: String(m.content) }],
+      timestamp: typeof m.timestamp === 'string' ? new Date(m.timestamp).getTime() : m.timestamp instanceof Date ? m.timestamp.getTime() : Date.now(),
+    }));
+  }, [initialMessages, taskId]);
 
   const displayedMessages = useMemo(() => {
-    if (!activeSessionId) return messages;
-    if (!partialMessage || !activeTurn?.userMessageId) return messages;
-    const anchorIndex = messages.findIndex((message) => message.id === activeTurn.userMessageId);
-    if (anchorIndex === -1) return messages;
-
-    let insertIndex = anchorIndex + 1;
-    while (insertIndex < messages.length) {
-      if (messages[insertIndex].role === 'user') break;
-      insertIndex += 1;
-    }
-
+    if (!streamingText) return messages;
     const streamingMessage: Message = {
-      id: `partial-${activeSessionId}`,
-      sessionId: activeSessionId,
+      id: `partial-${taskId}`,
+      sessionId: taskId,
       role: 'assistant',
-      content: [{ type: 'text', text: partialMessage }],
+      content: [{ type: 'text', text: streamingText }],
       timestamp: Date.now(),
     };
-
-    return [
-      ...messages.slice(0, insertIndex),
-      streamingMessage,
-      ...messages.slice(insertIndex),
-    ];
-  }, [activeSessionId, activeTurn?.userMessageId, messages, partialMessage]);
+    return [...messages, streamingMessage];
+  }, [messages, streamingText, taskId]);
 
   // Debounced scroll function to prevent scroll conflicts
   const scrollToBottom = useRef((behavior: ScrollBehavior = 'auto', immediate: boolean = false) => {
-    // Cancel any pending scroll requests
     if (scrollTimeoutRef.current) {
       clearTimeout(scrollTimeoutRef.current);
       scrollTimeoutRef.current = null;
@@ -104,13 +96,8 @@ export function ChatView() {
 
     const performScroll = () => {
       if (!isUserAtBottomRef.current) return;
-      
-      // Mark as scrolling to prevent concurrent scrolls
       isScrollingRef.current = true;
-      
       messagesEndRef.current?.scrollIntoView({ behavior });
-      
-      // Reset scrolling flag after a short delay
       setTimeout(() => {
         isScrollingRef.current = false;
       }, behavior === 'smooth' ? 300 : 50);
@@ -119,9 +106,8 @@ export function ChatView() {
     if (immediate) {
       performScroll();
     } else {
-      // Use RAF + timeout for debouncing
       scrollRequestRef.current = requestAnimationFrame(() => {
-        scrollTimeoutRef.current = setTimeout(performScroll, 16); // ~1 frame delay
+        scrollTimeoutRef.current = setTimeout(performScroll, 16);
       });
     }
   }).current;
@@ -134,7 +120,6 @@ export function ChatView() {
       isUserAtBottomRef.current = distanceToBottom <= 80;
     };
     updateScrollState();
-    // Prevent auto-scroll from interrupting users reading older messages
     const onScroll = () => updateScrollState();
     container.addEventListener('scroll', onScroll, { passive: true });
     return () => container.removeEventListener('scroll', onScroll);
@@ -142,30 +127,29 @@ export function ChatView() {
 
   useEffect(() => {
     const loadCollections = async () => {
-      if (!activeProjectId) {
+      if (!projectId) {
         setProjectCollections([]);
         return;
       }
       try {
-        const next = await headlessGetCollections(activeProjectId);
+        const next = await headlessGetCollections(projectId);
         setProjectCollections(next);
-        if (!activeCollectionByProject[activeProjectId] && next[0]) {
-          setProjectActiveCollection(activeProjectId, next[0].id);
+        if (!activeCollectionByProject[projectId] && next[0]) {
+          setProjectActiveCollection(projectId, next[0].id);
         }
       } catch {
         setProjectCollections([]);
       }
     };
     void loadCollections();
-  }, [activeProjectId, activeCollectionByProject, setProjectActiveCollection]);
+  }, [projectId, activeCollectionByProject, setProjectActiveCollection]);
 
   useEffect(() => {
     const messageCount = messages.length;
-    const partialLength = partialMessage.length;
+    const partialLength = streamingText.length;
     const hasNewMessage = messageCount !== prevMessageCountRef.current;
     const isStreamingTick = partialLength !== prevPartialLengthRef.current && !hasNewMessage;
 
-    // Skip scroll if already scrolling (prevent conflicts)
     if (isScrollingRef.current) {
       prevMessageCountRef.current = messageCount;
       prevPartialLengthRef.current = partialLength;
@@ -174,59 +158,44 @@ export function ChatView() {
 
     if (isUserAtBottomRef.current) {
       if (!isStreamingTick) {
-        // New message - use smooth scroll but with debounce
         const behavior: ScrollBehavior = hasNewMessage ? 'smooth' : 'auto';
         scrollToBottom(behavior, false);
       } else {
-        // Streaming tick - use instant scroll with debounce
         scrollToBottom('auto', false);
       }
     }
 
     prevMessageCountRef.current = messageCount;
     prevPartialLengthRef.current = partialLength;
-  }, [messages.length, partialMessage]);
+  }, [messages.length, streamingText]);
 
-  // Additional scroll trigger for content height changes (e.g., TodoWrite expand/collapse)
+  // Resize observer for content height changes
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
-
-    // Use ResizeObserver to detect height changes in the messages container
-    // We need to observe the inner content div, not the scroll container itself
     const messagesContainer = container.querySelector('.max-w-3xl');
     if (!messagesContainer) return;
 
     const resizeObserver = new ResizeObserver(() => {
-      // Don't interfere with ongoing scrolls
       if (!isScrollingRef.current && isUserAtBottomRef.current) {
-        // Scroll to bottom when content height changes
         scrollToBottom('auto', false);
       }
     });
-
     resizeObserver.observe(messagesContainer);
-
-    return () => {
-      resizeObserver.disconnect();
-    };
-  }, [displayedMessages]); // Re-create observer when messages change to ensure we're observing the right element
+    return () => resizeObserver.disconnect();
+  }, [displayedMessages]);
 
   // Cleanup scroll timeouts on unmount
   useEffect(() => {
     return () => {
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-      }
-      if (scrollRequestRef.current) {
-        cancelAnimationFrame(scrollRequestRef.current);
-      }
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+      if (scrollRequestRef.current) cancelAnimationFrame(scrollRequestRef.current);
     };
   }, []);
 
   useEffect(() => {
     textareaRef.current?.focus();
-  }, [activeSessionId]);
+  }, [taskId]);
 
   // Handle paste event for images
   const handlePaste = async (e: React.ClipboardEvent) => {
@@ -245,7 +214,6 @@ export function ChatView() {
       if (!blob) continue;
 
       try {
-        // Resize if needed to stay under API limit
         const resizedBlob = await resizeImageIfNeeded(blob);
         const base64 = await blobToBase64(resizedBlob);
         const url = URL.createObjectURL(resizedBlob);
@@ -267,7 +235,6 @@ export function ChatView() {
       const reader = new FileReader();
       reader.onloadend = () => {
         const result = reader.result as string;
-        // Remove data URL prefix (e.g., "data:image/png;base64,")
         const base64 = result.split(',')[1];
         resolve(base64);
       };
@@ -276,14 +243,11 @@ export function ChatView() {
     });
   };
 
-  // Resize and compress image if needed to stay under 5MB base64 limit
   const resizeImageIfNeeded = async (blob: Blob): Promise<Blob> => {
-    // Claude API limit is 5MB for base64 encoded images
-    // Base64 encoding increases size by ~33%, so we target 3.75MB for the blob
-    const MAX_BLOB_SIZE = 3.75 * 1024 * 1024; // 3.75MB
+    const MAX_BLOB_SIZE = 3.75 * 1024 * 1024;
 
     if (blob.size <= MAX_BLOB_SIZE) {
-      return blob; // No need to resize
+      return blob;
     }
 
     return new Promise((resolve, reject) => {
@@ -292,9 +256,6 @@ export function ChatView() {
 
       img.onload = () => {
         URL.revokeObjectURL(url);
-
-        // Calculate scaling factor to reduce file size
-        // We use a more aggressive approach: scale down until size is acceptable
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
         if (!ctx) {
@@ -302,14 +263,12 @@ export function ChatView() {
           return;
         }
 
-        // Start with a scale factor based on size ratio
         let scale = Math.sqrt(MAX_BLOB_SIZE / blob.size);
         let quality = 0.9;
 
         const attemptCompress = (currentScale: number, currentQuality: number): Promise<Blob> => {
           canvas.width = Math.floor(img.width * currentScale);
           canvas.height = Math.floor(img.height * currentScale);
-
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
@@ -320,8 +279,6 @@ export function ChatView() {
                   reject(new Error('Failed to compress image'));
                   return;
                 }
-
-                // If still too large, try again with lower quality or scale
                 if (compressedBlob.size > MAX_BLOB_SIZE && (currentQuality > 0.5 || currentScale > 0.3)) {
                   const newQuality = Math.max(0.5, currentQuality - 0.1);
                   const newScale = currentQuality <= 0.5 ? currentScale * 0.9 : currentScale;
@@ -373,15 +330,12 @@ export function ChatView() {
       picker.onchange = () => {
         const files = Array.from(picker.files || []);
         if (!files.length) return;
-        const newFiles = files.map((file) => {
-          const fileName = file.name || 'unknown';
-          return {
-            name: fileName,
-            path: '',
-            size: file.size || 0,
-            type: file.type || 'application/octet-stream',
-          };
-        });
+        const newFiles = files.map((file) => ({
+          name: file.name || 'unknown',
+          path: '',
+          size: file.size || 0,
+          type: file.type || 'application/octet-stream',
+        }));
         setAttachedFiles(prev => [...prev, ...newFiles]);
       };
       picker.click();
@@ -402,7 +356,6 @@ export function ChatView() {
       }
     };
     void loadConnectors();
-    // Refresh every 5 seconds
     const interval = setInterval(() => {
       void loadConnectors();
     }, 5000);
@@ -431,30 +384,21 @@ export function ChatView() {
     const imageFiles = files.filter(file => file.type.startsWith('image/'));
     const otherFiles = files.filter(file => !file.type.startsWith('image/'));
 
-    // Process images
     if (imageFiles.length > 0) {
       const newImages: Array<{ url: string; base64: string; mediaType: string }> = [];
-
       for (const file of imageFiles) {
         try {
-          // Resize if needed to stay under API limit
           const resizedBlob = await resizeImageIfNeeded(file);
           const base64 = await blobToBase64(resizedBlob);
           const url = URL.createObjectURL(resizedBlob);
-          newImages.push({
-            url,
-            base64,
-            mediaType: resizedBlob.type,
-          });
+          newImages.push({ url, base64, mediaType: resizedBlob.type });
         } catch (err) {
           console.error('Failed to process dropped image:', err);
         }
       }
-
       setPastedImages(prev => [...prev, ...newImages]);
     }
 
-    // Process other files
     if (otherFiles.length > 0) {
       const newFiles = otherFiles.map(file => ({
         name: file.name,
@@ -462,7 +406,6 @@ export function ChatView() {
         size: file.size,
         type: file.type || 'application/octet-stream',
       }));
-
       setAttachedFiles(prev => [...prev, ...newFiles]);
     }
   };
@@ -487,62 +430,34 @@ export function ChatView() {
       setShowConnectorLabel(!isTruncated && rightColumnWidth >= connectorFullWidth);
     };
     updateLabelVisibility();
-    const observer = new ResizeObserver(() => {
-      updateLabelVisibility();
-    });
+    const observer = new ResizeObserver(() => updateLabelVisibility());
     observer.observe(titleEl);
     observer.observe(headerEl);
     return () => observer.disconnect();
-  }, [activeSession?.title, activeConnectors.length]);
+  }, [taskTitle, activeConnectors.length]);
 
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    
-    // Get value from ref to handle both controlled and uncontrolled cases
+
     const currentPrompt = textareaRef.current?.value || prompt;
-    
-    if ((!currentPrompt.trim() && pastedImages.length === 0 && attachedFiles.length === 0) || !activeSessionId || isSubmitting) return;
+
+    if ((!currentPrompt.trim() && pastedImages.length === 0 && attachedFiles.length === 0) || isSubmitting) return;
 
     setIsSubmitting(true);
     try {
-      // Build content blocks
-      const contentBlocks: ContentBlock[] = [];
+      const collectionId = activeCollectionByProject[projectId] || projectCollections[0]?.id;
 
-      // Add images first
-      pastedImages.forEach(img => {
-        contentBlocks.push({
-          type: 'image',
-          source: {
-            type: 'base64',
-            media_type: img.mediaType as any,
-            data: img.base64,
-          },
-        });
+      await sendMessage({
+        prompt: currentPrompt.trim(),
+        projectId,
+        taskId,
+        collectionId,
+        deepResearch: deepResearch,
       });
 
-      // Add file attachments
-      attachedFiles.forEach(file => {
-        contentBlocks.push({
-          type: 'file_attachment',
-          filename: file.name,
-          relativePath: file.path, // Will be processed by backend to copy to .tmp
-          size: file.size,
-          mimeType: file.type,
-        });
-      });
+      // Revalidate route data to pick up new messages from DB
+      revalidate();
 
-      // Add text if present
-      if (currentPrompt.trim()) {
-        contentBlocks.push({
-          type: 'text',
-          text: currentPrompt.trim(),
-        });
-      }
-
-      // Send message with content blocks
-      await continueSession(activeSessionId, contentBlocks, { deepResearch: deepResearchEnabled });
-
-      // Clean up
       setPrompt('');
       if (textareaRef.current) {
         textareaRef.current.value = '';
@@ -556,18 +471,8 @@ export function ChatView() {
   };
 
   const handleStop = () => {
-    if (activeSessionId) {
-      stopSession(activeSessionId);
-    }
+    stop();
   };
-
-  if (!activeSession) {
-    return (
-      <div className="flex-1 flex items-center justify-center text-text-muted">
-        <span>{t('chat.loadingConversation')}</span>
-      </div>
-    );
-  }
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -578,7 +483,7 @@ export function ChatView() {
       >
         <div />
         <h2 ref={titleRef} className="font-medium text-text-primary text-center truncate max-w-lg">
-          {activeSession.title}
+          {taskTitle}
         </h2>
         {activeConnectors.length > 0 && (
           <>
@@ -617,17 +522,17 @@ export function ChatView() {
             </div>
           ) : (
             displayedMessages.map((message) => {
-              const isStreaming = typeof message.id === 'string' && message.id.startsWith('partial-');
+              const isStreamingMsg = typeof message.id === 'string' && message.id.startsWith('partial-');
               return (
               <div key={message.id}>
-                  <MessageCard message={message} isStreaming={isStreaming} />
+                  <MessageCard message={message} isStreaming={isStreamingMsg} />
               </div>
               );
             })
           )}
-          
-          {/* Processing indicator - show when we have an active turn but no partial message yet */}
-          {hasActiveTurn && (!partialMessage || partialMessage.trim() === '') && (
+
+          {/* Processing indicator */}
+          {isStreaming && !streamingText && (
             <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-surface border border-border max-w-fit">
               <Loader2 className="w-4 h-4 text-accent animate-spin" />
               <span className="text-sm text-text-secondary">
@@ -635,7 +540,7 @@ export function ChatView() {
               </span>
             </div>
           )}
-          
+
           <div ref={messagesEndRef} />
         </div>
       </div>
@@ -722,7 +627,6 @@ export function ChatView() {
                 }}
                 onPaste={handlePaste}
                 onKeyDown={(e) => {
-                  // Enter to send, Shift+Enter for new line
                   if (e.key === 'Enter' && !e.shiftKey) {
                     if (e.nativeEvent.isComposing || isComposingRef.current || e.keyCode === 229) {
                       return;
@@ -742,29 +646,24 @@ export function ChatView() {
                 <span className="px-2 py-1 text-xs text-text-muted">
                   {appConfig?.model || 'No model'}
                 </span>
-                {activeSessionId && (
-                  <button
-                    type="button"
-                    onClick={() => setDeepResearchBySession((prev) => ({
-                      ...prev,
-                      [activeSessionId]: !deepResearchEnabled,
-                    }))}
-                    className={`text-xs px-2 py-1 rounded border flex items-center gap-1 ${
-                      deepResearchEnabled
-                        ? 'bg-accent/10 border-accent/40 text-accent'
-                        : 'bg-surface-muted border-border text-text-muted'
-                    }`}
-                    title="Enable deeper multi-step web research for this task"
-                  >
-                    <FlaskConical className="w-3.5 h-3.5" />
-                    <span>Deep Research</span>
-                  </button>
-                )}
-                {activeProjectId && projectCollections.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setDeepResearch(!deepResearch)}
+                  className={`text-xs px-2 py-1 rounded border flex items-center gap-1 ${
+                    deepResearch
+                      ? 'bg-accent/10 border-accent/40 text-accent'
+                      : 'bg-surface-muted border-border text-text-muted'
+                  }`}
+                  title="Enable deeper multi-step web research for this task"
+                >
+                  <FlaskConical className="w-3.5 h-3.5" />
+                  <span>Deep Research</span>
+                </button>
+                {projectId && projectCollections.length > 0 && (
                   <select
                     className="text-xs bg-surface-muted border border-border rounded px-2 py-1 max-w-[180px]"
-                    value={activeCollectionByProject[activeProjectId] || projectCollections[0].id}
-                    onChange={(e) => setProjectActiveCollection(activeProjectId, e.target.value)}
+                    value={activeCollectionByProject[projectId] || projectCollections[0].id}
+                    onChange={(e) => setProjectActiveCollection(projectId, e.target.value)}
                     title="Active collection for task source capture"
                   >
                     {projectCollections.map((collection) => (
@@ -775,7 +674,7 @@ export function ChatView() {
                   </select>
                 )}
 
-                {canStop && (
+                {isStreaming && (
                   <button
                     type="button"
                     onClick={handleStop}

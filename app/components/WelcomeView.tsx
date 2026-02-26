@@ -1,8 +1,7 @@
 import { useMemo, useState } from 'react';
-import { useFetcher, useNavigate } from 'react-router';
+import { useFetcher, useMatches, useNavigate } from 'react-router';
 import { useAppStore } from '~/lib/store';
-import { useIPC } from '~/hooks/useIPC';
-import type { ContentBlock } from '~/lib/types';
+import { useChatStream } from '~/hooks/useChatStream';
 import { ArrowRight, FolderOpen, Plus, ClipboardList } from 'lucide-react';
 import { ProjectWorkspace } from './ProjectWorkspace';
 
@@ -10,15 +9,13 @@ export function WelcomeView() {
   const {
     projects,
     activeProjectId,
-    sessions,
-    sessionProjectMap,
-    sessionPlanMap,
     workingDir,
     setWorkingDir,
   } = useAppStore();
-  const { startSession, changeWorkingDir } = useIPC();
+  const { sendMessage } = useChatStream();
   const fetcher = useFetcher();
   const navigate = useNavigate();
+  const matches = useMatches();
 
   const [newProjectName, setNewProjectName] = useState('');
   const [prompt, setPrompt] = useState('');
@@ -30,12 +27,10 @@ export function WelcomeView() {
     [projects, activeProjectId],
   );
 
-  const projectTasks = useMemo(() => {
-    if (!activeProjectId) return [];
-    return sessions
-      .filter((session) => sessionProjectMap[session.id] === activeProjectId)
-      .sort((a, b) => b.updatedAt - a.updatedAt);
-  }, [sessions, sessionProjectMap, activeProjectId]);
+  // Read tasks from the project route loader data
+  const projectMatch = matches.find((m) => m.id && m.pathname.includes('/projects/'));
+  const tasks: Array<{ id: string; title: string; status: string; updatedAt: string | Date }> =
+    (projectMatch?.data as any)?.tasks || [];
 
   const handleCreateProject = () => {
     const name = newProjectName.trim();
@@ -56,15 +51,16 @@ export function WelcomeView() {
     const text = prompt.trim();
     if (!text || isSubmitting) return;
 
-    const content: ContentBlock[] = [{ type: 'text', text }];
     setIsSubmitting(true);
     setError(null);
     try {
-      const title = text.slice(0, 60) + (text.length > 60 ? '...' : '');
-      const session = await startSession(title, content, workingDir || undefined, { streaming: true });
+      const { taskId } = await sendMessage({
+        prompt: text,
+        projectId: activeProjectId,
+      });
       setPrompt('');
-      if (session?.id && activeProjectId) {
-        navigate(`/projects/${activeProjectId}/sessions/${session.id}`);
+      if (taskId) {
+        navigate(`/projects/${activeProjectId}/tasks/${taskId}`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -74,9 +70,20 @@ export function WelcomeView() {
   };
 
   const handleSelectFolder = async () => {
-    const result = await changeWorkingDir();
-    if (result.success && result.path) {
-      setWorkingDir(result.path);
+    const path = window.prompt('Enter working directory path (local path or s3:// URI):');
+    if (!path?.trim()) return;
+    try {
+      const res = await fetch('/api/workdir', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: path.trim() }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setWorkingDir(data.path);
+      }
+    } catch {
+      // ignore
     }
   };
 
@@ -152,37 +159,17 @@ export function WelcomeView() {
               <h2 className="text-sm font-semibold">Task History</h2>
             </div>
             <div className="space-y-2 max-h-[170px] overflow-y-auto pr-1">
-              {projectTasks.length === 0 ? (
+              {tasks.length === 0 ? (
                 <p className="text-xs text-text-muted">No tasks yet.</p>
               ) : (
-                projectTasks.map((task) => (
+                tasks.map((task) => (
                   <button
                     key={task.id}
                     className="w-full text-left px-2 py-2 rounded-lg border border-border bg-surface hover:bg-surface-hover"
-                    onClick={() => navigate(`/projects/${activeProjectId}/sessions/${task.id}`)}
+                    onClick={() => navigate(`/projects/${activeProjectId}/tasks/${task.id}`)}
                   >
                     <div className="text-sm truncate">{task.title}</div>
                     <div className="text-xs text-text-muted">{task.status}</div>
-                    {sessionPlanMap[task.id]?.phases?.length ? (
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {sessionPlanMap[task.id].phases.map((phase) => (
-                          <span
-                            key={`${task.id}-${phase.key}`}
-                            className={`text-[10px] px-1.5 py-0.5 rounded ${
-                              phase.status === 'completed'
-                                ? 'bg-success/15 text-success'
-                                : phase.status === 'running'
-                                  ? 'bg-accent/15 text-accent'
-                                  : phase.status === 'error'
-                                    ? 'bg-error/15 text-error'
-                                    : 'bg-surface-muted text-text-muted'
-                            }`}
-                          >
-                            {phase.label}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
                   </button>
                 ))
               )}

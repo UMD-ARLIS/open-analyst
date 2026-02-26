@@ -18,7 +18,8 @@ describe("Project route loader", () => {
       projectId: testProject.id,
     });
     const result = await loader(args);
-    expect(result).toEqual({ projectId: testProject.id });
+    expect(result).toHaveProperty("projectId", testProject.id);
+    expect(result).toHaveProperty("tasks");
   });
 
   it("redirects for invalid projectId", async () => {

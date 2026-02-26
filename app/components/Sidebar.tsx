@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useFetcher, useLocation, useNavigate } from 'react-router';
+import { useEffect, useState } from 'react';
+import { useFetcher, useLocation, useMatches, useNavigate } from 'react-router';
 import { useAppStore } from '~/lib/store';
-import { useIPC } from '~/hooks/useIPC';
 import { ChevronLeft, ChevronRight, FolderKanban, Moon, Plus, Settings, Sun, Trash2, Pencil } from 'lucide-react';
 import { SettingsPanel } from './SettingsPanel';
 
@@ -11,23 +10,29 @@ export function Sidebar() {
     sidebarCollapsed,
     toggleSidebar,
     updateSettings,
-    activeSessionId,
-    setActiveSession,
-    sessions,
-    sessionProjectMap,
     projects,
     activeProjectId,
     upsertProject,
     removeProject,
     isConfigured,
   } = useAppStore();
-  const { deleteSession } = useIPC();
   const fetcher = useFetcher();
+  const taskFetcher = useFetcher();
   const navigate = useNavigate();
   const location = useLocation();
+  const matches = useMatches();
   const [showSettings, setShowSettings] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  // Extract tasks from project route loader data
+  const projectMatch = matches.find((m) => m.id && m.pathname.includes('/projects/'));
+  const tasks: Array<{ id: string; title: string; status: string; updatedAt: string | Date }> =
+    (projectMatch?.data as any)?.tasks || [];
+
+  // Determine active taskId from URL
+  const taskMatch = matches.find((m) => (m.params as any)?.taskId);
+  const activeTaskId = (taskMatch?.params as any)?.taskId || null;
 
   // Navigate to new project after creation
   useEffect(() => {
@@ -39,11 +44,6 @@ export function Sidebar() {
     }
   }, [fetcher.state, fetcher.data, navigate]);
 
-  const projectSessions = useMemo(() => {
-    if (!activeProjectId) return [];
-    return sessions.filter((session) => sessionProjectMap[session.id] === activeProjectId);
-  }, [sessions, sessionProjectMap, activeProjectId]);
-
   const toggleTheme = () => {
     updateSettings({ theme: settings.theme === 'dark' ? 'light' : 'dark' });
   };
@@ -53,7 +53,6 @@ export function Sidebar() {
     if (!name) return;
     setError(null);
     setNewProjectName('');
-    setActiveSession(null);
     fetcher.submit(
       { name },
       { method: "POST", action: "/api/projects", encType: "application/json" }
@@ -81,13 +80,27 @@ export function Sidebar() {
     if (!confirmed) return;
     setError(null);
     removeProject(projectId);
-    setActiveSession(null);
     fetcher.submit(
       {},
       { method: "DELETE", action: `/api/projects/${projectId}`, encType: "application/json" }
     );
     if (projectId === activeProjectId) {
       navigate('/');
+    }
+  };
+
+  const handleDeleteTask = (taskId: string) => {
+    if (!activeProjectId) return;
+    taskFetcher.submit(
+      {},
+      {
+        method: "DELETE",
+        action: `/api/projects/${activeProjectId}/tasks/${taskId}`,
+      }
+    );
+    // If we're viewing the deleted task, navigate to project root
+    if (activeTaskId === taskId) {
+      navigate(`/projects/${activeProjectId}`);
     }
   };
 
@@ -178,19 +191,19 @@ export function Sidebar() {
         {!sidebarCollapsed && activeProjectId && (
           <div className="space-y-1">
             <div className="text-xs uppercase tracking-wide text-text-muted px-1">Tasks</div>
-            {projectSessions.length === 0 ? (
+            {tasks.length === 0 ? (
               <div className="text-sm text-text-muted px-1 py-2">No tasks yet in this project.</div>
             ) : (
-              projectSessions.map((session) => (
+              tasks.map((task) => (
                 <div
-                  key={session.id}
-                  className={`group flex items-center gap-2 px-2 py-2 rounded-lg border ${activeSessionId === session.id ? 'border-accent/40 bg-accent-muted' : 'border-border bg-surface-muted'}`}
+                  key={task.id}
+                  className={`group flex items-center gap-2 px-2 py-2 rounded-lg border ${activeTaskId === task.id ? 'border-accent/40 bg-accent-muted' : 'border-border bg-surface-muted'}`}
                 >
-                  <button className="flex-1 text-left min-w-0" onClick={() => navigate(`/projects/${activeProjectId}/sessions/${session.id}`)}>
-                    <div className="text-sm truncate">{session.title}</div>
-                    <div className="text-xs text-text-muted">{session.status}</div>
+                  <button className="flex-1 text-left min-w-0" onClick={() => navigate(`/projects/${activeProjectId}/tasks/${task.id}`)}>
+                    <div className="text-sm truncate">{task.title}</div>
+                    <div className="text-xs text-text-muted">{task.status}</div>
                   </button>
-                  <button className="w-6 h-6 rounded hover:bg-surface-hover text-error opacity-0 group-hover:opacity-100" onClick={() => deleteSession(session.id)}>
+                  <button className="w-6 h-6 rounded hover:bg-surface-hover text-error opacity-0 group-hover:opacity-100" onClick={() => handleDeleteTask(task.id)}>
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>

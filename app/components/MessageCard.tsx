@@ -1,10 +1,9 @@
-import { useState, isValidElement, cloneElement } from 'react';
+import { useState, useCallback, isValidElement, cloneElement } from 'react';
 import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
-import { useIPC } from '~/hooks/useIPC';
 import { useAppStore } from '~/lib/store';
 import {
   splitTextByFileMentions,
@@ -139,9 +138,8 @@ interface ContentBlockViewProps {
 }
 
 function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: ContentBlockViewProps) {
-  const { activeSessionId, sessions, workingDir } = useAppStore();
-  const activeSession = activeSessionId ? sessions.find(s => s.id === activeSessionId) : null;
-  const currentWorkingDir = activeSession?.cwd || workingDir;
+  const { workingDir } = useAppStore();
+  const currentWorkingDir = workingDir;
 
   const resolveFilePath = (value: string) => {
     if (/^(?:[A-Za-z]:\\|\\\\|\/)/.test(value)) {
@@ -601,8 +599,13 @@ function TodoWriteBlock({ block }: { block: ToolUseContent }) {
 
 // Inline AskUserQuestion component - displayed in message flow
 function AskUserQuestionBlock({ block }: { block: ToolUseContent }) {
-  const { respondToQuestion } = useIPC();
-  const { pendingQuestion } = useAppStore();
+  const { pendingQuestion, setPendingQuestion } = useAppStore();
+  const respondToQuestion = useCallback(
+    (_questionId: string, _answer: string) => {
+      setPendingQuestion(null);
+    },
+    [setPendingQuestion],
+  );
   const [selections, setSelections] = useState<Record<number, string[]>>({});
   const [submitted, setSubmitted] = useState(false);
 
@@ -758,29 +761,14 @@ function AskUserQuestionBlock({ block }: { block: ToolUseContent }) {
   );
 }
 
-function ToolResultBlock({ block, allBlocks, message }: { block: ToolResultContent; allBlocks?: ContentBlock[]; message?: Message }) {
-  const { traceStepsBySession } = useAppStore();
+function ToolResultBlock({ block, allBlocks }: { block: ToolResultContent; allBlocks?: ContentBlock[]; message?: Message }) {
   const [expanded, setExpanded] = useState(false);
 
-  // Try to find the tool name from trace steps
-  let toolName: string | undefined;
-
-  if (message?.sessionId) {
-    const steps = traceStepsBySession[message.sessionId] || [];
-    // Find the tool_call step that matches this tool_use_id
-    const toolCallStep = steps.find((s) => s.id === block.toolUseId && s.type === 'tool_call');
-    if (toolCallStep) {
-      toolName = toolCallStep.toolName;
-    }
-  }
-
-  // Fallback: try to find in allBlocks (for same message)
-  if (!toolName) {
-    const toolUseBlock = allBlocks?.find(
-      (b) => b.type === 'tool_use' && (b as ToolUseContent).id === block.toolUseId
-    ) as ToolUseContent | undefined;
-    toolName = toolUseBlock?.name;
-  }
+  // Try to find the tool name from allBlocks (same message)
+  const toolUseBlock = allBlocks?.find(
+    (b) => b.type === 'tool_use' && (b as ToolUseContent).id === block.toolUseId
+  ) as ToolUseContent | undefined;
+  const toolName = toolUseBlock?.name;
 
   // MCP tools start with mcp__ (double underscore)
   const isMCPTool = toolName?.startsWith('mcp__') || false;

@@ -54,11 +54,17 @@ describe("POST /api/chat/stream", () => {
   });
 
   it("returns 400 when no projectId and no active project", async () => {
-    // Clear active project so fallback doesn't kick in
-    const { upsertSettings } = await import(
-      "~/lib/db/queries/settings.server"
-    );
-    await upsertSettings({ activeProjectId: null });
+    // Mock getSettings to return no active project
+    const settingsMod = await import("~/lib/db/queries/settings.server");
+    const spy = vi.spyOn(settingsMod, "getSettings").mockResolvedValue({
+      activeProjectId: null,
+      model: "anthropic/claude-sonnet-4",
+      workingDir: "",
+      workingDirType: "local",
+      s3Uri: null,
+      agentBackend: "strands",
+      devLogsEnabled: false,
+    });
 
     const response = await action({
       request: makeRequest({ messages: [] }),
@@ -66,6 +72,7 @@ describe("POST /api/chat/stream", () => {
       context: {},
     });
     expect(response.status).toBe(400);
+    spy.mockRestore();
   });
 
   it("returns 405 for non-POST", async () => {

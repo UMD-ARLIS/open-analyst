@@ -1,6 +1,7 @@
+import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useIPC } from '~/hooks/useIPC';
-import type { PermissionRequest } from '~/lib/types';
+import { useAppStore } from '~/lib/store';
+import type { PermissionRequest, PermissionResult } from '~/lib/types';
 import {
   Shield,
   X,
@@ -14,7 +15,13 @@ interface PermissionDialogProps {
 
 export function PermissionDialog({ permission }: PermissionDialogProps) {
   const { t } = useTranslation();
-  const { respondToPermission } = useIPC();
+  const setPendingPermission = useAppStore((s) => s.setPendingPermission);
+  const respondToPermission = useCallback(
+    (_toolUseId: string, _result: PermissionResult) => {
+      setPendingPermission(null);
+    },
+    [setPendingPermission],
+  );
 
   const getToolDescription = (toolName: string): string => {
     const key = `permission.toolDescriptions.${toolName}`;

@@ -1,9 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { Outlet, useLoaderData, useRevalidator } from 'react-router';
 import { useAppStore } from '~/lib/store';
-import { useIPC } from '~/hooks/useIPC';
 import { Sidebar } from '~/components/Sidebar';
-import { ContextPanel } from '~/components/ContextPanel';
 import { PermissionDialog } from '~/components/PermissionDialog';
 import { ConfigModal } from '~/components/ConfigModal';
 import { Titlebar } from '~/components/Titlebar';
@@ -16,7 +14,6 @@ export { loader } from './_app.loader.server';
 
 export default function AppLayout() {
   const {
-    activeSessionId,
     pendingPermission,
     settings,
     showConfigModal,
@@ -30,7 +27,6 @@ export default function AppLayout() {
     setProjects,
     setActiveProjectId,
   } = useAppStore();
-  const { listSessions } = useIPC();
   const initialized = useRef(false);
   const loaderData = useLoaderData<typeof import('./_app.loader.server').loader>();
   const { revalidate } = useRevalidator();
@@ -49,8 +45,6 @@ export default function AppLayout() {
     if (initialized.current) return;
     initialized.current = true;
 
-    listSessions();
-
     const browserConfig = getBrowserConfig();
     setAppConfig(browserConfig);
   }, []);
@@ -66,7 +60,6 @@ export default function AppLayout() {
   const handleConfigSave = useCallback(
     async (newConfig: Partial<AppConfig>) => {
       const saved = saveBrowserConfig(newConfig);
-      // Only send the changed fields to the server config, not the full browser config
       await headlessSaveConfig(newConfig);
       setAppConfig(saved);
       revalidate();
@@ -88,8 +81,6 @@ export default function AppLayout() {
         <main className="flex-1 flex flex-col overflow-hidden bg-background">
           <Outlet />
         </main>
-
-        {activeSessionId && <ContextPanel />}
       </div>
 
       {pendingPermission && <PermissionDialog permission={pendingPermission} />}

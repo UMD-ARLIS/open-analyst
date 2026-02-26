@@ -1,9 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createTempDataDir, cleanupTempDataDir } from "../setup";
+import { createProject } from "~/lib/db/queries/projects.server";
 import { loader } from "../../../app/routes/_app.loader.server";
 
 describe("_app layout loader", () => {
   let tempDir: string;
+
+  beforeAll(async () => {
+    // Ensure at least one project exists for the loader to return
+    await createProject({ name: "Loader Test Project" });
+  });
 
   beforeEach(() => {
     tempDir = createTempDataDir();

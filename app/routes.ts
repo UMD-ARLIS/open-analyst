@@ -4,6 +4,7 @@ export default [
   layout("routes/_app.tsx", [
     index("routes/_app._index.tsx"),
     route("projects/:projectId", "routes/_app.projects.$projectId.tsx"),
+    route("projects/:projectId/tasks/:taskId", "routes/_app.projects.$projectId.tasks.$taskId.tsx"),
     route("projects/:projectId/sessions/:sessionId", "routes/_app.projects.$projectId.sessions.$sessionId.tsx"),
     route("settings", "routes/_app.settings.tsx"),
   ]),
@@ -38,6 +39,7 @@ export default [
     route("projects/:projectId/import/url", "routes/api.projects.$projectId.import.url.ts"),
     route("projects/:projectId/import/file", "routes/api.projects.$projectId.import.file.ts"),
     route("projects/:projectId/rag/query", "routes/api.projects.$projectId.rag.query.ts"),
+    route("projects/:projectId/tasks/:taskId", "routes/api.projects.$projectId.tasks.$taskId.ts"),
     route("projects/:projectId/runs", "routes/api.projects.$projectId.runs.ts"),
     route("projects/:projectId/runs/:runId", "routes/api.projects.$projectId.runs.$runId.ts"),
     route("models", "routes/api.models.ts"),
