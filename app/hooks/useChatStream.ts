@@ -8,6 +8,7 @@ interface SendMessageOpts {
   messages?: Array<{ role: string; content: string }>;
   collectionId?: string;
   deepResearch?: boolean;
+  skipUserMessage?: boolean;
 }
 
 export interface UseChatStreamReturn {
@@ -53,6 +54,7 @@ export function useChatStream(): UseChatStreamReturn {
               messages: opts.messages || [],
               collectionId: opts.collectionId,
               deepResearch: Boolean(opts.deepResearch),
+              skipUserMessage: Boolean(opts.skipUserMessage),
             }),
             signal: controller.signal,
           }

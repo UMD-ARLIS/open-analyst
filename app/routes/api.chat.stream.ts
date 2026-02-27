@@ -71,11 +71,13 @@ export async function action({ request }: Route.ActionArgs) {
     });
   }
 
-  // Persist user message
-  await createMessage(task.id, {
-    role: "user",
-    content: [{ type: "text", text: prompt }],
-  });
+  // Persist user message (unless already persisted, e.g. from task creation)
+  if (!body.skipUserMessage && prompt) {
+    await createMessage(task.id, {
+      role: "user",
+      content: [{ type: "text", text: prompt }],
+    });
+  }
 
   const stream = new ReadableStream({
     async start(controller) {

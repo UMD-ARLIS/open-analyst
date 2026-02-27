@@ -1,4 +1,5 @@
-import { useFetcher, useMatches, useNavigate, useParams } from "react-router";
+import { useEffect } from "react";
+import { useFetcher, useLocation, useNavigate, useParams } from "react-router";
 import { useAppStore } from "~/lib/store";
 import {
   Plus,
@@ -10,21 +11,20 @@ export function Sidebar() {
   const { sidebarCollapsed, isConfigured } = useAppStore();
   const navigate = useNavigate();
   const params = useParams();
-  const matches = useMatches();
+  const location = useLocation();
   const taskFetcher = useFetcher();
+  const taskListFetcher = useFetcher<{ tasks: Array<{ id: string; title: string; status: string; updatedAt: string | Date }> }>();
 
   const activeProjectId = params.projectId || null;
 
-  // Extract tasks from project route loader data
-  const projectMatch = matches.find(
-    (m) => m.id && m.pathname.includes("/projects/")
-  );
-  const tasks: Array<{
-    id: string;
-    title: string;
-    status: string;
-    updatedAt: string | Date;
-  }> = (projectMatch?.data as any)?.tasks || [];
+  // Load tasks whenever project changes, navigation occurs, or a delete completes
+  useEffect(() => {
+    if (activeProjectId) {
+      taskListFetcher.load(`/api/projects/${activeProjectId}/tasks`);
+    }
+  }, [activeProjectId, location.pathname, taskFetcher.data]);
+
+  const tasks = taskListFetcher.data?.tasks ?? [];
 
   // Determine active taskId from URL
   const activeTaskId = params.taskId || null;

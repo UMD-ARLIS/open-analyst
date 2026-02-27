@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useRevalidator, useSearchParams } from 'react-router';
 import { useAppStore } from '~/lib/store';
@@ -204,6 +204,28 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
   useEffect(() => {
     textareaRef.current?.focus();
   }, [taskId]);
+
+  // Auto-trigger streaming for pending tasks (navigated from dashboard)
+  const autoStreamedRef = useRef(false);
+  useEffect(() => {
+    if (autoStreamedRef.current || isStreaming || isSubmitting) return;
+    // If there's exactly one user message and no assistant messages, auto-stream
+    const hasOnlyUserMessage =
+      initialMessages.length === 1 &&
+      initialMessages[0].role === 'user';
+    if (!hasOnlyUserMessage) return;
+
+    autoStreamedRef.current = true;
+    const collectionId = activeCollectionByProject[projectId] || '';
+
+    sendMessage({
+      prompt: '',
+      projectId,
+      taskId,
+      collectionId,
+      skipUserMessage: true,
+    }).then(() => revalidate());
+  }, [taskId, initialMessages]);
 
   // Handle paste event for images
   const handlePaste = async (e: React.ClipboardEvent) => {

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   useFetcher,
   useLoaderData,
@@ -8,7 +8,6 @@ import {
   useSearchParams,
 } from "react-router";
 import { useAppStore } from "~/lib/store";
-import { useChatStream } from "~/hooks/useChatStream";
 import { ArrowRight, FolderOpen, FlaskConical, BookOpen } from "lucide-react";
 import { AlertDialog } from "./AlertDialog";
 
@@ -19,8 +18,8 @@ export function QuickStartDashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { workingDir, setWorkingDir, activeCollectionByProject, setProjectActiveCollection } =
     useAppStore();
-  const { sendMessage } = useChatStream();
   const fetcher = useFetcher();
+  const taskFetcher = useFetcher<{ taskId?: string }>();
 
   const projectId = params.projectId!;
 
@@ -36,26 +35,25 @@ export function QuickStartDashboard() {
   }> = (projectMatch?.data as any)?.tasks || [];
 
   const [prompt, setPrompt] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [showWorkdirDialog, setShowWorkdirDialog] = useState(false);
 
   const deepResearch = searchParams.get("deepResearch") === "true";
+  const isSubmitting = taskFetcher.state !== "idle";
 
-  const handleStartTask = async () => {
+  // Navigate once task is created — fetcher completion also triggers loader revalidation
+  useEffect(() => {
+    if (taskFetcher.data?.taskId) {
+      navigate(`/projects/${projectId}/tasks/${taskFetcher.data.taskId}`);
+    }
+  }, [taskFetcher.data, navigate, projectId]);
+
+  const handleStartTask = () => {
     const text = prompt.trim();
     if (!text || isSubmitting) return;
-    setIsSubmitting(true);
-    try {
-      const result = await sendMessage(text, {
-        projectId,
-        deepResearch,
-      });
-      if (result?.taskId) {
-        navigate(`/projects/${projectId}/tasks/${result.taskId}`);
-      }
-    } finally {
-      setIsSubmitting(false);
-    }
+    taskFetcher.submit(
+      { projectId, prompt: text, deepResearch },
+      { method: "POST", action: "/api/tasks/create", encType: "application/json" }
+    );
   };
 
   const toggleDeepResearch = () => {
