@@ -448,7 +448,7 @@
           "type": "varchar(255)",
           "primaryKey": false,
           "notNull": false,
-          "default": "'anthropic/claude-sonnet-4'"
+          "default": "''"
         },
         "working_dir": {
           "name": "working_dir",

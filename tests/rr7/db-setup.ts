@@ -86,7 +86,7 @@ CREATE TABLE settings (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id varchar(255) NOT NULL,
   active_project_id uuid,
-  model varchar(255) DEFAULT 'anthropic/claude-sonnet-4',
+  model varchar(255) DEFAULT '',
   working_dir text,
   working_dir_type varchar(20) DEFAULT 'local',
   s3_uri text,

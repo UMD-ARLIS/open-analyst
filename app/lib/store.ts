@@ -114,7 +114,7 @@ export const useAppStore = create<AppState>((set) => ({
   pendingQuestion: null,
   settings: defaultSettings,
   appConfig: null,
-  isConfigured: false,
+  isConfigured: true,
   showConfigModal: false,
   workingDir: null,
   projects: [],

@@ -14,7 +14,7 @@ export interface SettingsData {
 
 const DEFAULTS: SettingsData = {
   activeProjectId: null,
-  model: "anthropic/claude-sonnet-4",
+  model: "",
   workingDir: null,
   workingDirType: "local",
   s3Uri: null,

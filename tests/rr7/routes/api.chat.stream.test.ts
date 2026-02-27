@@ -58,7 +58,7 @@ describe("POST /api/chat/stream", () => {
     const settingsMod = await import("~/lib/db/queries/settings.server");
     const spy = vi.spyOn(settingsMod, "getSettings").mockResolvedValue({
       activeProjectId: null,
-      model: "anthropic/claude-sonnet-4",
+      model: "bedrock-claude-opus-4.6",
       workingDir: "",
       workingDirType: "local",
       s3Uri: null,

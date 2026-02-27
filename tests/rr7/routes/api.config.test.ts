@@ -14,7 +14,7 @@ describe("api.config", () => {
 
   it("POST saves config", async () => {
     const args = createMockActionArgs("POST", "/api/config", {
-      model: "anthropic/claude-sonnet-4",
+      model: "bedrock-claude-opus-4.6",
       agentBackend: "strands",
     });
     const response = await action(args as never);
@@ -23,6 +23,6 @@ describe("api.config", () => {
       config: Record<string, unknown>;
     };
     expect(data.success).toBe(true);
-    expect(data.config.model).toBe("anthropic/claude-sonnet-4");
+    expect(data.config.model).toBe("bedrock-claude-opus-4.6");
   });
 });

@@ -100,7 +100,7 @@ def create_agent(payload: dict) -> Agent:
             "base_url": settings.litellm_base_url,
             "use_litellm_proxy": True,
         },
-        model_id=payload.get("model_id", "anthropic/claude-sonnet-4"),
+        model_id=payload["model_id"],
     )
 
     workspace_dir = payload.get("working_dir", ".")

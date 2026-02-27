@@ -29,7 +29,16 @@ import {
   Clock,
   Plug,
   FileText,
+  Sparkles,
 } from 'lucide-react';
+
+function formatRelativeTime(ts: number): string {
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return 'just now';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return new Date(ts).toLocaleDateString();
+}
 
 interface MessageCardProps {
   message: Message;
@@ -66,54 +75,67 @@ export function MessageCard({ message, isStreaming }: MessageCardProps) {
   return (
     <div className="animate-fade-in">
       {isUser ? (
-        // User message - compact styling with smaller padding and radius
-        <div className="flex items-start gap-2 justify-end group">
-        <div
-          className={`message-user px-4 py-2.5 max-w-[80%] break-words ${
-            isQueued ? 'opacity-70 border-dashed' : ''
-          } ${isCancelled ? 'opacity-60' : ''}`}
-        >
-          {isQueued && (
-            <div className="mb-1 flex items-center gap-1 text-[11px] text-text-muted">
-              <Clock className="w-3 h-3" />
-              <span>Queued</span>
-            </div>
-          )}
-          {isCancelled && (
-            <div className="mb-1 flex items-center gap-1 text-[11px] text-text-muted">
-              <XCircle className="w-3 h-3" />
-              <span>Canceled</span>
-            </div>
-          )}
-          {contentBlocks.length === 0 ? (
-            <span className="text-text-muted italic">Empty message</span>
-          ) : (
-            contentBlocks.map((block, index) => (
-              <ContentBlockView
-                key={index}
-                block={block}
-                isUser={isUser}
-                isStreaming={isStreaming}
-              />
-            ))
-          )}
-          </div>
-          <button
-            onClick={handleCopy}
-            className="mt-1 w-6 h-6 flex items-center justify-center rounded-md bg-surface-muted hover:bg-surface-active transition-all opacity-0 group-hover:opacity-100 flex-shrink-0"
-            title="Copy message"
+        // User message
+        <div className="space-y-1">
+          <div className="text-[11px] text-text-muted text-right pr-1">You</div>
+          <div className="flex items-start gap-2 justify-end group">
+          <div
+            className={`message-user px-4 py-2.5 max-w-[80%] break-words ${
+              isQueued ? 'opacity-70 border-dashed' : ''
+            } ${isCancelled ? 'opacity-60' : ''}`}
           >
-            {copied ? (
-              <Check className="w-3 h-3 text-success" />
-            ) : (
-              <Copy className="w-3 h-3 text-text-muted" />
+            {isQueued && (
+              <div className="mb-1 flex items-center gap-1 text-[11px] text-text-muted">
+                <Clock className="w-3 h-3" />
+                <span>Queued</span>
+              </div>
             )}
-          </button>
+            {isCancelled && (
+              <div className="mb-1 flex items-center gap-1 text-[11px] text-text-muted">
+                <XCircle className="w-3 h-3" />
+                <span>Canceled</span>
+              </div>
+            )}
+            {contentBlocks.length === 0 ? (
+              <span className="text-text-muted italic">Empty message</span>
+            ) : (
+              contentBlocks.map((block, index) => (
+                <ContentBlockView
+                  key={index}
+                  block={block}
+                  isUser={isUser}
+                  isStreaming={isStreaming}
+                />
+              ))
+            )}
+          </div>
+            <button
+              onClick={handleCopy}
+              className="mt-1 w-6 h-6 flex items-center justify-center rounded-md bg-surface-muted hover:bg-surface-active transition-all opacity-0 group-hover:opacity-100 flex-shrink-0"
+              title="Copy message"
+            >
+              {copied ? (
+                <Check className="w-3 h-3 text-success" />
+              ) : (
+                <Copy className="w-3 h-3 text-text-muted" />
+              )}
+            </button>
+          </div>
+          {message.timestamp && (
+            <div className="text-[11px] text-text-muted text-right pr-1">{formatRelativeTime(message.timestamp)}</div>
+          )}
         </div>
       ) : (
-        // Assistant message
+        // Assistant message — skip empty text blocks
         <div className="space-y-3">
-          {contentBlocks.map((block, index) => (
+          <div className="flex items-center gap-1.5 text-[11px] text-text-muted">
+            <Sparkles className="w-3 h-3" />
+            <span>Assistant</span>
+            {message.timestamp && <span>· {formatRelativeTime(message.timestamp)}</span>}
+          </div>
+          {contentBlocks
+            .filter((block) => block.type !== 'text' || (block as { text?: string }).text)
+            .map((block, index) => (
             <ContentBlockView
               key={index}
               block={block}
@@ -195,7 +217,7 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
       const text = textBlock.text || '';
       
       if (!text) {
-        return <span className="text-text-muted italic">(empty text)</span>;
+        return null;
       }
       
       // Simple text display for user messages, Markdown for assistant
@@ -790,7 +812,7 @@ function ToolResultBlock({ block, allBlocks }: { block: ToolResultContent; allBl
       }
       // Generic error
       const firstLine = content.split('\n')[0];
-      return `✗ ${firstLine.substring(0, 60)}${firstLine.length > 60 ? '...' : ''}`;
+      return `✗ ${firstLine.substring(0, 60)}${firstLine.length > 60 ? '\u2026' : ''}`;
     }
 
     // Success cases - try to extract meaningful info
@@ -800,7 +822,7 @@ function ToolResultBlock({ block, allBlocks }: { block: ToolResultContent; allBl
       const urlMatch = content.match(/Successfully navigated to (.+)/);
       if (urlMatch) {
         const url = urlMatch[1].trim();
-        return `✓ Navigated to ${url.length > 50 ? url.substring(0, 50) + '...' : url}`;
+        return `✓ Navigated to ${url.length > 50 ? url.substring(0, 50) + '\u2026' : url}`;
       }
       return '✓ Navigation successful';
     }
@@ -821,7 +843,7 @@ function ToolResultBlock({ block, allBlocks }: { block: ToolResultContent; allBl
       const textMatch = content.match(/Successfully typed "(.+?)"/);
       if (textMatch) {
         const text = textMatch[1];
-        return `✓ Typed: ${text.length > 30 ? text.substring(0, 30) + '...' : text}`;
+        return `✓ Typed: ${text.length > 30 ? text.substring(0, 30) + '\u2026' : text}`;
       }
       return '✓ Text entered';
     }

@@ -15,7 +15,7 @@ const DEFAULT_CONFIG: HeadlessConfig = {
   apiKey: "",
   baseUrl: "https://api.openai.com/v1",
   bedrockRegion: "us-east-1",
-  model: "anthropic/claude-sonnet-4",
+  model: "",
   openaiMode: "chat",
   workingDir: process.cwd(),
   workingDirType: "local",

@@ -8,6 +8,7 @@ import {
 } from "~/lib/db/queries/tasks.server";
 import { createAgentProvider } from "~/lib/agent/index.server";
 import { getProjectWorkspace } from "~/lib/filesystem.server";
+import { resolveModel } from "~/lib/litellm.server";
 import type { HeadlessConfig } from "~/lib/types";
 import type { Route } from "./+types/api.chat.stream";
 
@@ -32,13 +33,16 @@ export async function action({ request }: Route.ActionArgs) {
     );
   }
 
+  // Validate model against LiteLLM before sending to agent
+  const model = await resolveModel(settings.model);
+
   // Build a minimal HeadlessConfig for the agent provider
   const cfg: HeadlessConfig = {
     provider: "openai",
     apiKey: "",
     baseUrl: "",
     bedrockRegion: "us-east-1",
-    model: settings.model,
+    model,
     openaiMode: "chat",
     workingDir: settings.workingDir || process.cwd(),
     workingDirType: settings.workingDirType,

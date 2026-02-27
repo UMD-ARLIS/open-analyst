@@ -253,6 +253,7 @@ export function ContextPanel() {
           onClick={toggleContextPanel}
           className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors"
           title="Expand panel"
+          aria-label="Expand panel"
         >
           <ChevronLeft className="w-4 h-4" />
         </button>
@@ -267,6 +268,7 @@ export function ContextPanel() {
           onClick={toggleContextPanel}
           className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors"
           title="Collapse panel"
+          aria-label="Collapse panel"
         >
           <ChevronRight className="w-4 h-4" />
         </button>

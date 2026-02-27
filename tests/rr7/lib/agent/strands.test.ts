@@ -16,7 +16,7 @@ const baseConfig: HeadlessConfig = {
   apiKey: "",
   baseUrl: "",
   bedrockRegion: "",
-  model: "anthropic/claude-sonnet-4",
+  model: "bedrock-claude-opus-4.6",
   openaiMode: "chat",
   workingDir: "/tmp",
   workingDirType: "local",
@@ -81,7 +81,7 @@ describe("StrandsProvider", () => {
     expect(body.collection_id).toBe("col-1");
     expect(body.collection_name).toBe("My Collection");
     expect(body.deep_research).toBe(true);
-    expect(body.model_id).toBe("anthropic/claude-sonnet-4");
+    expect(body.model_id).toBe("bedrock-claude-opus-4.6");
     expect(body.litellm_base_url).toBe("http://test-gateway:4000");
     expect(body.litellm_api_key).toBe("test-key-123");
   });

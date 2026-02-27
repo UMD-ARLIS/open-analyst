@@ -108,7 +108,7 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
                 type="text"
                 value={customModel}
                 onChange={(e) => setCustomModel(e.target.value)}
-                placeholder="Enter model ID (e.g. anthropic/claude-sonnet-4)"
+                placeholder="Enter custom model ID"
                 className="w-full px-4 py-3 rounded-xl bg-background border border-border text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
               />
             ) : (

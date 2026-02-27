@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useFetcher } from 'react-router';
+import { useFetcher, useSearchParams } from 'react-router';
 import {
   AlertCircle,
   CheckCircle,
@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAppStore } from '~/lib/store';
+import { AlertDialog } from './AlertDialog';
 import type { AppConfig, Skill } from '~/lib/types';
 import {
   getBrowserConfig,
@@ -86,11 +87,25 @@ const TABS: Array<{ id: TabId; label: string; description: string; icon: any }> 
 ];
 
 export function SettingsPanel({ isOpen, onClose, initialTab = 'api', initialData, mode = 'modal' }: SettingsPanelProps) {
-  const [activeTab, setActiveTab] = useState<TabId>(initialTab);
+  // In page mode, persist active tab in URL; in modal mode, use local state
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [localTab, setLocalTab] = useState<TabId>(initialTab);
+
+  const activeTab: TabId = mode === 'page'
+    ? (searchParams.get('tab') as TabId) || initialTab
+    : localTab;
+
+  const setActiveTab = (tab: TabId) => {
+    if (mode === 'page') {
+      setSearchParams({ tab }, { replace: true });
+    } else {
+      setLocalTab(tab);
+    }
+  };
 
   useEffect(() => {
-    if (isOpen) setActiveTab(initialTab);
-  }, [initialTab, isOpen]);
+    if (isOpen && mode !== 'page') setLocalTab(initialTab);
+  }, [initialTab, isOpen, mode]);
 
   if (!isOpen) return null;
 
@@ -115,7 +130,7 @@ export function SettingsPanel({ isOpen, onClose, initialTab = 'api', initialData
       <div className="flex-1 overflow-y-auto p-5">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold">{TABS.find((tab) => tab.id === activeTab)?.label}</h3>
-          <button onClick={onClose} className="p-2 rounded hover:bg-surface-hover">
+          <button onClick={onClose} className="p-2 rounded hover:bg-surface-hover" aria-label="Close settings">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -159,9 +174,12 @@ function APISettingsTab({ currentModel }: { currentModel?: string }) {
     headlessGetModels()
       .then((list) => {
         setModels(list);
-        // Only auto-select first model if we have no model at all
-        if (list.length > 0 && !model) {
-          setModel(list[0].id);
+        if (list.length > 0) {
+          // Auto-select first model if none set or if current model no longer exists
+          const currentValid = model && list.some((m) => m.id === model);
+          if (!currentValid) {
+            setModel(list[0].id);
+          }
         }
       })
       .catch((e) => setError(`Failed to load models: ${e instanceof Error ? e.message : String(e)}`))
@@ -305,9 +323,18 @@ function CredentialsTab({ initialItems }: { initialItems?: any[] }) {
     <div className="space-y-3">
       {error && <Banner tone="error" text={error} />}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-        <input className="input" placeholder="Name" value={draft.name || ''} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} />
-        <input className="input" placeholder="Username" value={draft.username || ''} onChange={(e) => setDraft((d) => ({ ...d, username: e.target.value }))} />
-        <input className="input" placeholder="Secret/Password" type="password" value={draft.password || ''} onChange={(e) => setDraft((d) => ({ ...d, password: e.target.value }))} />
+        <label className="text-sm">
+          <span className="sr-only">Credential name</span>
+          <input className="input" placeholder="Name" value={draft.name || ''} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} />
+        </label>
+        <label className="text-sm">
+          <span className="sr-only">Username</span>
+          <input className="input" placeholder="Username" value={draft.username || ''} onChange={(e) => setDraft((d) => ({ ...d, username: e.target.value }))} />
+        </label>
+        <label className="text-sm">
+          <span className="sr-only">Secret or password</span>
+          <input className="input" placeholder="Secret/Password" type="password" value={draft.password || ''} autoComplete="new-password" onChange={(e) => setDraft((d) => ({ ...d, password: e.target.value }))} />
+        </label>
       </div>
       <button className="btn btn-primary" onClick={save}>{editingId ? 'Update' : 'Save'} Credential</button>
 
@@ -430,6 +457,7 @@ function ConnectorsTab({ initialServers, initialPresets }: { initialServers?: an
 function SkillsTab({ initialSkills }: { initialSkills?: any[] }) {
   const [skills, setSkills] = useState<Skill[]>(initialSkills as Skill[] || []);
   const [error, setError] = useState('');
+  const [showInstallDialog, setShowInstallDialog] = useState(false);
   const fetcher = useFetcher();
 
   const load = async () => {
@@ -450,8 +478,8 @@ function SkillsTab({ initialSkills }: { initialSkills?: any[] }) {
     }
   }, [fetcher.state, fetcher.data]);
 
-  const install = async () => {
-    const folderPath = window.prompt('Skill folder path (must contain SKILL.md):');
+  const install = async (folderPath?: string) => {
+    setShowInstallDialog(false);
     if (!folderPath?.trim()) return;
     const validation = await headlessValidateSkillPath(folderPath.trim());
     if (!validation.valid) {
@@ -484,7 +512,17 @@ function SkillsTab({ initialSkills }: { initialSkills?: any[] }) {
   return (
     <div className="space-y-3">
       {error && <Banner tone="error" text={error} />}
-      <button className="btn btn-primary" onClick={() => void install()}>Install Skill From Path</button>
+      <button className="btn btn-primary" onClick={() => setShowInstallDialog(true)}>Install Skill From Path</button>
+      {showInstallDialog && (
+        <AlertDialog
+          open={showInstallDialog}
+          title="Install skill"
+          inputLabel="Skill folder path (must contain SKILL.md)"
+          confirmLabel="Install"
+          onConfirm={(val) => void install(val)}
+          onCancel={() => setShowInstallDialog(false)}
+        />
+      )}
       <div className="space-y-2">
         {skills.map((skill) => (
           <div key={skill.id} className="p-3 rounded border border-border bg-surface-muted flex items-center justify-between gap-2">

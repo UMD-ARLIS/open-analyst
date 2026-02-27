@@ -39,8 +39,15 @@ export default function AppLayout() {
       setActiveProjectId(loaderData.activeProjectId);
       setWorkingDir(loaderData.workingDir);
       setIsConfigured(loaderData.isConfigured);
+      // Keep appConfig.model in sync with the server-resolved model
+      if (loaderData.model) {
+        const current = useAppStore.getState().appConfig;
+        if (current && current.model !== loaderData.model) {
+          setAppConfig({ ...current, model: loaderData.model });
+        }
+      }
     }
-  }, [loaderData, setProjects, setActiveProjectId, setWorkingDir, setIsConfigured]);
+  }, [loaderData, setProjects, setActiveProjectId, setWorkingDir, setIsConfigured, setAppConfig]);
 
   // Revalidate loader data on navigation (handles popstate/back-nav)
   useEffect(() => {
@@ -52,7 +59,11 @@ export default function AppLayout() {
     initialized.current = true;
 
     const browserConfig = getBrowserConfig();
-    setAppConfig(browserConfig);
+    // Loader resolves model against LiteLLM — always use it over browser config
+    setAppConfig({
+      ...browserConfig,
+      model: loaderData?.model || browserConfig.model,
+    });
   }, []);
 
   useEffect(() => {

@@ -191,10 +191,16 @@
 
   /* Message bubbles */
   .message-user {
-    @apply bg-surface rounded-2xl;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    @apply rounded-2xl;
+    background: rgba(249, 115, 22, 0.08);
+    border: 1px solid rgba(249, 115, 22, 0.15);
     width: fit-content;
     margin-left: auto;
+  }
+
+  .light .message-user {
+    background: rgba(249, 115, 22, 0.06);
+    border: 1px solid rgba(249, 115, 22, 0.18);
   }
 
   .message-assistant {
@@ -299,6 +305,11 @@
 
   .prose-chat .footnotes p {
     margin: 0.25rem 0 0;
+  }
+
+  /* Loading skeleton */
+  .skeleton {
+    @apply rounded bg-surface-muted animate-pulse;
   }
 
   /* Code block */

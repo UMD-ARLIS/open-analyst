@@ -13,7 +13,7 @@ const defaultBrowserConfig: AppConfig = {
   provider: 'openrouter',
   apiKey: '',
   baseUrl: '',
-  model: 'anthropic/claude-sonnet-4',
+  model: '',
   isConfigured: false,
 };
 

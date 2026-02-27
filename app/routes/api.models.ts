@@ -1,26 +1,11 @@
-import { env } from "~/lib/env.server";
+import { fetchModels } from "~/lib/litellm.server";
 
 export async function loader() {
-  const url = `${env.LITELLM_BASE_URL}/v1/models`;
-  const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${env.LITELLM_API_KEY}`,
-    },
-  });
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    return Response.json(
-      { error: `Gateway error: ${res.status} ${body}` },
-      { status: res.status }
-    );
+  try {
+    const models = await fetchModels();
+    return Response.json({ models });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return Response.json({ error: msg }, { status: 502 });
   }
-
-  const data = (await res.json()) as { data?: Array<{ id: string }> };
-  const models = (data.data || []).map((m) => ({
-    id: m.id,
-    name: m.id,
-  }));
-
-  return Response.json({ models });
 }

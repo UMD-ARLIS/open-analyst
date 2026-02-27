@@ -28,14 +28,14 @@ describe("settings queries", () => {
       .insert(settings)
       .values({
         userId: "test-user",
-        model: "anthropic/claude-sonnet-4",
+        model: "bedrock-claude-opus-4.6",
         agentBackend: "strands",
       })
       .returning();
 
     expect(row).toBeDefined();
     expect(row.userId).toBe("test-user");
-    expect(row.model).toBe("anthropic/claude-sonnet-4");
+    expect(row.model).toBe("bedrock-claude-opus-4.6");
     expect(row.devLogsEnabled).toBe(false);
   });
 

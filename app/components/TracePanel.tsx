@@ -136,7 +136,7 @@ function TraceStepCard({ step, index }: TraceStepCardProps) {
           {step.content && (
             <p className="text-xs text-text-muted mt-1 line-clamp-2">
               {step.content.slice(0, 100)}
-              {step.content.length > 100 && '...'}
+              {step.content.length > 100 && '\u2026'}
             </p>
           )}
 
@@ -169,7 +169,7 @@ function TraceStepCard({ step, index }: TraceStepCardProps) {
           </summary>
           <pre className="text-xs bg-background rounded p-2 mt-1 overflow-x-auto whitespace-pre-wrap">
             {step.toolOutput.slice(0, 300)}
-            {step.toolOutput.length > 300 && '...'}
+            {step.toolOutput.length > 300 && '\u2026'}
           </pre>
         </details>
       )}

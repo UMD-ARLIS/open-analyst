@@ -158,9 +158,7 @@ export const settings = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     userId: varchar("user_id", { length: 255 }).notNull(),
     activeProjectId: uuid("active_project_id"),
-    model: varchar("model", { length: 255 }).default(
-      "anthropic/claude-sonnet-4"
-    ),
+    model: varchar("model", { length: 255 }).default(""),
     workingDir: text("working_dir"),
     workingDirType: varchar("working_dir_type", { length: 20 }).default(
       "local"
