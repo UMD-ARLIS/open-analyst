@@ -17,14 +17,54 @@ Use this skill when the user wants to:
 
 ## Workflow Overview
 
-1. **Understand the topic** — Read the user's notes, research, or topic description
-2. **Formulate the KIQ** — Craft a two-part Key Intelligence Question
-3. **Draft the content** — Write the BLUF, "What" section, "So What" section, and endnotes following IC analytic writing standards
-4. **Read the analytic writing guide** — Read `references/analytic-writing-guide.md` for detailed standards on KIQs, BLUFs, argumentation, and the four-sweeps review
-5. **Read the template spec** — Read `references/template-spec.md` for exact formatting details
+1. **Gather input** — Read all available source material (see "Working with Input Files" below)
+2. **Read the analytic writing guide** — Read `references/analytic-writing-guide.md` for detailed standards on KIQs, BLUFs, argumentation, and the four-sweeps review
+3. **Read the template spec** — Read `references/template-spec.md` for exact formatting details
+4. **Formulate the KIQ** — Craft a two-part Key Intelligence Question based on the source material
+5. **Draft the content** — Write the BLUF, "What" section, "So What" section, and endnotes following IC analytic writing standards
 6. **Generate the document** — Run `scripts/generate_bulletin.py` to clone the template and inject content
 7. **Self-review using the four sweeps** — Apply the four-sweeps checklist to verify quality
 8. **Visual QA** — Convert to PDF/images and visually inspect
+
+## Working with Input Files
+
+The skill can work from several kinds of input. Before drafting any content, check for source material in the user's workspace:
+
+### Automatic Source Discovery
+If the user says something like "write a bulletin from the research in this folder" or "use my notes to create a bulletin," scan the working directory (and common subdirectories like `research/`, `notes/`, `sources/`) for relevant files:
+
+```bash
+# Look for markdown, text, docx, and PDF files that might contain research
+find <workspace> -maxdepth 2 -type f \( -name "*.md" -o -name "*.txt" -o -name "*.docx" -o -name "*.pdf" \) | head -20
+```
+
+Read each file to understand the available source material before formulating the KIQ.
+
+### Supported Input Formats
+- **Markdown files (.md)** — Read directly. These often contain structured research notes with sources, data points, and analysis. Look for files named like `source-*.md`, `notes-*.md`, `research-*.md`.
+- **Text files (.txt)** — Read directly. May contain raw notes or outlines.
+- **Word documents (.docx)** — Extract text using `python -m markitdown file.docx` or unpack and read XML.
+- **PDFs (.pdf)** — Extract text using `python -m markitdown file.pdf`.
+- **Inline prompt text** — The user may also provide notes directly in their message.
+
+### How to Use Source Material
+When working from files:
+1. **Read all source files first** — understand the full scope of available evidence
+2. **Identify the strongest data points** — look for specific dates, numbers, named actors, institutional sources
+3. **Map sources to the analytic story arc** — which data supports "What" vs "So What"
+4. **Construct endnote citations from source metadata** — use the source name, author, date, and URL from the file headers to build Chicago-style citations
+5. **Synthesize, don't just reorganize** — the bulletin should be an analytic product with original judgments, not a summary of the source files. Apply probabilistic language and make assessments based on the evidence.
+
+### When sources have citation metadata
+If research files include structured headers (e.g., Source, URL, Author, Date), use that metadata to construct proper Chicago Manual of Style endnotes. For example, a file header like:
+```
+**Source**: CNA, September 2025
+**URL**: https://www.cna.org/...
+```
+becomes an endnote like:
+```
+CNA, "China Readies Drone Swarms for Future War" (Arlington, VA: CNA, September 2025).
+```
 
 ## Step 1: Formulate the Key Intelligence Question (KIQ)
 
@@ -38,12 +78,18 @@ Every bulletin starts with a KIQ. Read `references/analytic-writing-guide.md` fo
 
 ## Step 2: Draft the Content
 
+**CRITICAL WRITING RULES — apply to ALL text in the bulletin:**
+- **Never use em dashes (—), en dashes (–), or double hyphens (--).**  Use commas, semicolons, or restructure the sentence instead. The `generate_bulletin.py` script will also strip these automatically, but the content itself should not contain them.
+- **Never include inline superscript citation numbers (¹²³) or bracketed references ([1]) in bullet text.** The script adds endnote references automatically. Including them in the text causes duplicate citations.
+- **Every analytic judgment must be supported by the source evidence.** Do not upgrade the strength of a source's claim. If a source says "close to matching," the bulletin must not say "outpacing" or "surpassing." Use the source's own framing as a ceiling for your assessment.
+
 The bulletin has a specific structure. Read `references/template-spec.md` for the exact layout, but in brief:
 
 ### Title
 - Analytic, not descriptive — conveys the key judgment, not just the topic
 - Uses an active verb and names the key actor or trend
-- Bad: "China's Drone Program" / Good: "China's Embodied AI Ambitions Probably Outpace Fielded Capabilities"
+- **Every claim in the title must be directly supported by the source evidence.** Do not make comparative claims (e.g., "faster than the US") unless sources explicitly support that comparison. If sources say "close to matching," do not upgrade that to "outpacing."
+- Bad: "China's Drone Program" / Good: "China's Autonomous UAV Swarm Program Likely Approaches Operational Maturity"
 
 ### Section 1: "What" paragraph
 - **Lead sentence (BLUF)**: Bold+italic, one sentence, directly answers the KIQ. Uses probabilistic language (probably, likely, almost certainly). Never a statement of fact.
