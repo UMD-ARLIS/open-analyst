@@ -2,9 +2,6 @@ import { eq, desc } from "drizzle-orm";
 import { db, DEV_USER_ID } from "../index.server";
 import {
   projects,
-  collections,
-  documents,
-  tasks,
   type Project,
 } from "../schema";
 

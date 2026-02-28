@@ -1,5 +1,4 @@
 import { useState, useCallback, isValidElement, cloneElement } from 'react';
-import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
@@ -407,7 +406,6 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
 }
 
 function ToolUseBlock({ block }: { block: ToolUseContent }) {
-  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
 
   // Check if this is AskUserQuestion - render inline question UI
@@ -499,7 +497,7 @@ function ToolUseBlock({ block }: { block: ToolUseContent }) {
       {expanded && (
         <div className="p-4 space-y-4 bg-surface">
           <div>
-            <p className="text-xs font-medium text-text-muted mb-2">{t('messageCard.request')}</p>
+            <p className="text-xs font-medium text-text-muted mb-2">Request</p>
             <pre className="code-block text-xs">
               {JSON.stringify(block.input, null, 2)}
             </pre>

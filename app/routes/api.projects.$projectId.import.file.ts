@@ -85,7 +85,8 @@ export async function action({ request, params }: Route.ActionArgs) {
     (mimeType.includes("pdf") || filename.toLowerCase().endsWith(".pdf"))
   ) {
     try {
-      const pdfParse = (await import("pdf-parse")).default;
+      const pdfParseModule = await import("pdf-parse");
+      const pdfParse = (pdfParseModule as any).default ?? pdfParseModule;
       const parsed = await pdfParse(buffer);
       content = String(parsed.text || "")
         .replace(/\s+/g, " ")

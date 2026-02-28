@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import {
   useFetcher,
-  useLoaderData,
   useMatches,
   useNavigate,
   useParams,
@@ -16,7 +15,7 @@ export function QuickStartDashboard() {
   const params = useParams();
   const matches = useMatches();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { workingDir, setWorkingDir, activeCollectionByProject, setProjectActiveCollection } =
+  const { workingDir, setWorkingDir } =
     useAppStore();
   const fetcher = useFetcher();
   const taskFetcher = useFetcher<{ taskId?: string }>();

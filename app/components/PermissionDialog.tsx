@@ -1,5 +1,4 @@
 import { useCallback } from 'react';
-import { useTranslation } from 'react-i18next';
 import { useAppStore } from '~/lib/store';
 import type { PermissionRequest, PermissionResult } from '~/lib/types';
 import {
@@ -14,7 +13,6 @@ interface PermissionDialogProps {
 }
 
 export function PermissionDialog({ permission }: PermissionDialogProps) {
-  const { t } = useTranslation();
   const setPendingPermission = useAppStore((s) => s.setPendingPermission);
   const respondToPermission = useCallback(
     (_toolUseId: string, _result: PermissionResult) => {
@@ -24,14 +22,7 @@ export function PermissionDialog({ permission }: PermissionDialogProps) {
   );
 
   const getToolDescription = (toolName: string): string => {
-    const key = `permission.toolDescriptions.${toolName}`;
-    const translated = t(key);
-    // If translation exists (not the same as key), return it
-    if (translated !== key) {
-      return translated;
-    }
-    // Otherwise fallback to default message
-    return t('permission.useTool', { toolName });
+    return `Use ${toolName}`;
   };
 
   const isHighRisk = [
@@ -60,7 +51,7 @@ export function PermissionDialog({ permission }: PermissionDialogProps) {
           
           <div className="flex-1">
             <h2 className="text-lg font-semibold text-text-primary">
-              {t('permission.permissionRequired')}
+              Permission Required
             </h2>
             <p className="text-sm text-text-secondary mt-1">
               {getToolDescription(permission.toolName)}
@@ -71,12 +62,12 @@ export function PermissionDialog({ permission }: PermissionDialogProps) {
         {/* Tool Details */}
         <div className="mt-4 p-4 bg-surface-muted rounded-xl">
           <div className="flex items-center gap-2 mb-2">
-            <span className="text-sm font-medium text-text-primary">{t('permission.tool')}</span>
+            <span className="text-sm font-medium text-text-primary">Tool</span>
             <span className="font-mono text-accent text-sm">{permission.toolName}</span>
           </div>
           
           <div className="text-sm text-text-secondary">
-            <span className="font-medium text-text-primary">{t('permission.input')}</span>
+            <span className="font-medium text-text-primary">Input</span>
             <pre className="mt-1 text-xs code-block max-h-32 overflow-auto">
               {JSON.stringify(permission.input, null, 2)}
             </pre>
@@ -89,7 +80,7 @@ export function PermissionDialog({ permission }: PermissionDialogProps) {
             <div className="flex items-start gap-2">
               <AlertTriangle className="w-4 h-4 text-warning mt-0.5 flex-shrink-0" />
               <p className="text-sm text-warning">
-                {t('permission.warning')}
+                This action requires your approval
               </p>
             </div>
           </div>
@@ -102,7 +93,7 @@ export function PermissionDialog({ permission }: PermissionDialogProps) {
             className="flex-1 btn btn-secondary"
           >
             <X className="w-4 h-4" />
-            {t('permission.deny')}
+            Deny
           </button>
           
           <button
@@ -110,7 +101,7 @@ export function PermissionDialog({ permission }: PermissionDialogProps) {
             className="flex-1 btn btn-primary"
           >
             <Check className="w-4 h-4" />
-            {t('permission.allow')}
+            Allow
           </button>
         </div>
 
@@ -119,7 +110,7 @@ export function PermissionDialog({ permission }: PermissionDialogProps) {
           onClick={() => respondToPermission(permission.toolUseId, 'allow_always')}
           className="w-full mt-2 btn btn-ghost text-sm"
         >
-          {t('permission.alwaysAllow')}
+          Always Allow
         </button>
       </div>
     </div>

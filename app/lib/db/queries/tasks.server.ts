@@ -105,7 +105,7 @@ export async function createMessage(
   };
   if (input.id) values.id = input.id;
 
-  const [message] = await db.insert(messages).values(values).returning();
+  const [message] = await db.insert(messages).values(values as typeof messages.$inferInsert).returning();
   return message;
 }
 

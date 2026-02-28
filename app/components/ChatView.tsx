@@ -1,5 +1,4 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { useTranslation } from 'react-i18next';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useRevalidator, useSearchParams } from 'react-router';
 import { useAppStore } from '~/lib/store';
 import { useChatStream } from '~/hooks/useChatStream';
@@ -30,7 +29,6 @@ interface ChatViewProps {
 }
 
 export function ChatView({ taskId, taskTitle, projectId, initialMessages }: ChatViewProps) {
-  const { t } = useTranslation();
   const {
     appConfig,
     activeCollectionByProject,
@@ -541,7 +539,7 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
                 <div className="flex items-center gap-2 px-2 py-1 rounded-lg border border-purple-500/20">
                   <Plug className="w-3.5 h-3.5" />
                   <span className="text-xs font-medium whitespace-nowrap">
-                    {t('chat.connectorCount', { count: activeConnectors.length })}
+                    {`${activeConnectors.length} connector${activeConnectors.length === 1 ? '' : 's'}`}
                   </span>
                 </div>
               </div>
@@ -549,7 +547,7 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
                 <Plug className="w-3.5 h-3.5 text-purple-500" />
                 <span className="text-xs text-purple-500 font-medium">
                   {showConnectorLabel ? (
-                    t('chat.connectorCount', { count: activeConnectors.length })
+                    `${activeConnectors.length} connector${activeConnectors.length === 1 ? '' : 's'}`
                   ) : (
                     activeConnectors.length
                   )}
@@ -576,7 +574,7 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
         <div className="max-w-3xl mx-auto py-6 px-4 space-y-4">
           {displayedMessages.length === 0 ? (
             <div className="text-center py-12 text-text-muted">
-              <p>{t('chat.startConversation')}</p>
+              <p>Start a conversation</p>
             </div>
           ) : (
             displayedMessages.map((message) => {
@@ -594,7 +592,7 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
             <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-surface border border-border max-w-fit">
               <Loader2 className="w-4 h-4 text-accent animate-spin" />
               <span className="text-sm text-text-secondary">
-                {t('chat.processing')}
+                Processing...
               </span>
             </div>
           )}
@@ -668,7 +666,7 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
                 type="button"
                 onClick={handleFileSelect}
                 className="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors"
-                title={t('welcome.attachFiles')}
+                title="Attach files"
                 aria-label="Attach files"
               >
                 <Plus className="w-5 h-5" />
@@ -694,7 +692,7 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
                     handleSubmit();
                   }
                 }}
-                placeholder={t('chat.typeMessage')}
+                placeholder="Type a message..."
                 disabled={isSubmitting}
                 rows={1}
                 className="flex-1 resize-none bg-transparent border-none outline-none focus-visible:ring-2 focus-visible:ring-accent rounded text-text-primary placeholder:text-text-muted text-sm py-1.5"

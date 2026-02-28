@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { ensureConfigDir, getConfigDir } from "./helpers.server";
+import { getConfigDir } from "./helpers.server";
 import { getSettings, upsertSettings } from "./db/queries/settings.server";
 
 const LOGS_DIRNAME = "logs";

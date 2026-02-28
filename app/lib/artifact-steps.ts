@@ -1,4 +1,4 @@
-import type { TraceStep } from '../types';
+import type { TraceStep } from './types';
 
 const FILE_TOOL_NAMES = new Set([
   'write_file',

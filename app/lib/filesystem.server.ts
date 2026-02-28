@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { getConfigDir, ensureConfigDir } from "./helpers.server";
+import { getConfigDir } from "./helpers.server";
 
 const WORKSPACES_DIR_NAME = "workspaces";
 

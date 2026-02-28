@@ -8,8 +8,6 @@ export default defineConfig({
     alias: {
       '~': resolve(__dirname, 'app'),
       '@': resolve(__dirname, 'src'),
-      '@renderer': resolve(__dirname, 'src/renderer'),
-      'react-i18next': resolve(__dirname, 'src/renderer/shims/react-i18next.ts'),
     },
   },
 });
