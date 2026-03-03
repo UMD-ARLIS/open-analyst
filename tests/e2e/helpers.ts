@@ -1,4 +1,4 @@
-import type { APIRequestContext } from "@playwright/test";
+import type { APIRequestContext, Page } from "@playwright/test";
 
 export const BASE_URL = "http://localhost:5173";
 
@@ -21,6 +21,11 @@ export async function deleteProject(
   id: string
 ): Promise<void> {
   await request.delete(`${BASE_URL}/api/projects/${id}`);
+}
+
+/** Wait for the app layout to finish hydrating (Zustand store synced from loader). */
+export async function waitForHydration(page: Page) {
+  await page.locator("[data-hydrated]").waitFor({ state: "attached" });
 }
 
 /** Delete a task via the API. */

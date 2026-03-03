@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { Outlet, useLoaderData, useLocation, useRevalidator } from 'react-router';
 import { useAppStore } from '~/lib/store';
 import { Sidebar } from '~/components/Sidebar';
@@ -33,6 +33,7 @@ export default function AppLayout() {
   const location = useLocation();
 
   // Bridge: sync loader data into Zustand
+  const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
     if (loaderData) {
       setProjects(loaderData.projects);
@@ -46,6 +47,7 @@ export default function AppLayout() {
           setAppConfig({ ...current, model: loaderData.model });
         }
       }
+      setHydrated(true);
     }
   }, [loaderData, setProjects, setActiveProjectId, setWorkingDir, setIsConfigured, setAppConfig]);
 
@@ -89,7 +91,7 @@ export default function AppLayout() {
   }, [setShowConfigModal]);
 
   return (
-    <div className="h-screen w-screen flex flex-col overflow-hidden bg-background">
+    <div className="h-screen w-screen flex flex-col overflow-hidden bg-background" data-hydrated={hydrated || undefined}>
       <TopNav />
 
       <div className="flex-1 flex overflow-hidden">

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { createProject, deleteProject } from "./helpers";
+import { createProject, deleteProject, waitForHydration } from "./helpers";
 
 test.describe("QuickStartDashboard", () => {
   let projectId: string;
@@ -15,6 +15,7 @@ test.describe("QuickStartDashboard", () => {
 
   test('shows "What do you want to work on?" heading', async ({ page }) => {
     await page.goto(`/projects/${projectId}`);
+    await waitForHydration(page);
     await expect(
       page.getByText("What do you want to work on?")
     ).toBeVisible();
@@ -22,6 +23,7 @@ test.describe("QuickStartDashboard", () => {
 
   test("task input textarea present and editable", async ({ page }) => {
     await page.goto(`/projects/${projectId}`);
+    await waitForHydration(page);
     const textarea = page.getByPlaceholder("Describe your task…");
     await expect(textarea).toBeVisible();
     await textarea.fill("Test task input");
@@ -30,6 +32,7 @@ test.describe("QuickStartDashboard", () => {
 
   test("Deep Research toggle toggles tag-active class", async ({ page }) => {
     await page.goto(`/projects/${projectId}`);
+    await waitForHydration(page);
     const toggle = page.getByText("Deep Research");
     await expect(toggle).toBeVisible();
 
@@ -49,6 +52,7 @@ test.describe("QuickStartDashboard", () => {
     page,
   }) => {
     await page.goto(`/projects/${projectId}`);
+    await waitForHydration(page);
     await expect(
       page.getByText("Set working directory")
     ).toBeVisible();
@@ -57,6 +61,7 @@ test.describe("QuickStartDashboard", () => {
 
   test('"Manage knowledge" navigates to /knowledge', async ({ page }) => {
     await page.goto(`/projects/${projectId}`);
+    await waitForHydration(page);
     await page.getByText("Manage knowledge").click();
     await expect(page).toHaveURL(
       new RegExp(`/projects/${projectId}/knowledge`)
@@ -71,6 +76,7 @@ test.describe("QuickStartDashboard", () => {
     await deleteProject(request, projectId);
     // Navigate to index
     await page.goto("/");
+    await waitForHydration(page);
     await expect(page.getByText("Welcome to Open Analyst")).toBeVisible();
     await expect(
       page.getByText("Create your first project")

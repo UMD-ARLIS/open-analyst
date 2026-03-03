@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { createProject, deleteProject, BASE_URL } from "./helpers";
+import { createProject, deleteProject, BASE_URL, waitForHydration } from "./helpers";
 
 test.describe("Knowledge page", () => {
   let projectId: string;
@@ -18,6 +18,7 @@ test.describe("Knowledge page", () => {
 
   test("collections section visible with create input", async ({ page }) => {
     await page.goto(`/projects/${projectId}/knowledge`);
+    await waitForHydration(page);
     await expect(page.getByText("Collections")).toBeVisible();
     await expect(
       page.getByPlaceholder("New collection name…")
@@ -26,6 +27,7 @@ test.describe("Knowledge page", () => {
 
   test("create collection — appears as tag chip", async ({ page }) => {
     await page.goto(`/projects/${projectId}/knowledge`);
+    await waitForHydration(page);
     const input = page.getByPlaceholder("New collection name…");
     const name = `col-${Date.now()}`;
     await input.fill(name);
@@ -48,6 +50,7 @@ test.describe("Knowledge page", () => {
     await page.goto(
       `/projects/${projectId}/knowledge?collection=${collection.id}`
     );
+    await waitForHydration(page);
     await expect(page.getByRole("heading", { name: "Sources", exact: true })).toBeVisible();
   });
 
@@ -65,6 +68,7 @@ test.describe("Knowledge page", () => {
     await page.goto(
       `/projects/${projectId}/knowledge?collection=${collection.id}`
     );
+    await waitForHydration(page);
 
     // Fill manual source form
     await page.getByPlaceholder("Manual source title").fill("Test Document");
@@ -98,6 +102,7 @@ test.describe("Knowledge page", () => {
     await page.goto(
       `/projects/${projectId}/knowledge?collection=${collection.id}`
     );
+    await waitForHydration(page);
 
     // Click the document to show preview
     await page.getByText("Preview Doc").click();
@@ -112,6 +117,7 @@ test.describe("Knowledge page", () => {
     const { collection } = await colRes.json();
 
     await page.goto(`/projects/${projectId}/knowledge`);
+    await waitForHydration(page);
     // Click the collection tag
     await page.getByRole("button", { name: collection.name }).click();
     await expect(page).toHaveURL(
@@ -121,6 +127,7 @@ test.describe("Knowledge page", () => {
 
   test("Search Sources section has query input", async ({ page }) => {
     await page.goto(`/projects/${projectId}/knowledge`);
+    await waitForHydration(page);
     await expect(page.getByText("Search Sources")).toBeVisible();
     await expect(
       page.getByPlaceholder("Query your knowledge base…")

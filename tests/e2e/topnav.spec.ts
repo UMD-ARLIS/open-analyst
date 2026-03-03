@@ -1,9 +1,10 @@
 import { test, expect } from "@playwright/test";
-import { createProject, deleteProject, BASE_URL } from "./helpers";
+import { createProject, deleteProject, BASE_URL, waitForHydration } from "./helpers";
 
 test.describe("TopNav", () => {
   test("logo and branding visible", async ({ page }) => {
     await page.goto("/");
+    await waitForHydration(page);
     await expect(page.getByText("Open Analyst")).toBeVisible();
     // Logo icon container
     await expect(page.locator("nav .rounded-md")).toBeVisible();
@@ -16,6 +17,7 @@ test.describe("TopNav", () => {
     const project = await createProject(request, "E2E Switcher Test");
     try {
       await page.goto(`/projects/${project.id}`);
+      await waitForHydration(page);
       await page.getByLabel("Switch project").click();
       await expect(page.getByText(project.name)).toBeVisible();
     } finally {
@@ -29,6 +31,7 @@ test.describe("TopNav", () => {
   }) => {
     // Start from index so the switcher is available
     await page.goto("/");
+    await waitForHydration(page);
     await page.getByLabel("Switch project").click();
 
     const name = `E2E Created ${Date.now()}`;
@@ -52,6 +55,7 @@ test.describe("TopNav", () => {
     const project = await createProject(request, "E2E Tabs Test");
     try {
       await page.goto(`/projects/${project.id}`);
+      await waitForHydration(page);
       const dashBtn = page.getByRole("button", { name: "Dashboard" });
       await expect(dashBtn).toBeVisible();
       // Dashboard tab should have active styling
@@ -69,12 +73,14 @@ test.describe("TopNav", () => {
 
   test("settings button navigates to /settings", async ({ page }) => {
     await page.goto("/");
+    await waitForHydration(page);
     await page.getByLabel("Settings").click();
     await expect(page).toHaveURL(/\/settings/);
   });
 
   test("theme toggle switches dark/light mode", async ({ page }) => {
     await page.goto("/");
+    await waitForHydration(page);
     // Default is dark (no .light class)
     const html = page.locator("html");
     const hasLightBefore = await html.evaluate((el) =>

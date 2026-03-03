@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { createProject, deleteProject } from "./helpers";
+import { createProject, deleteProject, waitForHydration } from "./helpers";
 
 test.describe("Sidebar", () => {
   let projectId: string;
@@ -17,12 +17,14 @@ test.describe("Sidebar", () => {
     page,
   }) => {
     await page.goto(`/projects/${projectId}`);
+    await waitForHydration(page);
     await expect(page.getByText("Tasks", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "New task" })).toBeVisible();
   });
 
   test('shows "No tasks yet." for empty project', async ({ page }) => {
     await page.goto(`/projects/${projectId}`);
+    await waitForHydration(page);
     await expect(page.getByText("No tasks yet.")).toBeVisible();
   });
 
@@ -30,6 +32,7 @@ test.describe("Sidebar", () => {
     page,
   }) => {
     await page.goto(`/projects/${projectId}`);
+    await waitForHydration(page);
     // Sidebar should be expanded initially
     await expect(page.getByText("Tasks", { exact: true })).toBeVisible();
 
@@ -42,6 +45,7 @@ test.describe("Sidebar", () => {
 
   test("expand button restores full sidebar", async ({ page }) => {
     await page.goto(`/projects/${projectId}`);
+    await waitForHydration(page);
 
     // Collapse first
     await page.getByLabel("Collapse sidebar").click();
@@ -56,6 +60,7 @@ test.describe("Sidebar", () => {
     page,
   }) => {
     await page.goto("/");
+    await waitForHydration(page);
     await expect(
       page.getByText("Select a project to see tasks.")
     ).toBeVisible();
@@ -63,6 +68,7 @@ test.describe("Sidebar", () => {
 
   test("user/settings footer visible", async ({ page }) => {
     await page.goto(`/projects/${projectId}`);
+    await waitForHydration(page);
     // The footer shows "User" text and settings icon
     await expect(page.getByText("User")).toBeVisible();
   });
