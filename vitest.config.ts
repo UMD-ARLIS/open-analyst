@@ -8,7 +8,7 @@ export default defineConfig({
     globalSetup: ['./tests/rr7/global-setup.ts'],
     setupFiles: ['./tests/rr7/tc-env-setup.ts', 'dotenv/config'],
     include: ['app/**/*.{test,spec}.{js,ts}', 'tests/**/*.{test,spec}.{js,ts}'],
-    exclude: ['node_modules', 'dist', '.claude'],
+    exclude: ['node_modules', 'dist', '.claude', 'tests/e2e/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
