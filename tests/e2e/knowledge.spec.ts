@@ -48,7 +48,7 @@ test.describe("Knowledge page", () => {
     await page.goto(
       `/projects/${projectId}/knowledge?collection=${collection.id}`
     );
-    await expect(page.getByText("Sources")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Sources", exact: true })).toBeVisible();
   });
 
   test("add manual source — appears in document list", async ({

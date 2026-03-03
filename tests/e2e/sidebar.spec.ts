@@ -17,7 +17,7 @@ test.describe("Sidebar", () => {
     page,
   }) => {
     await page.goto(`/projects/${projectId}`);
-    await expect(page.getByText("Tasks")).toBeVisible();
+    await expect(page.getByText("Tasks", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "New task" })).toBeVisible();
   });
 
@@ -31,13 +31,13 @@ test.describe("Sidebar", () => {
   }) => {
     await page.goto(`/projects/${projectId}`);
     // Sidebar should be expanded initially
-    await expect(page.getByText("Tasks")).toBeVisible();
+    await expect(page.getByText("Tasks", { exact: true })).toBeVisible();
 
     // Click the sidebar toggle in the nav
     await page.getByLabel("Collapse sidebar").click();
 
     // "Tasks" text should be hidden when collapsed
-    await expect(page.getByText("Tasks")).not.toBeVisible();
+    await expect(page.getByText("Tasks", { exact: true })).not.toBeVisible();
   });
 
   test("expand button restores full sidebar", async ({ page }) => {
@@ -45,11 +45,11 @@ test.describe("Sidebar", () => {
 
     // Collapse first
     await page.getByLabel("Collapse sidebar").click();
-    await expect(page.getByText("Tasks")).not.toBeVisible();
+    await expect(page.getByText("Tasks", { exact: true })).not.toBeVisible();
 
     // Expand
     await page.getByLabel("Expand sidebar").click();
-    await expect(page.getByText("Tasks")).toBeVisible();
+    await expect(page.getByText("Tasks", { exact: true })).toBeVisible();
   });
 
   test('shows "Select a project to see tasks" when no project selected', async ({
