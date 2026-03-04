@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { createProject, deleteProject, waitForHydration } from "./helpers";
+import { createProject, deleteProject, deleteAllProjects, waitForHydration } from "./helpers";
 
 test.describe("Sidebar", () => {
   let projectId: string;
@@ -60,8 +60,8 @@ test.describe("Sidebar", () => {
     page,
     request,
   }) => {
-    // Delete the project created in beforeEach so there's no active project
-    await deleteProject(request, projectId);
+    // Delete all projects so there's no active project (other parallel tests may have created some)
+    await deleteAllProjects(request);
     projectId = "";
     await page.goto("/");
     await waitForHydration(page);

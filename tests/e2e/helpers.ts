@@ -23,6 +23,17 @@ export async function deleteProject(
   await request.delete(`${BASE_URL}/api/projects/${id}`);
 }
 
+/** Delete all projects via the API. */
+export async function deleteAllProjects(
+  request: APIRequestContext
+): Promise<void> {
+  const res = await request.get(`${BASE_URL}/api/projects`);
+  const { projects } = await res.json();
+  for (const p of projects) {
+    await request.delete(`${BASE_URL}/api/projects/${p.id}`);
+  }
+}
+
 /** Wait for the app layout to finish hydrating (Zustand store synced from loader). */
 export async function waitForHydration(page: Page) {
   await page.locator("[data-hydrated]").waitFor({ state: "attached" });

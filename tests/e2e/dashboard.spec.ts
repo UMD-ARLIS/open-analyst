@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { createProject, deleteProject, waitForHydration } from "./helpers";
+import { createProject, deleteProject, deleteAllProjects, waitForHydration } from "./helpers";
 
 test.describe("QuickStartDashboard", () => {
   let projectId: string;
@@ -72,8 +72,9 @@ test.describe("QuickStartDashboard", () => {
     page,
     request,
   }) => {
-    // Delete the project created in beforeEach so there's a clean slate
-    await deleteProject(request, projectId);
+    // Delete all projects so there's a clean slate (other parallel tests may have created some)
+    await deleteAllProjects(request);
+    projectId = "";
     // Navigate to index
     await page.goto("/");
     await waitForHydration(page);
@@ -81,7 +82,5 @@ test.describe("QuickStartDashboard", () => {
     await expect(
       page.getByText("Create your first project")
     ).toBeVisible();
-    // Prevent afterEach from deleting again
-    projectId = "";
   });
 });

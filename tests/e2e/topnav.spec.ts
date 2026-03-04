@@ -5,7 +5,7 @@ test.describe("TopNav", () => {
   test("logo and branding visible", async ({ page }) => {
     await page.goto("/");
     await waitForHydration(page);
-    await expect(page.getByText("Open Analyst")).toBeVisible();
+    await expect(page.locator("nav").getByText("Open Analyst")).toBeVisible();
     // Logo icon container
     await expect(page.locator("nav .rounded-md")).toBeVisible();
   });
