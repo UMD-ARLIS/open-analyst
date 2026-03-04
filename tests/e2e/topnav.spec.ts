@@ -19,7 +19,8 @@ test.describe("TopNav", () => {
       await page.goto(`/projects/${project.id}`);
       await waitForHydration(page);
       await page.getByLabel("Switch project").click();
-      await expect(page.getByText(project.name)).toBeVisible();
+      const dropdown = page.locator(".absolute.top-full");
+      await expect(dropdown.getByText(project.name)).toBeVisible();
     } finally {
       await deleteProject(request, project.id);
     }
@@ -62,7 +63,7 @@ test.describe("TopNav", () => {
       await expect(dashBtn).toHaveClass(/bg-accent-muted/);
 
       // Click Knowledge tab
-      await page.getByRole("button", { name: "Knowledge" }).click();
+      await page.getByRole("button", { name: "Knowledge", exact: true }).click();
       await expect(page).toHaveURL(
         new RegExp(`/projects/${project.id}/knowledge`)
       );

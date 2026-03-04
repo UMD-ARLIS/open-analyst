@@ -58,7 +58,11 @@ test.describe("Sidebar", () => {
 
   test('shows "Select a project to see tasks" when no project selected', async ({
     page,
+    request,
   }) => {
+    // Delete the project created in beforeEach so there's no active project
+    await deleteProject(request, projectId);
+    projectId = "";
     await page.goto("/");
     await waitForHydration(page);
     await expect(
