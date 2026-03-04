@@ -18,9 +18,16 @@ export async function loader() {
     await upsertSettings({ model: resolvedModel });
   }
 
+  // Validate activeProjectId — clear if the project no longer exists
+  let activeProjectId = settings.activeProjectId ?? null;
+  if (activeProjectId && !projects.some((p) => p.id === activeProjectId)) {
+    activeProjectId = null;
+    await upsertSettings({ activeProjectId: null });
+  }
+
   return {
     projects,
-    activeProjectId: settings.activeProjectId ?? null,
+    activeProjectId,
     workingDir: settings.workingDir || "",
     model: resolvedModel,
     isConfigured: true,
