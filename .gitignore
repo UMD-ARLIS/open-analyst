@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 
+# React Router v7 generated types
+.react-router/
+
 # Build outputs
 dist/
 dist-electron/

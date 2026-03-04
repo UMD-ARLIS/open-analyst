@@ -1,18 +1,13 @@
+import { reactRouter } from "@react-router/dev/vite";
 import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [reactRouter()],
   resolve: {
     alias: {
+      '~': resolve(__dirname, 'app'),
       '@': resolve(__dirname, 'src'),
-      '@renderer': resolve(__dirname, 'src/renderer'),
-      'react-i18next': resolve(__dirname, 'src/renderer/shims/react-i18next.ts'),
     },
-  },
-  build: {
-    outDir: 'dist',
-    emptyOutDir: true,
   },
 });
