@@ -100,6 +100,15 @@ The Node app sends the Python service:
 
 The current agent runtime now uses native Strands session persistence plus a summarizing conversation manager. When S3 artifact storage is configured, the same AWS environment is also used for Strands session storage.
 
+### 5a. Session and memory model
+
+Chat continuity currently has two layers:
+
+- Strands-native session state, keyed by the task id passed as `session_id`
+- app-side task summaries stored in `tasks.plan_snapshot.summary`
+
+The React Router chat route reads the previous task summary, sends it to the agent, and rewrites it when the turn completes. The Python agent builds either an `S3SessionManager` or `FileSessionManager` and pairs it with `SummarizingConversationManager`, so recent turns remain available without replaying the full transcript every time.
+
 ### 6. Retrieval and knowledge management
 
 Knowledge is stored as project documents linked to collections.
@@ -117,6 +126,8 @@ Local JSON files under the Open Analyst config directory are still used for:
 - some operational settings files
 
 Per-project working files are stored in workspace folders created by `app/lib/filesystem.server.ts`.
+
+Repository skill bundles under `skills/` are part of the runtime as well. The Node app discovers them from disk, matches them against the current request, and forwards the selected skill instructions plus resolved reference/script paths into the Strands prompt.
 
 ## Main User Flows
 

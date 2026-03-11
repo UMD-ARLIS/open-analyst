@@ -1,6 +1,6 @@
 # Repository Map
 
-Last updated: 2026-03-10
+Last updated: 2026-03-11
 
 ## Top Level
 
@@ -41,7 +41,7 @@ Current documentation and historical planning docs.
 
 ### `skills/`
 
-Local built-in skill bundles and their helper scripts/assets.
+Local built-in skill bundles plus helper scripts, references, and template assets used by the chat skill matcher.
 
 ### `build/`
 
@@ -117,6 +117,7 @@ Key UI components:
 ### Runtime utilities
 
 - `chat.server.ts`: non-streaming agent wrapper
+- `chat-stream.ts`: folds streamed agent events into structured assistant content
 - `filesystem.server.ts`: per-project workspace paths
 - `litellm.server.ts`: model discovery and resolution
 - `env.server.ts`: validated environment variables

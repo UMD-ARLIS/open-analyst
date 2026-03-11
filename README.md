@@ -17,7 +17,7 @@ At runtime the system looks like this:
 4. Chat routes proxy model/tool execution to the Strands agent service.
 5. The agent calls back into the Node app for project retrieval and source capture.
 
-Chat responses are streamed back as structured progress events plus the final answer. Tool calls, status updates, and the final assistant text are stored on the task so the UI can resume live task state cleanly.
+Chat responses are streamed back as structured progress events plus the final answer. Tool calls, status updates, and the final assistant text are stored on the task so the UI can resume live task state cleanly. Each task also keeps a compact app-side summary, while the Strands service maintains its own session state and conversation summary keyed by the task id.
 
 See:
 
@@ -77,6 +77,8 @@ Run the web app:
 pnpm dev
 ```
 
+`pnpm dev` runs React Router/Vite in polling mode and ignores generated folders such as `.venv/` and `__pycache__/` to avoid Linux watcher exhaustion in this mixed TS/Python repo.
+
 Run the Strands agent in a second terminal:
 
 ```bash
@@ -130,6 +132,13 @@ pnpm test:agent
 pnpm run build
 ```
 
+For linting and formatting, prefer direct commands against the current source tree:
+
+```bash
+pnpm exec eslint app tests --ext .ts,.tsx
+pnpm exec prettier --check "app/**/*.{ts,tsx,css}" "tests/**/*.ts" "*.md"
+```
+
 ## Core Product Model
 
 - A `project` is the top-level unit.
@@ -144,6 +153,7 @@ pnpm run build
 - `app/components/`: primary UI components
 - `app/lib/db/`: Drizzle schema and query layer
 - `app/lib/agent/`: Node-side agent provider abstraction
+- `app/lib/chat-stream.ts`: structured chat event folding
 - `services/strands-agent/src/`: Python agent entrypoint and tool implementations
 - `drizzle/`: generated SQL migrations
 - `docs/`: current architecture and repository documentation
