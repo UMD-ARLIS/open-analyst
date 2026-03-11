@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 interface AlertDialogProps {
   open: boolean;
@@ -29,6 +29,7 @@ export function AlertDialog({
   const [inputValue, setInputValue] = useState(inputDefaultValue);
   const inputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const inputId = useId();
 
   useEffect(() => {
     setInputValue(inputDefaultValue);
@@ -75,8 +76,9 @@ export function AlertDialog({
 
           {inputLabel && (
             <div className="space-y-1">
-              <label className="text-sm text-text-secondary">{inputLabel}</label>
+              <label htmlFor={inputId} className="text-sm text-text-secondary">{inputLabel}</label>
               <input
+                id={inputId}
                 ref={inputRef}
                 type="text"
                 className="input w-full"

@@ -31,4 +31,10 @@ describe('route config', () => {
     expect(apiPaths).toContain('api/credentials');
     expect(apiPaths).toContain('api/chat');
   });
+
+  it('contains a top-level catch-all route for unmatched requests', () => {
+    const catchAllRoute = routes.find((r: any) => r.path === '*');
+    expect(catchAllRoute).toBeDefined();
+    expect(catchAllRoute.file).toContain('routes/_catchall.tsx');
+  });
 });

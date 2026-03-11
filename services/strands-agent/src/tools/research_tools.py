@@ -1,5 +1,6 @@
 """Research tools: arXiv, HuggingFace, and deep research."""
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
 import time
 from urllib.parse import urlencode, quote
@@ -257,6 +258,19 @@ def _parse_search_result_urls(search_output: str) -> list[str]:
     return unique
 
 
+def _resolve_collection_id(
+    project_id: str,
+    api_base_url: str,
+    collection_id: str,
+    collection_name: str,
+) -> str:
+    if collection_id or not project_id:
+        return collection_id
+    api = ProjectAPI(api_base_url, project_id)
+    collection = api.ensure_collection(collection_name)
+    return str(collection.get("id", "")).strip()
+
+
 @tool
 def deep_research(
     question: str,
@@ -296,31 +310,59 @@ def deep_research(
         if len(queries) >= breadth:
             break
 
+    resolved_collection_id = _resolve_collection_id(
+        project_id=project_id,
+        api_base_url=api_base_url,
+        collection_id=collection_id,
+        collection_name=collection_name,
+    )
+
     sources = []
     notes = []
+    search_results: list[tuple[str, str]] = []
 
-    for q in queries[:breadth]:
-        search_output = ""
-        try:
-            search_output = web_search(query=q)
-            notes.append(f"Search query: {q}")
-        except Exception as e:
-            notes.append(f"Search query failed: {q} ({e})")
-            continue
-
-        urls = _parse_search_result_urls(search_output)[:fetch_limit]
-        for u in urls:
+    with ThreadPoolExecutor(max_workers=min(4, len(queries[:breadth]) or 1)) as pool:
+        futures = {
+            pool.submit(web_search, query=q): q
+            for q in queries[:breadth]
+        }
+        for future in as_completed(futures):
+            query = futures[future]
             try:
-                fetched = web_fetch(
-                    url=u,
-                    collection_name=collection_name,
-                    project_id=project_id,
-                    api_base_url=api_base_url,
-                    collection_id=collection_id,
-                )
-                sources.append({"query": q, "url": u, "fetched": fetched})
+                search_output = future.result()
+                notes.append(f"Search query: {query}")
+                search_results.append((query, search_output))
             except Exception as e:
-                notes.append(f"Fetch failed: {u} ({e})")
+                notes.append(f"Search query failed: {query} ({e})")
+
+    fetch_jobs: list[tuple[str, str]] = []
+    seen_urls: set[str] = set()
+    for query, search_output in search_results:
+        for url in _parse_search_result_urls(search_output)[:fetch_limit]:
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+            fetch_jobs.append((query, url))
+
+    with ThreadPoolExecutor(max_workers=min(8, len(fetch_jobs) or 1)) as pool:
+        futures = {
+            pool.submit(
+                web_fetch,
+                url=url,
+                collection_name=collection_name,
+                project_id=project_id,
+                api_base_url=api_base_url,
+                collection_id=resolved_collection_id,
+            ): (query, url)
+            for query, url in fetch_jobs
+        }
+        for future in as_completed(futures):
+            query, url = futures[future]
+            try:
+                fetched = future.result()
+                sources.append({"query": query, "url": url, "fetched": fetched})
+            except Exception as e:
+                notes.append(f"Fetch failed: {url} ({e})")
 
     # Build citation list
     citation_list = "\n".join(

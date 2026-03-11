@@ -1,72 +1,159 @@
 # Open Analyst
 
-Headless, project-oriented analyst workspace.
+Open Analyst is a project-oriented research workspace with:
 
-Open Analyst runs as:
-- Browser UI (Vite/React)
-- Headless API service (Node HTTP)
+- a React Router 7 web app in `app/`
+- server-side API routes in the same React Router app
+- a separate Python Strands agent service in `services/strands-agent/`
+- Postgres persistence via Drizzle
 
-No Electron runtime is required.
+## Runtime Overview
 
-## Quick Start
+At runtime the system looks like this:
 
-Requirements:
+1. The browser loads the React Router app.
+2. UI components call same-origin `/api/*` routes.
+3. API routes read and write project data in Postgres.
+4. Chat routes proxy model/tool execution to the Strands agent service.
+5. The agent calls back into the Node app for project retrieval and source capture.
+
+Chat responses are streamed back as structured progress events plus the final answer. Tool calls, status updates, and the final assistant text are stored on the task so the UI can resume live task state cleanly. Each task also keeps a compact app-side summary, while the Strands service maintains its own session state and conversation summary keyed by the task id.
+
+See:
+
+- `docs/ARCHITECTURE.md`
+- `docs/REPOSITORY_MAP.md`
+
+## Requirements
+
 - Node.js 20+
-- npm
+- pnpm
+- Python with `uv` for the Strands agent
+- PostgreSQL
+- LiteLLM gateway access
 
-Install:
+## Environment
+
+Copy these files and fill in the required values:
+
+- `.env.example` -> `.env`
+- `services/strands-agent/.env.example` -> `services/strands-agent/.env`
+
+Required variables:
+
+- `DATABASE_URL`
+- `LITELLM_API_KEY`
+
+Optional variables:
+
+- `LITELLM_BASE_URL`
+- `STRANDS_URL`
+- `NODE_API_BASE_URL`
+- `ARTIFACT_STORAGE_BACKEND`
+- `ARTIFACT_LOCAL_DIR`
+- `ARTIFACT_S3_BUCKET`
+- `ARTIFACT_S3_REGION`
+- `ARTIFACT_S3_PREFIX`
+- `ARTIFACT_S3_ENDPOINT`
+
+## Local Development
+
+Install dependencies:
+
 ```bash
-npm install
+pnpm install
+cd services/strands-agent && uv sync
 ```
 
-Run full stack (UI + headless API):
-```bash
-npm run dev:stack
-```
-
-Run services separately:
-```bash
-npm run serve:headless   # API on :8787
-npm run dev:web          # UI on :5173
-```
-
-## Build and Test
+Start Postgres:
 
 ```bash
-npm test -- --run
-npm run build
+docker compose up -d
 ```
 
-## Core Workflow
+Run the web app:
 
-1. Create/select a project in the left sidebar.
-2. Create/select a collection for that project.
-3. Start or continue a task in chat.
-4. Use fetch/search/research tools during chat.
-5. Captured sources are stored in the active project collection and available for RAG.
-6. Reopen old tasks from project task history.
+```bash
+pnpm dev
+```
 
-## Key Capabilities
+`pnpm dev` runs React Router/Vite in polling mode and ignores generated folders such as `.venv/` and `__pycache__/` to avoid Linux watcher exhaustion in this mixed TS/Python repo.
 
-- Project-first workspace (not task-only)
-- Collections and source/document management
-- Agentic tool execution during chat
-- Deep research tool for multi-step source discovery and synthesis
-- Deep search + retrieval over project documents
-- Source capture and indexing from web/PDF/research APIs
-- MCP server configuration
-- Skills management (builtin + custom install)
-- Credentials and logs management
+Run the Strands agent in a second terminal:
+
+```bash
+pnpm dev:agent
+```
+
+Run both from the repo root:
+
+```bash
+pnpm dev:all
+```
+
+The web app serves the UI and API routes on port `5173` by default. The Strands service defaults to `8080`.
+
+## Production-Like Run
+
+Build and serve the web app:
+
+```bash
+pnpm build
+pnpm start
+```
+
+`pnpm start` only serves the React Router build. The Strands agent is still a separate process and must be started independently, for example with `pnpm dev:agent` or a process manager that points `STRANDS_URL` at the running agent service.
+
+## Database
+
+Generate migrations:
+
+```bash
+pnpm db:generate
+```
+
+Apply migrations:
+
+```bash
+pnpm db:migrate
+```
+
+Open Drizzle Studio:
+
+```bash
+pnpm db:studio
+```
+
+## Tests and Build
+
+```bash
+pnpm test -- --run
+pnpm test:agent
+pnpm run build
+```
+
+For linting and formatting, prefer direct commands against the current source tree:
+
+```bash
+pnpm exec eslint app tests --ext .ts,.tsx
+pnpm exec prettier --check "app/**/*.{ts,tsx,css}" "tests/**/*.ts" "*.md"
+```
+
+## Core Product Model
+
+- A `project` is the top-level unit.
+- A project contains `collections` and `documents`.
+- A project also contains `tasks`.
+- A task contains `messages` and `task_events`.
+- Chat can use project knowledge through the RAG endpoint.
 
 ## Important Paths
 
-- UI: `src/renderer`
-- Headless API: `scripts/headless-server.js`
-- Project/data store: `scripts/headless/project-store.js`
-- Architecture + status: `ARCHITECTURE_MAP.md`
-
-## Documentation Scope
-
-Documentation is intentionally consolidated into two files:
-- `README.md`
-- `ARCHITECTURE_MAP.md`
+- `app/routes.ts`: route tree for UI pages and `/api/*` resources
+- `app/components/`: primary UI components
+- `app/lib/db/`: Drizzle schema and query layer
+- `app/lib/agent/`: Node-side agent provider abstraction
+- `app/lib/chat-stream.ts`: structured chat event folding
+- `services/strands-agent/src/`: Python agent entrypoint and tool implementations
+- `drizzle/`: generated SQL migrations
+- `docs/`: current architecture and repository documentation

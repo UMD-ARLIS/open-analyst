@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { createProject, deleteProject, deleteAllProjects, waitForHydration } from "./helpers";
+import { createProject, deleteProject, deleteAllProjects, scopedName, waitForHydration } from "./helpers";
 
 test.describe("Sidebar", () => {
   let projectId: string;
@@ -75,5 +75,27 @@ test.describe("Sidebar", () => {
     await waitForHydration(page);
     // The footer shows "User" text and settings icon
     await expect(page.getByText("User")).toBeVisible();
+  });
+
+  test("delete task removes it from the live sidebar list", async ({
+    page,
+    request,
+  }) => {
+    const taskTitle = scopedName("Sidebar delete task");
+    const createTaskResponse = await request.post("http://localhost:5173/api/tasks/create", {
+      data: {
+        projectId,
+        prompt: taskTitle,
+      },
+    });
+    await createTaskResponse.json();
+
+    await page.goto(`/projects/${projectId}`);
+    await waitForHydration(page);
+
+    const deleteButton = page.getByRole("button", { name: `Delete task ${taskTitle}` });
+    await expect(deleteButton).toBeVisible();
+    await deleteButton.click();
+    await expect(deleteButton).not.toBeVisible();
   });
 });

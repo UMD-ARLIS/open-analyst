@@ -104,7 +104,7 @@ export function Sidebar() {
                   <button
                     className="w-6 h-6 rounded hover:bg-surface-active text-error opacity-0 group-hover:opacity-100"
                     onClick={() => handleDeleteTask(task.id)}
-                    aria-label="Delete task"
+                    aria-label={`Delete task ${task.title}`}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>

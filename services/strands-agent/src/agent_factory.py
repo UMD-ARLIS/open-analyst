@@ -1,8 +1,12 @@
 """Creates the Strands Agent with model, tools, and system prompt."""
 
+import os
+
 import litellm
+from strands.agent.conversation_manager import SummarizingConversationManager
 from strands import Agent
 from strands.models import LiteLLMModel
+from strands.session import FileSessionManager, S3SessionManager
 
 from config import settings
 from tools import create_project_tools
@@ -10,6 +14,8 @@ from tools import create_project_tools
 # Bedrock requires conversations to start with a user message.
 # This tells LiteLLM to auto-rewrite system messages for compatibility.
 litellm.modify_params = True
+
+CORE_TOOL_NAMES = {"collection_overview", "capture_artifact"}
 
 SYSTEM_PROMPT = """You are Open Analyst, an AI research assistant.
 
@@ -26,12 +32,217 @@ You help users research topics, analyze documents, and organize findings into st
 - Organize captured content into appropriate collections
 - Be concise but thorough in analysis
 - When uncertain, acknowledge limitations and suggest next steps
+- Do not use read_file on binary office formats such as .xlsx, .xlsm, .docx, .pptx, or .pdf. Use execute_command with the relevant extraction or generation workflow instead.
 """
+
+
+def _extract_active_skills(payload: dict) -> list[dict]:
+    raw = payload.get("skills", [])
+    if not isinstance(raw, list):
+        return []
+    result = []
+    for skill in raw:
+        if isinstance(skill, dict):
+            result.append(skill)
+    return result
+
+
+def _extract_skill_catalog(payload: dict) -> list[dict]:
+    raw = payload.get("skill_catalog", [])
+    if not isinstance(raw, list):
+        return []
+    result = []
+    for skill in raw:
+        if isinstance(skill, dict):
+            result.append(skill)
+    return result
+
+
+def _extract_active_tool_names(payload: dict) -> set[str]:
+    raw = payload.get("active_tool_names", [])
+    if not isinstance(raw, list):
+        return set()
+    return {str(tool).strip() for tool in raw if str(tool).strip()}
+
+
+def _collect_allowed_tools(payload: dict) -> set[str] | None:
+    tool_names = _extract_active_tool_names(payload)
+    if tool_names:
+        return tool_names | CORE_TOOL_NAMES
+
+    skills = _extract_active_skills(payload)
+    tool_names: set[str] = set()
+    for skill in skills:
+        tools = skill.get("tools", [])
+        if isinstance(tools, list):
+            tool_names.update(str(tool).strip() for tool in tools if str(tool).strip())
+    return (tool_names | CORE_TOOL_NAMES) if tool_names else CORE_TOOL_NAMES
+
+
+def _build_skill_catalog_prompt(skill_catalog: list[dict]) -> str:
+    entries: list[str] = []
+    for skill in skill_catalog:
+        name = str(skill.get("name", "")).strip()
+        description = str(skill.get("description", "")).strip()
+        tools = skill.get("tools", [])
+        if not name:
+            continue
+        block = [f"- {name}"]
+        if description:
+            block[0] += f": {description}"
+        if isinstance(tools, list) and tools:
+            block.append(f"  Tools: {', '.join(str(tool) for tool in tools)}")
+        entries.append("\n".join(block))
+    if not entries:
+        return ""
+    return (
+        "Enabled skills are available when relevant.\n"
+        "If the user asks what skills are available, list the exact skill names from this catalog.\n"
+        "Do not answer that question with generic capabilities alone.\n\n"
+        "Enabled skill catalog:\n"
+        + "\n".join(entries)
+    )
+
+
+def _build_active_skill_prompt(skills: list[dict]) -> str:
+    def _string_list(value) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return [str(item).strip() for item in value if str(item).strip()]
+
+    def _skill_folder(skill: dict) -> str:
+        folder = str(
+            skill.get("folder_path")
+            or skill.get("source_path")
+            or skill.get("folderPath")
+            or skill.get("sourcePath")
+            or ""
+        ).strip()
+        return folder
+
+    def _resolve_paths(skill: dict, rel_key: str, abs_key: str) -> list[str]:
+        resolved: list[str] = []
+        seen: set[str] = set()
+        folder = _skill_folder(skill)
+
+        for item in _string_list(skill.get(abs_key)):
+            if item not in seen:
+                resolved.append(item)
+                seen.add(item)
+
+        for item in _string_list(skill.get(rel_key)):
+            candidate = item
+            if folder and not os.path.isabs(item):
+                candidate = os.path.join(folder, item)
+            if candidate not in seen:
+                resolved.append(candidate)
+                seen.add(candidate)
+
+        return resolved
+
+    def _read_reference_excerpt(path_value: str, limit: int = 2400) -> str:
+        try:
+            with open(path_value, "r", encoding="utf-8", errors="ignore") as handle:
+                text = handle.read(limit + 1).strip()
+        except OSError:
+            return ""
+
+        if not text:
+            return ""
+        if len(text) > limit:
+            return text[:limit].rstrip() + "\n...[truncated]"
+        return text
+
+    sections: list[str] = []
+    for skill in skills:
+        name = str(skill.get("name", "")).strip()
+        instructions = str(skill.get("instructions", "")).strip()
+        tools = skill.get("tools", [])
+        folder = _skill_folder(skill)
+        reference_paths = _resolve_paths(skill, "references", "reference_paths")
+        script_paths = _resolve_paths(skill, "scripts", "script_paths")
+        if not name and not instructions:
+            continue
+        block = [f"Skill: {name or 'Unnamed Skill'}"]
+        if isinstance(tools, list) and tools:
+            block.append(f"Tools: {', '.join(str(tool) for tool in tools)}")
+        if folder:
+            block.append(f"Skill folder: {folder}")
+        if reference_paths:
+            block.append(
+                "Reference files to consult before drafting:\n"
+                + "\n".join(f"- {item}" for item in reference_paths)
+            )
+            excerpts: list[str] = []
+            for ref_path in reference_paths[:2]:
+                excerpt = _read_reference_excerpt(ref_path)
+                if excerpt:
+                    excerpts.append(f"[{ref_path}]\n{excerpt}")
+            if excerpts:
+                block.append("Reference excerpts:\n" + "\n\n".join(excerpts))
+        if script_paths:
+            block.append(
+                "Bundled scripts to use before writing any replacement implementation:\n"
+                + "\n".join(f"- {item}" for item in script_paths)
+            )
+        if instructions:
+            block.append(instructions)
+        if folder or reference_paths or script_paths:
+            block.append(
+                "Execution rules:\n"
+                "- Follow the matched skill workflow in order.\n"
+                "- Use execute_command with the absolute paths above when the skill assets are outside the working directory.\n"
+                "- Use bundled scripts before writing any replacement code.\n"
+                "- Only create replacement code if the bundled script is missing or still fails after you inspect or run it."
+            )
+        sections.append("\n".join(block))
+    if not sections:
+        return ""
+    return "\n\nActive skills:\n\n" + "\n\n".join(sections)
+
+
+def _is_skill_catalog_question(text: str) -> bool:
+    lowered = text.lower()
+    return (
+        "skill" in lowered
+        and (
+            "available" in lowered
+            or "enabled" in lowered
+            or "what skills" in lowered
+            or "which skills" in lowered
+            or "list" in lowered
+        )
+    )
 
 
 def _build_system_prompt(payload: dict) -> str:
     """Build the system prompt, optionally augmented with RAG context."""
     base = SYSTEM_PROMPT
+    skill_catalog = _extract_skill_catalog(payload)
+    skills = _extract_active_skills(payload)
+    skill_catalog_prompt = _build_skill_catalog_prompt(skill_catalog)
+    active_skill_prompt = _build_active_skill_prompt(skills)
+    if skill_catalog_prompt:
+        base += f"\n\n{skill_catalog_prompt}"
+    if active_skill_prompt:
+        base += f"\n\n{active_skill_prompt}"
+
+    last_user = _get_last_user_message(payload.get("messages", []))
+    if skill_catalog and _is_skill_catalog_question(last_user):
+        base += (
+            "\n\nThe current user is explicitly asking about available skills. "
+            "Answer with the exact enabled skill names from the enabled skill catalog, "
+            "and give a brief description of each. "
+            "Do not answer that question with generic capabilities alone."
+        )
+
+    task_summary = str(payload.get("task_summary", "")).strip()
+    if task_summary:
+        base += (
+            "\n\nTask memory summary from earlier work in this task. "
+            "Use it to maintain continuity, but prefer newer user instructions if they conflict.\n\n"
+            f"{task_summary}"
+        )
 
     # RAG context injection: query the Node.js project store for relevant docs
     project_id = payload.get("project_id", "")
@@ -41,7 +252,6 @@ def _build_system_prompt(payload: dict) -> str:
             from util.capture import ProjectAPI
 
             api = ProjectAPI(api_base_url, project_id)
-            last_user = _get_last_user_message(payload.get("messages", []))
             if last_user:
                 rag = api.rag_query(last_user, limit=6)
                 results = rag.get("results", [])
@@ -84,6 +294,26 @@ def _build_prompt(messages: list) -> str:
     return "\n\n".join(parts) if parts else ""
 
 
+def _build_session_manager(payload: dict):
+    session_id = str(payload.get("session_id", "")).strip()
+    if not session_id:
+        return None
+
+    bucket = str(payload.get("session_s3_bucket", "")).strip()
+    if bucket:
+        prefix = str(payload.get("session_s3_prefix", "strands/sessions")).strip()
+        region_name = str(payload.get("session_s3_region", "")).strip() or None
+        return S3SessionManager(
+            session_id=session_id,
+            bucket=bucket,
+            prefix=prefix,
+            region_name=region_name,
+        )
+
+    storage_dir = str(payload.get("session_storage_dir", "")).strip() or None
+    return FileSessionManager(session_id=session_id, storage_dir=storage_dir)
+
+
 def create_agent(payload: dict) -> Agent:
     """Create a configured Strands Agent from an invocation payload.
 
@@ -110,12 +340,31 @@ def create_agent(payload: dict) -> Agent:
         api_base_url=payload.get("api_base_url", settings.node_api_base_url),
         collection_id=payload.get("collection_id", ""),
         collection_name=payload.get("collection_name", "Task Sources"),
+        allowed_tool_names=_collect_allowed_tools(payload),
     )
 
     system_prompt = _build_system_prompt(payload)
+    session_manager = _build_session_manager(payload)
+    conversation_manager = SummarizingConversationManager(
+        summary_ratio=0.35,
+        preserve_recent_messages=12,
+    )
+
+    hooks = payload.get("_hooks", [])
+    if not isinstance(hooks, list):
+        hooks = []
 
     return Agent(
         model=model,
         tools=tools,
         system_prompt=system_prompt,
+        agent_id="open-analyst",
+        session_manager=session_manager,
+        conversation_manager=conversation_manager,
+        hooks=hooks,
+        trace_attributes={
+            "project_id": str(payload.get("project_id", "")).strip(),
+            "collection_id": str(payload.get("collection_id", "")).strip(),
+            "session_id": str(payload.get("session_id", "")).strip(),
+        },
     )

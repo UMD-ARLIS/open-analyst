@@ -1,14 +1,105 @@
 """Open Analyst Strands Agent — BedrockAgentCore entrypoint."""
 
+import asyncio
 import logging
+from collections.abc import AsyncIterator
+from typing import Any
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
+from strands.hooks.events import (
+    AfterInvocationEvent,
+    AfterToolCallEvent,
+    BeforeInvocationEvent,
+    BeforeToolCallEvent,
+)
+from strands.hooks.registry import HookProvider, HookRegistry
 
 from agent_factory import create_agent, _build_prompt
 
 logger = logging.getLogger(__name__)
 
 app = BedrockAgentCoreApp()
+
+
+def _extract_tool_result_text(result: dict | None) -> str:
+    if not isinstance(result, dict):
+        return ""
+    parts = result.get("content", [])
+    if not isinstance(parts, list):
+        return str(result)
+
+    lines: list[str] = []
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        if "text" in part and part["text"]:
+            lines.append(str(part["text"]))
+        elif "json" in part:
+            lines.append(str(part["json"]))
+        elif "document" in part:
+            lines.append(str(part["document"]))
+        elif "image" in part:
+            lines.append("[image]")
+    return "\n".join(lines).strip()
+
+
+class StreamingHookBridge(HookProvider):
+    def __init__(self, queue: asyncio.Queue[dict[str, Any]]):
+        self.queue = queue
+
+    def _emit(self, event: dict[str, Any]) -> None:
+        self.queue.put_nowait(event)
+
+    def register_hooks(self, registry: HookRegistry, **kwargs: Any) -> None:
+        registry.add_callback(BeforeInvocationEvent, self._before_invocation)
+        registry.add_callback(BeforeToolCallEvent, self._before_tool_call)
+        registry.add_callback(AfterToolCallEvent, self._after_tool_call)
+        registry.add_callback(AfterInvocationEvent, self._after_invocation)
+
+    def _before_invocation(self, event: BeforeInvocationEvent) -> None:
+        self._emit(
+            {
+                "type": "status",
+                "status": "running",
+                "phase": "starting",
+                "text": "Starting analysis",
+            }
+        )
+
+    def _before_tool_call(self, event: BeforeToolCallEvent) -> None:
+        self._emit(
+            {
+                "type": "tool_call_start",
+                "toolName": event.tool_use.get("name", ""),
+                "toolUseId": event.tool_use.get("toolUseId", ""),
+                "toolInput": event.tool_use.get("input", {}) or {},
+            }
+        )
+
+    def _after_tool_call(self, event: AfterToolCallEvent) -> None:
+        output = _extract_tool_result_text(event.result)
+        status = "error" if event.exception or event.result.get("status") == "error" else "completed"
+        if event.exception and not output:
+            output = str(event.exception)
+        self._emit(
+            {
+                "type": "tool_call_end",
+                "toolName": event.tool_use.get("name", ""),
+                "toolUseId": event.tool_use.get("toolUseId", ""),
+                "toolOutput": output,
+                "toolStatus": status,
+            }
+        )
+
+    def _after_invocation(self, event: AfterInvocationEvent) -> None:
+        self._emit(
+            {
+                "type": "status",
+                "status": "completed",
+                "phase": "completed",
+                "text": "Analysis complete",
+            }
+        )
 
 
 def _extract_text(result) -> str:
@@ -31,6 +122,10 @@ def _extract_text(result) -> str:
 def _invoke_sync(payload: dict) -> dict:
     """Non-streaming invocation — returns full result as JSON."""
     try:
+        hooks = payload.get("_hooks", [])
+        if not isinstance(hooks, list):
+            hooks = []
+        payload = {**payload, "_hooks": hooks}
         agent = create_agent(payload)
         prompt = _build_prompt(payload.get("messages", []))
         result = agent(prompt)
@@ -46,35 +141,69 @@ def _invoke_sync(payload: dict) -> dict:
         }
 
 
+async def _drain_events(queue: asyncio.Queue[dict[str, Any]]) -> AsyncIterator[dict[str, Any]]:
+    while not queue.empty():
+        yield queue.get_nowait()
+
+
 async def _invoke_stream(payload: dict):
     """Streaming invocation — yields SSE events as they arrive."""
+    queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+    hooks = payload.get("_hooks", [])
+    if not isinstance(hooks, list):
+        hooks = []
+    hooks = [*hooks, StreamingHookBridge(queue)]
+    payload = {**payload, "_hooks": hooks}
     agent = create_agent(payload)
     prompt = _build_prompt(payload.get("messages", []))
-    last_tool_use_id = None
+    async_task_id = app.add_async_task(
+        "strands_stream",
+        {"session_id": payload.get("session_id", ""), "project_id": payload.get("project_id", "")},
+    )
 
-    async for event in agent.stream_async(prompt):
-        data = event.get("data")
-        if data:
-            yield {"type": "text_delta", "text": data}
+    active_skill_names = [
+        str(skill.get("name", "")).strip()
+        for skill in payload.get("skills", [])
+        if isinstance(skill, dict) and str(skill.get("name", "")).strip()
+    ]
+    if active_skill_names:
+        queue.put_nowait(
+            {
+                "type": "status",
+                "status": "running",
+                "phase": "skills",
+                "text": f"Using skills: {', '.join(active_skill_names)}",
+            }
+        )
 
-        reasoning = event.get("reasoningText")
-        if reasoning:
-            yield {"type": "reasoning_delta", "text": reasoning}
+    try:
+        async for pending in _drain_events(queue):
+            yield pending
 
-        tool_use = event.get("current_tool_use")
-        if tool_use and isinstance(tool_use, dict):
-            tool_id = tool_use.get("toolUseId") or tool_use.get("id")
-            tool_name = tool_use.get("name", "")
-            if tool_id and tool_id != last_tool_use_id:
-                last_tool_use_id = tool_id
-                yield {
-                    "type": "tool_call_start",
-                    "toolName": tool_name,
-                    "toolUseId": tool_id,
-                }
+        async for event in agent.stream_async(prompt):
+            async for pending in _drain_events(queue):
+                yield pending
 
-        if event.get("complete"):
-            yield {"type": "agent_end"}
+            data = event.get("data")
+            if data:
+                yield {"type": "text_delta", "text": data}
+
+            if event.get("complete"):
+                yield {"type": "agent_end"}
+
+        async for pending in _drain_events(queue):
+            yield pending
+    except Exception as exc:
+        logger.exception("Streaming agent invocation failed")
+        yield {
+            "type": "status",
+            "status": "error",
+            "phase": "failed",
+            "text": f"Run failed: {exc}",
+        }
+        yield {"type": "error", "error": str(exc)}
+    finally:
+        app.complete_async_task(async_task_id)
 
 
 @app.entrypoint

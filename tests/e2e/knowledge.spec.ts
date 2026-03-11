@@ -1,5 +1,14 @@
 import { test, expect } from "@playwright/test";
-import { createProject, deleteProject, BASE_URL, waitForHydration } from "./helpers";
+import path from "node:path";
+import {
+  createCollection,
+  createDocument,
+  createProject,
+  deleteProject,
+  BASE_URL,
+  scopedName,
+  waitForHydration,
+} from "./helpers";
 
 test.describe("Knowledge page", () => {
   let projectId: string;
@@ -132,5 +141,53 @@ test.describe("Knowledge page", () => {
     await expect(
       page.getByPlaceholder("Query your knowledge base…")
     ).toBeVisible();
+  });
+
+  test("upload file import stores a document and shows extracted text", async ({
+    page,
+    request,
+  }) => {
+    const collection = await createCollection(
+      request,
+      projectId,
+      scopedName("Uploads")
+    );
+
+    await page.goto(`/projects/${projectId}/knowledge?collection=${collection.id}`);
+    await waitForHydration(page);
+
+    const fileChooserPromise = page.waitForEvent("filechooser");
+    await page.getByRole("button", { name: "Upload files" }).click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles(path.resolve(process.cwd(), "tests/fixtures/live-import.txt"));
+
+    await expect(page.getByText("live-import.txt")).toBeVisible();
+    await page.getByText("live-import.txt").click();
+    await expect(page.getByText("Open Analyst live import fixture.")).toBeVisible();
+  });
+
+  test("RAG search returns snippets from a live document", async ({
+    page,
+    request,
+  }) => {
+    const collection = await createCollection(
+      request,
+      projectId,
+      scopedName("Search")
+    );
+    await createDocument(request, projectId, {
+      collectionId: collection.id,
+      title: scopedName("Needle Document"),
+      content: "Unique needle phrase for live RAG verification.",
+      sourceType: "manual",
+    });
+
+    await page.goto(`/projects/${projectId}/knowledge?collection=${collection.id}`);
+    await waitForHydration(page);
+
+    await page.getByPlaceholder("Query your knowledge base…").fill("needle phrase");
+    await page.getByRole("button", { name: "Search", exact: true }).click();
+
+    await expect(page.getByText("Unique needle phrase for live RAG verification.")).toBeVisible();
   });
 });
