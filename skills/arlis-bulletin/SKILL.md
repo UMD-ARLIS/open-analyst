@@ -1,6 +1,20 @@
 ---
 name: arlis-bulletin
 description: "Create ARLIS Insights Bulletin reports (.docx) from a topic, research notes, or raw data. Produces intelligence-community-style analytic bulletins using the official ARLIS template with proper branding, classification markings, and formatting. Use this skill whenever the user asks to write a bulletin, intelligence brief, analytic report, ARLIS product, threat assessment, technology assessment, or any short-form analytic document following IC writing standards. Also use when the user mentions KIQs, BLUFs, analytic story arcs, or four-sweeps review in the context of creating a written product."
+matchPhrases:
+  - bulletin
+  - analytic bulletin
+  - arlis bulletin
+  - arlis insights bulletin
+  - intelligence brief
+  - analytic brief
+  - analytic report
+  - arlis product
+  - threat assessment
+  - technology assessment
+  - kiq
+  - bluf
+  - four sweeps
 tools:
   - list_directory
   - read_file

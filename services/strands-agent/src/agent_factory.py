@@ -1,5 +1,7 @@
 """Creates the Strands Agent with model, tools, and system prompt."""
 
+import os
+
 import litellm
 from strands.agent.conversation_manager import SummarizingConversationManager
 from strands import Agent
@@ -30,6 +32,7 @@ You help users research topics, analyze documents, and organize findings into st
 - Organize captured content into appropriate collections
 - Be concise but thorough in analysis
 - When uncertain, acknowledge limitations and suggest next steps
+- Do not use read_file on binary office formats such as .xlsx, .xlsm, .docx, .pptx, or .pdf. Use execute_command with the relevant extraction or generation workflow instead.
 """
 
 
@@ -102,18 +105,96 @@ def _build_skill_catalog_prompt(skill_catalog: list[dict]) -> str:
 
 
 def _build_active_skill_prompt(skills: list[dict]) -> str:
+    def _string_list(value) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return [str(item).strip() for item in value if str(item).strip()]
+
+    def _skill_folder(skill: dict) -> str:
+        folder = str(
+            skill.get("folder_path")
+            or skill.get("source_path")
+            or skill.get("folderPath")
+            or skill.get("sourcePath")
+            or ""
+        ).strip()
+        return folder
+
+    def _resolve_paths(skill: dict, rel_key: str, abs_key: str) -> list[str]:
+        resolved: list[str] = []
+        seen: set[str] = set()
+        folder = _skill_folder(skill)
+
+        for item in _string_list(skill.get(abs_key)):
+            if item not in seen:
+                resolved.append(item)
+                seen.add(item)
+
+        for item in _string_list(skill.get(rel_key)):
+            candidate = item
+            if folder and not os.path.isabs(item):
+                candidate = os.path.join(folder, item)
+            if candidate not in seen:
+                resolved.append(candidate)
+                seen.add(candidate)
+
+        return resolved
+
+    def _read_reference_excerpt(path_value: str, limit: int = 2400) -> str:
+        try:
+            with open(path_value, "r", encoding="utf-8", errors="ignore") as handle:
+                text = handle.read(limit + 1).strip()
+        except OSError:
+            return ""
+
+        if not text:
+            return ""
+        if len(text) > limit:
+            return text[:limit].rstrip() + "\n...[truncated]"
+        return text
+
     sections: list[str] = []
     for skill in skills:
         name = str(skill.get("name", "")).strip()
         instructions = str(skill.get("instructions", "")).strip()
         tools = skill.get("tools", [])
+        folder = _skill_folder(skill)
+        reference_paths = _resolve_paths(skill, "references", "reference_paths")
+        script_paths = _resolve_paths(skill, "scripts", "script_paths")
         if not name and not instructions:
             continue
         block = [f"Skill: {name or 'Unnamed Skill'}"]
         if isinstance(tools, list) and tools:
             block.append(f"Tools: {', '.join(str(tool) for tool in tools)}")
+        if folder:
+            block.append(f"Skill folder: {folder}")
+        if reference_paths:
+            block.append(
+                "Reference files to consult before drafting:\n"
+                + "\n".join(f"- {item}" for item in reference_paths)
+            )
+            excerpts: list[str] = []
+            for ref_path in reference_paths[:2]:
+                excerpt = _read_reference_excerpt(ref_path)
+                if excerpt:
+                    excerpts.append(f"[{ref_path}]\n{excerpt}")
+            if excerpts:
+                block.append("Reference excerpts:\n" + "\n\n".join(excerpts))
+        if script_paths:
+            block.append(
+                "Bundled scripts to use before writing any replacement implementation:\n"
+                + "\n".join(f"- {item}" for item in script_paths)
+            )
         if instructions:
             block.append(instructions)
+        if folder or reference_paths or script_paths:
+            block.append(
+                "Execution rules:\n"
+                "- Follow the matched skill workflow in order.\n"
+                "- Use execute_command with the absolute paths above when the skill assets are outside the working directory.\n"
+                "- Use bundled scripts before writing any replacement code.\n"
+                "- Only create replacement code if the bundled script is missing or still fails after you inspect or run it."
+            )
         sections.append("\n".join(block))
     if not sections:
         return ""

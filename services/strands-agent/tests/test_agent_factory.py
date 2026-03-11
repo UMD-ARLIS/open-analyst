@@ -59,6 +59,9 @@ def test_build_active_skill_prompt_includes_full_instructions_for_matched_skills
                 "name": "pdf",
                 "tools": ["read_file", "write_file"],
                 "instructions": "Use this skill for PDF tasks.",
+                "folder_path": "/tmp/skills/pdf",
+                "reference_paths": ["/tmp/skills/pdf/references/guide.md"],
+                "script_paths": ["/tmp/skills/pdf/scripts/process_pdf.py"],
             }
         ]
     )
@@ -66,6 +69,10 @@ def test_build_active_skill_prompt_includes_full_instructions_for_matched_skills
     assert "Skill: pdf" in result
     assert "Tools: read_file, write_file" in result
     assert "Use this skill for PDF tasks." in result
+    assert "Skill folder: /tmp/skills/pdf" in result
+    assert "/tmp/skills/pdf/references/guide.md" in result
+    assert "/tmp/skills/pdf/scripts/process_pdf.py" in result
+    assert "Use bundled scripts before writing any replacement code." in result
 
 
 def test_collect_allowed_tools_prefers_explicit_active_tool_names():

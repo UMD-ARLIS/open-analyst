@@ -252,6 +252,36 @@ export function listActiveSkills(configDir?: string): Skill[] {
   return listSkills(configDir).filter((skill) => skill.enabled);
 }
 
+function normalizeText(value: string | undefined): string {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9.]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getConfigStringList(
+  skill: Skill,
+  key: 'matchPhrases' | 'denyPhrases' | 'fileExtensions'
+): string[] {
+  const value = skill.config?.[key];
+  return Array.isArray(value) ? value.map((item) => String(item).trim()).filter(Boolean) : [];
+}
+
+function getSkillAliases(skill: Skill): string[] {
+  const aliases = new Set<string>();
+  const add = (value: string | undefined) => {
+    const normalized = normalizeText(value);
+    if (normalized.length >= 4) aliases.add(normalized);
+  };
+
+  add(skill.name);
+  add(skill.id.replace(/^repo-skill-/, '').replace(/^builtin-/, '').replace(/[-_]+/g, ' '));
+  add(skill.source?.path ? path.basename(skill.source.path).replace(/\.[^.]+$/, '') : '');
+
+  return Array.from(aliases);
+}
+
 function getSkillMatchTerms(skill: Skill): string[] {
   const terms = new Set<string>();
   const addTokens = (value: string | undefined) => {
@@ -312,19 +342,57 @@ export function selectMatchedSkills(
         .filter(Boolean)
     : [];
   const fullText = [prompt, ...userTexts].filter(Boolean).join('\n');
+  const normalizedPrompt = normalizeText(prompt);
+  const normalizedFullText = normalizeText(fullText);
 
   if (!fullText) return [];
 
   const scored = skills
     .map((skill) => {
+      const matchPhrases = getConfigStringList(skill, 'matchPhrases').map(normalizeText);
+      const denyPhrases = getConfigStringList(skill, 'denyPhrases').map(normalizeText);
+      const fileExtensions = getConfigStringList(skill, 'fileExtensions').map((item) =>
+        item.startsWith('.') ? item.toLowerCase() : `.${item.toLowerCase()}`
+      );
+      const aliases = getSkillAliases(skill);
+
+      if (denyPhrases.some((phrase) => phrase && normalizedFullText.includes(phrase))) {
+        return { skill, score: -1 };
+      }
+
       const terms = getSkillMatchTerms(skill);
       let score = 0;
+      let explicitMatch = false;
 
-      for (const term of terms) {
-        if (prompt.includes(term)) {
-          score += term.startsWith('.') ? 8 : 6;
-        } else if (fullText.includes(term)) {
-          score += term.startsWith('.') ? 4 : 2;
+      for (const phrase of matchPhrases) {
+        if (phrase && normalizedFullText.includes(phrase)) {
+          score += normalizedPrompt.includes(phrase) ? 18 : 12;
+          explicitMatch = true;
+        }
+      }
+
+      for (const alias of aliases) {
+        if (alias && normalizedFullText.includes(alias)) {
+          score += normalizedPrompt.includes(alias) ? 14 : 10;
+          explicitMatch = true;
+        }
+      }
+
+      for (const extension of fileExtensions) {
+        if (extension && fullText.includes(extension)) {
+          score += prompt.includes(extension) ? 12 : 8;
+          explicitMatch = true;
+        }
+      }
+
+      const allowGenericTermScoring = matchPhrases.length === 0 || explicitMatch;
+      if (allowGenericTermScoring) {
+        for (const term of terms) {
+          if (prompt.includes(term)) {
+            score += term.startsWith('.') ? 8 : 6;
+          } else if (fullText.includes(term)) {
+            score += term.startsWith('.') ? 4 : 2;
+          }
         }
       }
 

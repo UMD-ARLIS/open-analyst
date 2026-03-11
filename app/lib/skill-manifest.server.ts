@@ -60,6 +60,12 @@ function listChildFiles(dirPath: string): string[] {
   return fs.readdirSync(dirPath).sort();
 }
 
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((item) => String(item).trim()).filter(Boolean)
+    : [];
+}
+
 export function parseSkillManifest(folderPath: string, base: Partial<Skill> = {}): Skill {
   const skillPath = path.resolve(folderPath);
   const skillFile = path.join(skillPath, "SKILL.md");
@@ -92,6 +98,9 @@ export function parseSkillManifest(folderPath: string, base: Partial<Skill> = {}
       ...(base.config || {}),
       folderPath: skillPath,
       license: typeof attributes.license === "string" ? attributes.license : undefined,
+      matchPhrases: readStringArray(attributes.matchPhrases),
+      denyPhrases: readStringArray(attributes.denyPhrases),
+      fileExtensions: readStringArray(attributes.fileExtensions),
     },
     instructions: body,
     tools: Array.isArray(base.tools) && base.tools.length ? base.tools : frontmatterTools,

@@ -80,6 +80,10 @@ describe("StrandsProvider", () => {
             createdAt: Date.now(),
             instructions: "Use this skill for PDFs.",
             tools: ["read_file"],
+            config: { folderPath: "/tmp/skills/pdf" },
+            source: { kind: "repository", path: "/tmp/skills/pdf" },
+            references: ["references/guide.md"],
+            scripts: ["scripts/process_pdf.py"],
           },
         ],
       }
@@ -108,6 +112,10 @@ describe("StrandsProvider", () => {
         name: "pdf",
         instructions: "Use this skill for PDFs.",
         tools: ["read_file"],
+        folder_path: "/tmp/skills/pdf",
+        source_path: "/tmp/skills/pdf",
+        reference_paths: ["/tmp/skills/pdf/references/guide.md"],
+        script_paths: ["/tmp/skills/pdf/scripts/process_pdf.py"],
       }),
     ]);
     expect(body.skill_catalog).toEqual([

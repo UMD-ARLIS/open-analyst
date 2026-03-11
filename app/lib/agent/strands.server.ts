@@ -7,6 +7,7 @@ import type {
 } from './interface';
 import type { HeadlessConfig } from '../types';
 import { env } from '~/lib/env.server';
+import path from 'path';
 
 export class StrandsProvider implements AgentProvider {
   readonly name = 'strands';
@@ -31,13 +32,32 @@ export class StrandsProvider implements AgentProvider {
       collection_name: options.collectionName || 'Task Sources',
       deep_research: options.deepResearch || false,
       skills: (options.skills || []).map((skill) => ({
+        folder_path:
+          typeof skill.config?.folderPath === 'string'
+            ? skill.config.folderPath
+            : skill.source?.path || '',
+        source_path: skill.source?.path || '',
         id: skill.id,
         name: skill.name,
         description: skill.description || '',
         instructions: skill.instructions || '',
         tools: skill.tools || [],
         references: skill.references || [],
+        reference_paths: (skill.references || []).map((item) => {
+          const folderPath =
+            typeof skill.config?.folderPath === 'string'
+              ? skill.config.folderPath
+              : skill.source?.path || '';
+          return folderPath ? path.join(folderPath, item) : item;
+        }),
         scripts: skill.scripts || [],
+        script_paths: (skill.scripts || []).map((item) => {
+          const folderPath =
+            typeof skill.config?.folderPath === 'string'
+              ? skill.config.folderPath
+              : skill.source?.path || '';
+          return folderPath ? path.join(folderPath, item) : item;
+        }),
       })),
       skill_catalog: (options.skillCatalog || []).map((skill) => ({
         id: skill.id,

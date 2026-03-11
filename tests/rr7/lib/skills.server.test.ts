@@ -9,10 +9,12 @@ const baseSkill = (overrides: Partial<Skill>): Skill => ({
   type: 'builtin',
   enabled: true,
   createdAt: Date.now(),
-  config: {},
+  config: overrides.config || {},
   instructions: overrides.instructions,
   tools: overrides.tools || [],
   source: overrides.source,
+  references: overrides.references,
+  scripts: overrides.scripts,
 });
 
 describe('selectMatchedSkills', () => {
@@ -57,5 +59,37 @@ describe('selectMatchedSkills', () => {
     });
 
     expect(matched.map((skill) => skill.id)).toEqual(['research']);
+  });
+
+  it('requires explicit bulletin intent before matching arlis-bulletin', () => {
+    const skills = [
+      baseSkill({
+        id: 'repo-skill-arlis-bulletin',
+        name: 'arlis-bulletin',
+        description: 'Create intelligence-style analytic bulletins',
+        source: { kind: 'repository', path: '/tmp/skills/arlis-bulletin' },
+        config: {
+          matchPhrases: ['arlis bulletin', 'intelligence brief', 'bluf', 'kiq'],
+        },
+      }),
+      baseSkill({
+        id: 'xlsx',
+        name: 'Spreadsheet',
+        description: 'Work with xlsx spreadsheets',
+        source: { kind: 'repository', path: '/tmp/skills/xlsx' },
+      }),
+    ];
+
+    const spreadsheetOnly = selectMatchedSkills(skills, {
+      prompt: 'Summarize the attached drone_articles_analysis.xlsx and list the top findings.',
+    });
+    expect(spreadsheetOnly.map((skill) => skill.id)).toEqual(['xlsx']);
+
+    const bulletinRequest = selectMatchedSkills(skills, {
+      prompt:
+        'Use drone_articles_analysis.xlsx to draft an ARLIS bulletin with a BLUF and KIQ.',
+    });
+    expect(bulletinRequest.map((skill) => skill.id)).toContain('repo-skill-arlis-bulletin');
+    expect(bulletinRequest.map((skill) => skill.id)).toContain('xlsx');
   });
 });
