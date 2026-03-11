@@ -16,6 +16,15 @@ strands_models_mod = types.ModuleType("strands.models")
 strands_models_mod.LiteLLMModel = object
 sys.modules.setdefault("strands.models", strands_models_mod)
 
+conversation_mod = types.ModuleType("strands.agent.conversation_manager")
+conversation_mod.SummarizingConversationManager = object
+sys.modules.setdefault("strands.agent.conversation_manager", conversation_mod)
+
+session_mod = types.ModuleType("strands.session")
+session_mod.FileSessionManager = object
+session_mod.S3SessionManager = object
+sys.modules.setdefault("strands.session", session_mod)
+
 litellm_mod = types.ModuleType("litellm")
 litellm_mod.modify_params = False
 sys.modules.setdefault("litellm", litellm_mod)

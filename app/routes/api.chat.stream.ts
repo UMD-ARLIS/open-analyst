@@ -1,40 +1,40 @@
-import { getSettings } from "~/lib/db/queries/settings.server";
+import { getSettings } from '~/lib/db/queries/settings.server';
 import {
   createTask,
   getTask,
+  listMessages,
   updateTask,
   appendTaskEvent,
   createMessage,
-} from "~/lib/db/queries/tasks.server";
-import { createAgentProvider } from "~/lib/agent/index.server";
-import { getProjectWorkspace } from "~/lib/filesystem.server";
-import { resolveModel } from "~/lib/litellm.server";
+} from '~/lib/db/queries/tasks.server';
+import { createAgentProvider } from '~/lib/agent/index.server';
+import { getProjectWorkspace } from '~/lib/filesystem.server';
+import { resolveModel } from '~/lib/litellm.server';
+import { applyChatStreamEvent, extractFinalAssistantText } from '~/lib/chat-stream';
+import type { ContentBlock } from '~/lib/types';
 import {
   getActiveSkillToolNames,
   getSkillCatalog,
   listActiveSkills,
   selectMatchedSkills,
-} from "~/lib/skills.server";
-import type { HeadlessConfig } from "~/lib/types";
-import type { Route } from "./+types/api.chat.stream";
+} from '~/lib/skills.server';
+import type { HeadlessConfig } from '~/lib/types';
+import type { Route } from './+types/api.chat.stream';
 
 export async function action({ request }: Route.ActionArgs) {
-  if (request.method !== "POST") {
-    return Response.json({ error: "Method not allowed" }, { status: 405 });
+  if (request.method !== 'POST') {
+    return Response.json({ error: 'Method not allowed' }, { status: 405 });
   }
 
   const body = await request.json();
   const settings = await getSettings();
   const requestMessages = Array.isArray(body.messages) ? body.messages : [];
-  const projectId = String(
-    body.projectId || settings.activeProjectId || ""
-  ).trim();
+  const projectId = String(body.projectId || settings.activeProjectId || '').trim();
 
   if (!projectId) {
     return Response.json(
       {
-        error:
-          "No active project configured. Create/select a project first.",
+        error: 'No active project configured. Create/select a project first.',
       },
       { status: 400 }
     );
@@ -45,15 +45,15 @@ export async function action({ request }: Route.ActionArgs) {
 
   // Build a minimal HeadlessConfig for the agent provider
   const cfg: HeadlessConfig = {
-    provider: "openai",
-    apiKey: "",
-    baseUrl: "",
-    bedrockRegion: "us-east-1",
+    provider: 'openai',
+    apiKey: '',
+    baseUrl: '',
+    bedrockRegion: 'us-east-1',
     model,
-    openaiMode: "chat",
+    openaiMode: 'chat',
     workingDir: settings.workingDir || process.cwd(),
     workingDirType: settings.workingDirType,
-    s3Uri: settings.s3Uri || "",
+    s3Uri: settings.s3Uri || '',
     activeProjectId: projectId,
     agentBackend: settings.agentBackend,
   };
@@ -61,15 +61,15 @@ export async function action({ request }: Route.ActionArgs) {
   const provider = createAgentProvider(cfg);
   const workingDir = getProjectWorkspace(projectId);
   const activeSkills = listActiveSkills();
-  const prompt = String(body.prompt || "").trim();
-  const chatMessages = requestMessages.length
+  const prompt = String(body.prompt || '').trim();
+  const requestedChatMessages = requestMessages.length
     ? requestMessages
     : prompt
-      ? [{ role: "user", content: prompt }]
+      ? [{ role: 'user', content: prompt }]
       : [];
   const matchedSkills = selectMatchedSkills(activeSkills, {
     prompt,
-    messages: chatMessages,
+    messages: requestedChatMessages,
   });
 
   // Reuse existing task or create new one
@@ -77,22 +77,46 @@ export async function action({ request }: Route.ActionArgs) {
   if (body.taskId) {
     const existing = await getTask(body.taskId);
     if (!existing || existing.projectId !== projectId) {
-      return Response.json({ error: "Task not found" }, { status: 404 });
+      return Response.json({ error: 'Task not found' }, { status: 404 });
     }
-    task = await updateTask(existing.id, { status: "running" });
+    task = await updateTask(existing.id, { status: 'running' });
   } else {
     task = await createTask(projectId, {
-      title: prompt.slice(0, 500) || "New Task",
-      type: "chat",
-      status: "running",
+      title: prompt.slice(0, 500) || 'New Task',
+      type: 'chat',
+      status: 'running',
     });
   }
+
+  const persistedMessages = requestedChatMessages.length === 0 ? await listMessages(task.id) : [];
+  const chatMessages = requestedChatMessages.length
+    ? requestedChatMessages
+    : persistedMessages.map((message) => {
+        const content = Array.isArray(message.content) ? message.content : [];
+        const text = content
+          .filter(
+            (block): block is { type: 'text'; text: string } =>
+              Boolean(block) &&
+              typeof block === 'object' &&
+              (block as { type?: string }).type === 'text' &&
+              typeof (block as { text?: unknown }).text === 'string'
+          )
+          .map((block) => block.text)
+          .join('\n');
+        return { role: message.role, content: text };
+      });
+  const previousSummary =
+    task.planSnapshot &&
+    typeof task.planSnapshot === 'object' &&
+    typeof (task.planSnapshot as { summary?: unknown }).summary === 'string'
+      ? String((task.planSnapshot as { summary: string }).summary)
+      : '';
 
   // Persist user message (unless already persisted, e.g. from task creation)
   if (!body.skipUserMessage && prompt) {
     await createMessage(task.id, {
-      role: "user",
-      content: [{ type: "text", text: prompt }],
+      role: 'user',
+      content: [{ type: 'text', text: prompt }],
     });
   }
 
@@ -100,54 +124,68 @@ export async function action({ request }: Route.ActionArgs) {
     async start(controller) {
       const encoder = new TextEncoder();
       const send = (event: string, data: unknown) => {
-        controller.enqueue(
-          encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
-        );
+        controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
       };
 
       // Emit task_created so the client knows the task ID immediately
-      send("task_created", { taskId: task.id });
+      send('task_created', { taskId: task.id });
 
       try {
-        let fullText = "";
-        for await (const event of provider.stream(
-          chatMessages,
-          {
-            projectId,
-            workingDir,
-            collectionId: String(body.collectionId || "").trim() || undefined,
-            collectionName:
-              String(body.collectionName || "").trim() || "Task Sources",
-            deepResearch: body.deepResearch === true,
-            skills: matchedSkills,
-            skillCatalog: getSkillCatalog(activeSkills),
-            activeToolNames: getActiveSkillToolNames(activeSkills),
-          }
-        )) {
+        let contentBlocks: ContentBlock[] = [];
+        for await (const event of provider.stream(chatMessages, {
+          projectId,
+          workingDir,
+          sessionId: task.id,
+          taskSummary: previousSummary,
+          collectionId: String(body.collectionId || '').trim() || undefined,
+          collectionName: String(body.collectionName || '').trim() || 'Task Sources',
+          deepResearch: body.deepResearch === true,
+          skills: matchedSkills,
+          skillCatalog: getSkillCatalog(activeSkills),
+          activeToolNames: getActiveSkillToolNames(activeSkills),
+        })) {
           send(event.type, event);
-          if (event.type === "text_delta" && event.text) {
-            fullText += event.text;
-          }
+          contentBlocks = applyChatStreamEvent(contentBlocks, event);
           await appendTaskEvent(task.id, event.type, {
             text: event.text,
+            phase: event.phase,
+            status: event.status,
             toolName: event.toolName,
+            toolUseId: event.toolUseId,
+            toolInput: event.toolInput,
+            toolOutput: event.toolOutput,
             toolStatus: event.toolStatus,
             error: event.error,
           });
         }
 
+        const fullText = extractFinalAssistantText(contentBlocks);
         // Persist assistant message
         await createMessage(task.id, {
-          role: "assistant",
-          content: [{ type: "text", text: fullText }],
+          role: 'assistant',
+          content: contentBlocks.length > 0 ? contentBlocks : [{ type: 'text', text: fullText }],
         });
 
-        send("done", { taskId: task.id });
-        await updateTask(task.id, { status: "completed" });
+        send('done', { taskId: task.id });
+        await updateTask(task.id, {
+          status: 'completed',
+          planSnapshot: {
+            summary: [
+              `Task: ${task.title || 'Untitled task'}`,
+              prompt ? `Latest user request: ${prompt}` : '',
+              matchedSkills.length
+                ? `Skills used: ${matchedSkills.map((skill) => skill.name).join(', ')}`
+                : '',
+              fullText ? `Latest answer: ${fullText.slice(0, 1200)}` : '',
+            ]
+              .filter(Boolean)
+              .join('\n'),
+          },
+        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        send("error", { error: msg });
-        await updateTask(task.id, { status: "failed" });
+        send('error', { error: msg });
+        await updateTask(task.id, { status: 'failed' });
       } finally {
         await provider.dispose?.();
         controller.close();
@@ -157,9 +195,9 @@ export async function action({ request }: Route.ActionArgs) {
 
   return new Response(stream, {
     headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
     },
   });
 }

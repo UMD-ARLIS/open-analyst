@@ -1,6 +1,6 @@
 # Open Analyst Architecture
 
-Last updated: 2026-03-10
+Last updated: 2026-03-11
 
 ## Overview
 
@@ -76,7 +76,8 @@ Instead:
 2. `app/routes/api.chat.stream.ts` creates or resumes a task
 3. the route selects an agent provider from `app/lib/agent/index.server.ts`
 4. the current provider, `StrandsProvider`, forwards the request to the Python service
-5. streamed events are persisted as task events and forwarded back to the browser over SSE
+5. the Python service emits structured status, tool, and text events
+6. streamed events are persisted as task events and folded into structured assistant message content over SSE
 
 ### 5. Python Strands service
 
@@ -91,10 +92,13 @@ Key files:
 The Node app sends the Python service:
 
 - chat messages
+- task session id and compact task summary
 - project id
 - workspace directory
 - collection context
 - LiteLLM connection details
+
+The current agent runtime now uses native Strands session persistence plus a summarizing conversation manager. When S3 artifact storage is configured, the same AWS environment is also used for Strands session storage.
 
 ### 6. Retrieval and knowledge management
 
@@ -127,7 +131,8 @@ Per-project working files are stored in workspace folders created by `app/lib/fi
 1. User opens a task route.
 2. The task loader fetches task metadata and stored messages.
 3. `ChatView` streams responses from `/api/chat/stream`.
-4. The browser appends live text while the server persists the final assistant message.
+4. The browser renders structured status/tool progress blocks plus the final answer during the run.
+5. The server persists task events, the structured assistant message, and a compact task summary for continuity on later turns.
 
 ### Knowledge flow
 

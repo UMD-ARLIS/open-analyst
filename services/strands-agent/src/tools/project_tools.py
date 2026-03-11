@@ -99,4 +99,19 @@ def capture_artifact(
 
     doc_title = document.get("title", title or relative_path)
     source_uri = document.get("sourceUri") or document.get("storageUri") or ""
-    return f"Captured artifact: {doc_title} ({source_uri})"
+    document_id = document.get("id", "")
+    artifact_url = ""
+    download_url = ""
+    if document_id:
+        artifact_url = (
+            f"{api_base_url}/api/projects/{project_id}/documents/{document_id}/artifact"
+        )
+        download_url = f"{artifact_url}?download=1"
+
+    lines = [f"Captured artifact: {doc_title}"]
+    if source_uri:
+        lines.append(f"Storage URI: {source_uri}")
+    if artifact_url:
+        lines.append(f"Open artifact: {artifact_url}")
+        lines.append(f"Download artifact: {download_url}")
+    return "\n".join(lines)

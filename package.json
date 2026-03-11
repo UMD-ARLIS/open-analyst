@@ -3,7 +3,7 @@
   "version": "2.0.0",
   "description": "Remote-first analyst application with headless agent runtime",
   "scripts": {
-    "dev": "react-router dev",
+    "dev": "cross-env CHOKIDAR_USEPOLLING=1 react-router dev",
     "build": "react-router build",
     "start": "react-router-serve build/server/index.js",
     "dev:agent": "cd services/strands-agent && uv run python src/main.py",
@@ -66,6 +66,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
     "drizzle-kit": "^0.31.9",
     "esbuild": "^0.27.3",
     "eslint": "^9.39.1",

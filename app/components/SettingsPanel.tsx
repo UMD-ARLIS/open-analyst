@@ -114,6 +114,7 @@ export function SettingsPanel({
           <button
             key={tab.id}
             onClick={() => onTabChange?.(tab.id)}
+            data-testid={`settings-tab-${tab.id}`}
             className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left ${activeTab === tab.id ? 'bg-accent/10 text-accent' : 'text-text-secondary hover:bg-surface-hover'}`}
           >
             <tab.icon className="w-4 h-4" />
@@ -327,14 +328,24 @@ function CredentialsTab({ initialItems }: { initialItems?: any[] }) {
 
       <div className="space-y-2">
         {items.map((item) => (
-          <div key={item.id} className="p-3 rounded border border-border bg-surface-muted flex items-center justify-between gap-2">
+          <div
+            key={item.id}
+            data-testid={`credential-row-${item.id}`}
+            className="p-3 rounded border border-border bg-surface-muted flex items-center justify-between gap-2"
+          >
             <div>
               <div className="text-sm font-medium">{item.name}</div>
               <div className="text-xs text-text-muted">{item.username}</div>
             </div>
             <div className="flex gap-2">
               <button className="btn btn-secondary" onClick={() => { setEditingId(item.id); setDraft(item); }}>Edit</button>
-              <button className="btn btn-ghost text-error" onClick={() => handleDelete(item.id)}><Trash2 className="w-4 h-4" /></button>
+              <button
+                className="btn btn-ghost text-error"
+                onClick={() => handleDelete(item.id)}
+                aria-label={`Delete credential ${item.name}`}
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
             </div>
           </div>
         ))}
@@ -426,14 +437,24 @@ function ConnectorsTab({ initialServers, initialPresets }: { initialServers?: an
           const status = statuses.find((s) => s.id === server.id);
           const count = tools.filter((t) => t.serverId === server.id).length || status?.toolCount || 0;
           return (
-            <div key={server.id} className="p-3 rounded border border-border bg-surface-muted flex items-center justify-between gap-3">
+            <div
+              key={server.id}
+              data-testid={`mcp-server-row-${server.id}`}
+              className="p-3 rounded border border-border bg-surface-muted flex items-center justify-between gap-3"
+            >
               <div>
                 <div className="text-sm font-medium">{server.name}</div>
                 <div className="text-xs text-text-muted">{server.type} • {status?.connected ? 'connected' : 'disabled'} • {count} tools</div>
               </div>
               <div className="flex gap-2">
                 <button className="btn btn-secondary" onClick={() => toggleServer(server)}>{server.enabled ? 'Disable' : 'Enable'}</button>
-                <button className="btn btn-ghost text-error" onClick={() => deleteServer(server.id)}><Trash2 className="w-4 h-4" /></button>
+                <button
+                  className="btn btn-ghost text-error"
+                  onClick={() => deleteServer(server.id)}
+                  aria-label={`Delete MCP server ${server.name}`}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
               </div>
             </div>
           );
@@ -509,14 +530,26 @@ function SkillsTab({ initialSkills }: { initialSkills?: any[] }) {
       )}
       <div className="space-y-2">
         {skills.map((skill) => (
-          <div key={skill.id} className="p-3 rounded border border-border bg-surface-muted flex items-center justify-between gap-2">
+          <div
+            key={skill.id}
+            data-testid={`skill-row-${skill.id}`}
+            className="p-3 rounded border border-border bg-surface-muted flex items-center justify-between gap-2"
+          >
             <div>
               <div className="text-sm font-medium">{skill.name}</div>
               <div className="text-xs text-text-muted">{skill.type}</div>
             </div>
             <div className="flex gap-2">
               <button className="btn btn-secondary" onClick={() => void toggleEnabled(skill)}>{skill.enabled ? 'Disable' : 'Enable'}</button>
-              {skill.type !== 'builtin' && <button className="btn btn-ghost text-error" onClick={() => void deleteSkill(skill.id)}><Trash2 className="w-4 h-4" /></button>}
+              {skill.type !== 'builtin' && (
+                <button
+                  className="btn btn-ghost text-error"
+                  onClick={() => void deleteSkill(skill.id)}
+                  aria-label={`Delete skill ${skill.name}`}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
             </div>
           </div>
         ))}

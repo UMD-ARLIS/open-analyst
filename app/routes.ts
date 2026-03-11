@@ -51,4 +51,6 @@ export default [
     route("tasks/create", "routes/api.tasks.create.ts"),
     route("debug/store", "routes/api.debug.store.ts"),
   ]),
+
+  route("*", "routes/_catchall.tsx"),
 ] satisfies RouteConfig;

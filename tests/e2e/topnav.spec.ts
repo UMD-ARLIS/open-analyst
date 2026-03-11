@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { createProject, deleteProject, BASE_URL, waitForHydration } from "./helpers";
+import { createProject, deleteProject, scopedName, waitForHydration } from "./helpers";
 
 test.describe("TopNav", () => {
   test("logo and branding visible", async ({ page }) => {
@@ -41,7 +41,9 @@ test.describe("TopNav", () => {
 
     // Should navigate to the new project page
     await expect(page).toHaveURL(/\/projects\/.+/);
-    await expect(page.getByText(name)).toBeVisible();
+    const projectsResponse = await request.get("http://localhost:5173/api/projects");
+    const { projects } = await projectsResponse.json();
+    expect(projects.some((project: { name: string }) => project.name === name)).toBe(true);
 
     // Cleanup: extract project id from URL and delete
     const url = page.url();
@@ -97,5 +99,35 @@ test.describe("TopNav", () => {
       el.classList.contains("light")
     );
     expect(hasLightAfter).not.toBe(hasLightBefore);
+  });
+
+  test("project switcher rename and delete controls work", async ({
+    page,
+    request,
+  }) => {
+    const project = await createProject(request, scopedName("Rename Me"));
+    const replacementName = scopedName("Renamed Project");
+    try {
+      await page.goto(`/projects/${project.id}`);
+      await waitForHydration(page);
+
+      await page.getByLabel("Switch project").click();
+      await page.getByRole("button", { name: `Rename project ${project.name}` }).click();
+      await page.getByLabel("Project name").fill(replacementName);
+      await page.getByRole("button", { name: "Rename", exact: true }).click();
+      await expect(page.getByLabel("Switch project")).toContainText(replacementName);
+
+      await page.getByLabel("Switch project").click();
+      await page.getByRole("button", { name: `Delete project ${replacementName}` }).click();
+      await page.getByRole("button", { name: "Delete", exact: true }).click();
+      await expect(page).toHaveURL(/\/$/);
+    } finally {
+      const remainingProjectsResponse = await request.get("http://localhost:5173/api/projects");
+      const { projects } = await remainingProjectsResponse.json();
+      const remaining = projects.find((item: { id: string }) => item.id === project.id);
+      if (remaining) {
+        await deleteProject(request, project.id);
+      }
+    }
   });
 });

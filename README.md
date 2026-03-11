@@ -17,6 +17,8 @@ At runtime the system looks like this:
 4. Chat routes proxy model/tool execution to the Strands agent service.
 5. The agent calls back into the Node app for project retrieval and source capture.
 
+Chat responses are streamed back as structured progress events plus the final answer. Tool calls, status updates, and the final assistant text are stored on the task so the UI can resume live task state cleanly.
+
 See:
 
 - `docs/ARCHITECTURE.md`
@@ -88,6 +90,17 @@ pnpm dev:all
 ```
 
 The web app serves the UI and API routes on port `5173` by default. The Strands service defaults to `8080`.
+
+## Production-Like Run
+
+Build and serve the web app:
+
+```bash
+pnpm build
+pnpm start
+```
+
+`pnpm start` only serves the React Router build. The Strands agent is still a separate process and must be started independently, for example with `pnpm dev:agent` or a process manager that points `STRANDS_URL` at the running agent service.
 
 ## Database
 

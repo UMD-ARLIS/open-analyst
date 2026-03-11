@@ -1,8 +1,10 @@
 """Creates the Strands Agent with model, tools, and system prompt."""
 
 import litellm
+from strands.agent.conversation_manager import SummarizingConversationManager
 from strands import Agent
 from strands.models import LiteLLMModel
+from strands.session import FileSessionManager, S3SessionManager
 
 from config import settings
 from tools import create_project_tools
@@ -153,6 +155,14 @@ def _build_system_prompt(payload: dict) -> str:
             "Do not answer that question with generic capabilities alone."
         )
 
+    task_summary = str(payload.get("task_summary", "")).strip()
+    if task_summary:
+        base += (
+            "\n\nTask memory summary from earlier work in this task. "
+            "Use it to maintain continuity, but prefer newer user instructions if they conflict.\n\n"
+            f"{task_summary}"
+        )
+
     # RAG context injection: query the Node.js project store for relevant docs
     project_id = payload.get("project_id", "")
     api_base_url = payload.get("api_base_url", settings.node_api_base_url)
@@ -203,6 +213,26 @@ def _build_prompt(messages: list) -> str:
     return "\n\n".join(parts) if parts else ""
 
 
+def _build_session_manager(payload: dict):
+    session_id = str(payload.get("session_id", "")).strip()
+    if not session_id:
+        return None
+
+    bucket = str(payload.get("session_s3_bucket", "")).strip()
+    if bucket:
+        prefix = str(payload.get("session_s3_prefix", "strands/sessions")).strip()
+        region_name = str(payload.get("session_s3_region", "")).strip() or None
+        return S3SessionManager(
+            session_id=session_id,
+            bucket=bucket,
+            prefix=prefix,
+            region_name=region_name,
+        )
+
+    storage_dir = str(payload.get("session_storage_dir", "")).strip() or None
+    return FileSessionManager(session_id=session_id, storage_dir=storage_dir)
+
+
 def create_agent(payload: dict) -> Agent:
     """Create a configured Strands Agent from an invocation payload.
 
@@ -233,9 +263,27 @@ def create_agent(payload: dict) -> Agent:
     )
 
     system_prompt = _build_system_prompt(payload)
+    session_manager = _build_session_manager(payload)
+    conversation_manager = SummarizingConversationManager(
+        summary_ratio=0.35,
+        preserve_recent_messages=12,
+    )
+
+    hooks = payload.get("_hooks", [])
+    if not isinstance(hooks, list):
+        hooks = []
 
     return Agent(
         model=model,
         tools=tools,
         system_prompt=system_prompt,
+        agent_id="open-analyst",
+        session_manager=session_manager,
+        conversation_manager=conversation_manager,
+        hooks=hooks,
+        trace_attributes={
+            "project_id": str(payload.get("project_id", "")).strip(),
+            "collection_id": str(payload.get("collection_id", "")).strip(),
+            "session_id": str(payload.get("session_id", "")).strip(),
+        },
     )

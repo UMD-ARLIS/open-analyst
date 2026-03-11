@@ -1,37 +1,61 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanupTempDataDir, createTempDataDir } from "../setup";
+import { describe, expect, it } from 'vitest';
+import { selectMatchedSkills } from '~/lib/skills.server';
+import type { Skill } from '~/lib/types';
 
-describe("skills.server", () => {
-  let tempDir: string;
+const baseSkill = (overrides: Partial<Skill>): Skill => ({
+  id: overrides.id || 'skill-id',
+  name: overrides.name || 'Skill',
+  description: overrides.description,
+  type: 'builtin',
+  enabled: true,
+  createdAt: Date.now(),
+  config: {},
+  instructions: overrides.instructions,
+  tools: overrides.tools || [],
+  source: overrides.source,
+});
 
-  beforeEach(() => {
-    tempDir = createTempDataDir();
+describe('selectMatchedSkills', () => {
+  it('prioritizes file-specific skills from prompt extensions', () => {
+    const skills = [
+      baseSkill({
+        id: 'xlsx',
+        name: 'Spreadsheet',
+        description: 'Work with xlsx spreadsheets',
+        source: { kind: 'repository', path: '/tmp/xlsx' },
+      }),
+      baseSkill({
+        id: 'docx',
+        name: 'Document',
+        description: 'Work with docx files',
+        source: { kind: 'repository', path: '/tmp/docx' },
+      }),
+    ];
+
+    const matched = selectMatchedSkills(skills, {
+      prompt: 'Summarize the attached budget.xlsx and preserve formulas.',
+    });
+
+    expect(matched.map((skill) => skill.id)).toEqual(['xlsx']);
   });
 
-  afterEach(() => {
-    cleanupTempDataDir(tempDir);
-  });
+  it('uses the broader user history instead of only the latest token match', () => {
+    const skills = [
+      baseSkill({
+        id: 'research',
+        name: 'Web Research',
+        description: 'Search the web and synthesize sources',
+        tools: ['web_search'],
+      }),
+    ];
 
-  it("discovers repository skills and keeps builtins enabled", async () => {
-    const { listSkills } = await import("~/lib/skills.server");
-    const skills = listSkills();
+    const matched = selectMatchedSkills(skills, {
+      messages: [
+        { role: 'user', content: 'Research the latest drone defense reporting' },
+        { role: 'assistant', content: 'I can help with that.' },
+      ],
+    });
 
-    expect(skills.some((skill) => skill.id === "builtin-web-research" && skill.enabled)).toBe(true);
-    expect(skills.some((skill) => skill.id === "builtin-code-ops" && skill.enabled)).toBe(true);
-
-    const pdfSkill = skills.find((skill) => skill.id === "repo-skill-pdf");
-    expect(pdfSkill).toBeDefined();
-    expect(pdfSkill?.source?.kind).toBe("repository");
-    expect(pdfSkill?.instructions).toContain("PDF Processing Guide");
-    expect(pdfSkill?.enabled).toBe(false);
-  });
-
-  it("persists enablement overrides for repository skills", async () => {
-    const { setSkillEnabled, listActiveSkills } = await import("~/lib/skills.server");
-    const updated = setSkillEnabled("repo-skill-pdf", true);
-
-    expect(updated?.enabled).toBe(true);
-    const active = listActiveSkills();
-    expect(active.some((skill) => skill.id === "repo-skill-pdf")).toBe(true);
+    expect(matched.map((skill) => skill.id)).toEqual(['research']);
   });
 });

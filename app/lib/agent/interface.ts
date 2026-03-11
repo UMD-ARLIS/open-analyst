@@ -1,31 +1,36 @@
-import type { Skill, SkillCatalogEntry } from "../types";
+import type { Skill, SkillCatalogEntry } from '../types';
 
 export interface AgentEvent {
   type:
-    | "text_delta"
-    | "tool_call_start"
-    | "tool_call_end"
-    | "thinking"
-    | "agent_start"
-    | "agent_end"
-    | "error";
+    | 'status'
+    | 'text_delta'
+    | 'tool_call_start'
+    | 'tool_call_end'
+    | 'agent_start'
+    | 'agent_end'
+    | 'error';
   text?: string;
+  phase?: string;
+  status?: 'running' | 'completed' | 'error';
   toolName?: string;
+  toolUseId?: string;
   toolInput?: Record<string, unknown>;
   toolOutput?: string;
-  toolStatus?: "running" | "completed" | "error";
+  toolStatus?: 'running' | 'completed' | 'error';
   error?: string;
   timestamp: number;
 }
 
 export interface AgentChatMessage {
-  role: "user" | "assistant" | "system";
+  role: 'user' | 'assistant' | 'system';
   content: string;
 }
 
 export interface AgentChatOptions {
   projectId: string;
   workingDir: string;
+  sessionId?: string;
+  taskSummary?: string;
   collectionId?: string;
   collectionName?: string;
   deepResearch?: boolean;
@@ -36,8 +41,8 @@ export interface AgentChatOptions {
 
 export interface AgentTrace {
   id: string;
-  type: "tool_call" | "tool_result";
-  status: "running" | "completed" | "error";
+  type: 'tool_call' | 'tool_result';
+  status: 'running' | 'completed' | 'error';
   title: string;
   toolName?: string;
   toolInput?: Record<string, unknown>;
@@ -51,13 +56,7 @@ export interface AgentChatResult {
 
 export interface AgentProvider {
   readonly name: string;
-  chat(
-    messages: AgentChatMessage[],
-    options: AgentChatOptions
-  ): Promise<AgentChatResult>;
-  stream(
-    messages: AgentChatMessage[],
-    options: AgentChatOptions
-  ): AsyncIterable<AgentEvent>;
+  chat(messages: AgentChatMessage[], options: AgentChatOptions): Promise<AgentChatResult>;
+  stream(messages: AgentChatMessage[], options: AgentChatOptions): AsyncIterable<AgentEvent>;
   dispose?(): Promise<void>;
 }

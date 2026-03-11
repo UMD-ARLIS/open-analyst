@@ -38,6 +38,7 @@ export type ContentBlock =
   | FileAttachmentContent
   | ToolUseContent
   | ToolResultContent
+  | StatusContent
   | ThinkingContent;
 
 export interface TextContent {
@@ -80,6 +81,13 @@ export interface ToolResultContent {
   }>;
 }
 
+export interface StatusContent {
+  type: 'status';
+  status: 'running' | 'completed' | 'error';
+  text: string;
+  phase?: string;
+}
+
 export interface ThinkingContent {
   type: 'thinking';
   thinking: string;
@@ -120,7 +128,7 @@ export interface Skill {
   instructions?: string;
   tools?: string[];
   source?: {
-    kind: "builtin" | "repository" | "custom";
+    kind: 'builtin' | 'repository' | 'custom';
     path?: string;
   };
   references?: string[];
@@ -194,8 +202,20 @@ export interface PermissionRule {
 
 // IPC Event types
 export type ClientEvent =
-  | { type: 'session.start'; payload: { title: string; prompt: string; cwd?: string; allowedTools?: string[]; content?: ContentBlock[] } }
-  | { type: 'session.continue'; payload: { sessionId: string; prompt: string; content?: ContentBlock[] } }
+  | {
+      type: 'session.start';
+      payload: {
+        title: string;
+        prompt: string;
+        cwd?: string;
+        allowedTools?: string[];
+        content?: ContentBlock[];
+      };
+    }
+  | {
+      type: 'session.continue';
+      payload: { sessionId: string; prompt: string; content?: ContentBlock[] };
+    }
   | { type: 'session.stop'; payload: { sessionId: string } }
   | { type: 'session.delete'; payload: { sessionId: string } }
   | { type: 'session.list'; payload: Record<string, never> }
@@ -250,13 +270,19 @@ export interface SandboxSyncStatus {
 export type ServerEvent =
   | { type: 'stream.message'; payload: { sessionId: string; message: Message } }
   | { type: 'stream.partial'; payload: { sessionId: string; delta: string } }
-  | { type: 'session.status'; payload: { sessionId: string; status: SessionStatus; error?: string } }
+  | {
+      type: 'session.status';
+      payload: { sessionId: string; status: SessionStatus; error?: string };
+    }
   | { type: 'session.update'; payload: { sessionId: string; updates: Partial<Session> } }
   | { type: 'session.list'; payload: { sessions: Session[] } }
   | { type: 'permission.request'; payload: PermissionRequest }
   | { type: 'question.request'; payload: UserQuestionRequest }
   | { type: 'trace.step'; payload: { sessionId: string; step: TraceStep } }
-  | { type: 'trace.update'; payload: { sessionId: string; stepId: string; updates: Partial<TraceStep> } }
+  | {
+      type: 'trace.update';
+      payload: { sessionId: string; stepId: string; updates: Partial<TraceStep> };
+    }
   | { type: 'folder.selected'; payload: { path: string } }
   | { type: 'config.status'; payload: { isConfigured: boolean; config: AppConfig | null } }
   | { type: 'sandbox.progress'; payload: SandboxSetupProgress }
@@ -276,7 +302,15 @@ export interface Settings {
 }
 
 // Tool types
-export type ToolName = 'read' | 'write' | 'edit' | 'glob' | 'grep' | 'bash' | 'webFetch' | 'webSearch';
+export type ToolName =
+  | 'read'
+  | 'write'
+  | 'edit'
+  | 'glob'
+  | 'grep'
+  | 'bash'
+  | 'webFetch'
+  | 'webSearch';
 
 export interface ToolResult {
   success: boolean;
@@ -371,7 +405,7 @@ export interface MCPToolInfo {
 export interface Credential {
   id: string;
   name: string;
-  type: "email" | "website" | "api" | "other";
+  type: 'email' | 'website' | 'api' | 'other';
   service?: string;
   username: string;
   password?: string;
@@ -384,7 +418,7 @@ export interface Credential {
 export interface McpServerConfig {
   id: string;
   name: string;
-  type: "stdio" | "sse";
+  type: 'stdio' | 'sse';
   command?: string;
   args?: string[];
   env?: Record<string, string>;
@@ -395,7 +429,7 @@ export interface McpServerConfig {
 
 export interface McpPreset {
   name: string;
-  type: "stdio" | "sse";
+  type: 'stdio' | 'sse';
   command: string;
   args: string[];
   requiresEnv: string[];
@@ -508,7 +542,7 @@ export interface SkillConfig {
   id: string;
   name: string;
   description: string;
-  type: "builtin" | "custom";
+  type: 'builtin' | 'custom';
   enabled: boolean;
   config: Record<string, unknown>;
   createdAt: number;
@@ -519,5 +553,5 @@ export interface ArtifactRecord {
   filename: string;
   mimeType: string;
   size: number;
-  backend: "local" | "s3";
+  backend: 'local' | 's3';
 }

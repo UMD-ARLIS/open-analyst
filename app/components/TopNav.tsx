@@ -195,7 +195,7 @@ export function TopNav() {
                             currentName: project.name,
                           });
                         }}
-                        aria-label="Rename project"
+                        aria-label={`Rename project ${project.name}`}
                       >
                         ✎
                       </button>
@@ -208,7 +208,7 @@ export function TopNav() {
                             projectName: project.name,
                           });
                         }}
-                        aria-label="Delete project"
+                        aria-label={`Delete project ${project.name}`}
                       >
                         ✕
                       </button>

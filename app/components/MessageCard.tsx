@@ -7,9 +7,17 @@ import { useAppStore } from '~/lib/store';
 import {
   splitTextByFileMentions,
   splitChildrenByFileMentions,
-  getFileLinkButtonClassName
+  getFileLinkButtonClassName,
 } from '~/lib/file-link';
-import type { Message, ContentBlock, ToolUseContent, ToolResultContent, QuestionItem, FileAttachmentContent } from '~/lib/types';
+import type {
+  Message,
+  ContentBlock,
+  ToolUseContent,
+  ToolResultContent,
+  QuestionItem,
+  FileAttachmentContent,
+  StatusContent,
+} from '~/lib/types';
 import {
   ChevronDown,
   ChevronRight,
@@ -62,6 +70,10 @@ function normalizeContentBlocks(rawContent: unknown): ContentBlock[] {
   });
 }
 
+function escapeCurrencyMarkdown(text: string): string {
+  return text.replace(/\$(?=\d)/g, '\\$');
+}
+
 export function MessageCard({ message, isStreaming }: MessageCardProps) {
   const isUser = message.role === 'user';
   const isQueued = message.localStatus === 'queued';
@@ -72,8 +84,8 @@ export function MessageCard({ message, isStreaming }: MessageCardProps) {
   // Extract text content for copying
   const getTextContent = () => {
     return contentBlocks
-      .filter(block => block.type === 'text')
-      .map(block => (block as { type: 'text'; text: string }).text)
+      .filter((block) => block.type === 'text')
+      .map((block) => (block as { type: 'text'; text: string }).text)
       .join('\n');
   };
 
@@ -93,36 +105,36 @@ export function MessageCard({ message, isStreaming }: MessageCardProps) {
         <div className="space-y-1">
           <div className="text-[11px] text-text-muted text-right pr-1">You</div>
           <div className="flex items-start gap-2 justify-end group">
-          <div
-            className={`message-user px-4 py-2.5 max-w-[80%] break-words ${
-              isQueued ? 'opacity-70 border-dashed' : ''
-            } ${isCancelled ? 'opacity-60' : ''}`}
-          >
-            {isQueued && (
-              <div className="mb-1 flex items-center gap-1 text-[11px] text-text-muted">
-                <Clock className="w-3 h-3" />
-                <span>Queued</span>
-              </div>
-            )}
-            {isCancelled && (
-              <div className="mb-1 flex items-center gap-1 text-[11px] text-text-muted">
-                <XCircle className="w-3 h-3" />
-                <span>Canceled</span>
-              </div>
-            )}
-            {contentBlocks.length === 0 ? (
-              <span className="text-text-muted italic">Empty message</span>
-            ) : (
-              contentBlocks.map((block, index) => (
-                <ContentBlockView
-                  key={index}
-                  block={block}
-                  isUser={isUser}
-                  isStreaming={isStreaming}
-                />
-              ))
-            )}
-          </div>
+            <div
+              className={`message-user px-4 py-2.5 max-w-[80%] break-words ${
+                isQueued ? 'opacity-70 border-dashed' : ''
+              } ${isCancelled ? 'opacity-60' : ''}`}
+            >
+              {isQueued && (
+                <div className="mb-1 flex items-center gap-1 text-[11px] text-text-muted">
+                  <Clock className="w-3 h-3" />
+                  <span>Queued</span>
+                </div>
+              )}
+              {isCancelled && (
+                <div className="mb-1 flex items-center gap-1 text-[11px] text-text-muted">
+                  <XCircle className="w-3 h-3" />
+                  <span>Canceled</span>
+                </div>
+              )}
+              {contentBlocks.length === 0 ? (
+                <span className="text-text-muted italic">Empty message</span>
+              ) : (
+                contentBlocks.map((block, index) => (
+                  <ContentBlockView
+                    key={index}
+                    block={block}
+                    isUser={isUser}
+                    isStreaming={isStreaming}
+                  />
+                ))
+              )}
+            </div>
             <button
               onClick={handleCopy}
               className="mt-1 w-6 h-6 flex items-center justify-center rounded-md bg-surface-muted hover:bg-surface-active transition-all opacity-0 group-hover:opacity-100 flex-shrink-0"
@@ -154,15 +166,15 @@ export function MessageCard({ message, isStreaming }: MessageCardProps) {
           {contentBlocks
             .filter((block) => block.type !== 'text' || (block as { text?: string }).text)
             .map((block, index) => (
-            <ContentBlockView
-              key={index}
-              block={block}
-              isUser={isUser}
-              isStreaming={isStreaming}
-              allBlocks={contentBlocks}
-              message={message}
-            />
-          ))}
+              <ContentBlockView
+                key={index}
+                block={block}
+                isUser={isUser}
+                isStreaming={isStreaming}
+                allBlocks={contentBlocks}
+                message={message}
+              />
+            ))}
           {contentBlocks.length === 0 && (
             <div className="text-sm text-text-muted italic">Empty message</div>
           )}
@@ -180,7 +192,13 @@ interface ContentBlockViewProps {
   message?: Message; // Pass the whole message to access previous messages
 }
 
-function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: ContentBlockViewProps) {
+function ContentBlockView({
+  block,
+  isUser,
+  isStreaming,
+  allBlocks,
+  message,
+}: ContentBlockViewProps) {
   const { workingDir } = useAppStore();
   const currentWorkingDir = workingDir;
 
@@ -211,7 +229,10 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
     </button>
   );
 
-  const renderFileMentionParts = (parts: ReturnType<typeof splitChildrenByFileMentions>, keyPrefix: string) =>
+  const renderFileMentionParts = (
+    parts: ReturnType<typeof splitChildrenByFileMentions>,
+    keyPrefix: string
+  ) =>
     parts.map((part, partIndex) => {
       const key = `${keyPrefix}-${partIndex}`;
       if (part.type === 'file') {
@@ -236,11 +257,11 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
     case 'text': {
       const textBlock = block as { type: 'text'; text: string };
       const text = textBlock.text || '';
-      
+
       if (!text) {
         return null;
       }
-      
+
       // Simple text display for user messages, Markdown for assistant
       if (isUser) {
         return (
@@ -250,7 +271,7 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
           </p>
         );
       }
-      
+
       return (
         <div className="prose-chat max-w-none text-text-primary">
           <ReactMarkdown
@@ -294,38 +315,29 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
                     return renderFileButton(parts[0].value);
                   }
                   return (
-                    <code className="px-1.5 py-0.5 rounded bg-surface-muted text-accent font-mono text-sm" {...props}>
+                    <code
+                      className="px-1.5 py-0.5 rounded bg-surface-muted text-accent font-mono text-sm"
+                      {...props}
+                    >
                       {children}
                     </code>
                   );
                 }
 
                 return (
-                  <CodeBlock language={match[1]}>
-                    {String(children).replace(/\n$/, '')}
-                  </CodeBlock>
+                  <CodeBlock language={match[1]}>{String(children).replace(/\n$/, '')}</CodeBlock>
                 );
               },
               p({ children }) {
-                return (
-                  <p className="text-left">
-                    {renderChildrenWithFileLinks(children, 'p')}
-                  </p>
-                );
+                return <p className="text-left">{renderChildrenWithFileLinks(children, 'p')}</p>;
               },
               li({ children }) {
-                return (
-                  <li className="text-left">
-                    {renderChildrenWithFileLinks(children, 'li')}
-                  </li>
-                );
+                return <li className="text-left">{renderChildrenWithFileLinks(children, 'li')}</li>;
               },
               table({ children }) {
                 return (
                   <div className="overflow-x-auto my-3">
-                    <table className="min-w-full border-collapse">
-                      {children}
-                    </table>
+                    <table className="min-w-full border-collapse">{children}</table>
                   </div>
                 );
               },
@@ -355,32 +367,25 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
                 );
               },
               strong({ children }) {
-                return (
-                  <strong>
-                    {renderChildrenWithFileLinks(children, 'strong')}
-                  </strong>
-                );
+                return <strong>{renderChildrenWithFileLinks(children, 'strong')}</strong>;
               },
               em({ children }) {
-                return (
-                  <em>
-                    {renderChildrenWithFileLinks(children, 'em')}
-                  </em>
-                );
+                return <em>{renderChildrenWithFileLinks(children, 'em')}</em>;
               },
             }}
           >
-            {text}
+            {escapeCurrencyMarkdown(text)}
           </ReactMarkdown>
-          {isStreaming && (
-            <span className="inline-block w-2 h-4 bg-accent ml-1 animate-pulse" />
-          )}
+          {isStreaming && <span className="inline-block w-2 h-4 bg-accent ml-1 animate-pulse" />}
         </div>
       );
     }
 
     case 'image': {
-      const imageBlock = block as { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
+      const imageBlock = block as {
+        type: 'image';
+        source: { type: 'base64'; media_type: string; data: string };
+      };
       const { source } = imageBlock;
       const imageSrc = `data:${source.media_type};base64,${source.data}`;
 
@@ -415,16 +420,33 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
     case 'tool_result':
       return <ToolResultBlock block={block} allBlocks={allBlocks} message={message} />;
 
+    case 'status':
+      return <StatusBlock block={block} />;
+
     case 'thinking':
-      return (
-        <div className="text-sm text-text-muted italic">
-          {block.thinking}
-        </div>
-      );
+      return <div className="text-sm text-text-muted italic">{block.thinking}</div>;
 
     default:
       return null;
   }
+}
+
+function StatusBlock({ block }: { block: StatusContent }) {
+  const tone =
+    block.status === 'error'
+      ? 'border-error/30 bg-error/5 text-error'
+      : block.status === 'completed'
+        ? 'border-success/30 bg-success/5 text-success'
+        : 'border-accent/30 bg-accent/5 text-accent';
+
+  return (
+    <div
+      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium ${tone}`}
+    >
+      {block.status === 'running' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+      <span>{block.text}</span>
+    </div>
+  );
 }
 
 function ToolUseBlock({ block }: { block: ToolUseContent }) {
@@ -451,25 +473,25 @@ function ToolUseBlock({ block }: { block: ToolUseContent }) {
       }
       return `Using MCP tool`;
     }
-    
+
     const titles: Record<string, string> = {
-      'Bash': 'Running command',
-      'Read': 'Reading file',
-      'Write': 'Writing file',
-      'Edit': 'Editing file',
-      'Glob': 'Searching files',
-      'Grep': 'Searching content',
-      'WebFetch': 'Fetching URL',
-      'WebSearch': 'Searching web',
-      'TodoRead': 'Reading todo list',
-      'TodoWrite': 'Updating todo list',
-      'read_file': 'Reading file',
-      'write_file': 'Writing file',
-      'edit_file': 'Editing file',
-      'list_directory': 'Listing directory',
-      'glob': 'Searching files',
-      'grep': 'Searching content',
-      'execute_command': 'Running command',
+      Bash: 'Running command',
+      Read: 'Reading file',
+      Write: 'Writing file',
+      Edit: 'Editing file',
+      Glob: 'Searching files',
+      Grep: 'Searching content',
+      WebFetch: 'Fetching URL',
+      WebSearch: 'Searching web',
+      TodoRead: 'Reading todo list',
+      TodoWrite: 'Updating todo list',
+      read_file: 'Reading file',
+      write_file: 'Writing file',
+      edit_file: 'Editing file',
+      list_directory: 'Listing directory',
+      glob: 'Searching files',
+      grep: 'Searching content',
+      execute_command: 'Running command',
     };
     return titles[name] || `Using ${name}`;
   };
@@ -479,30 +501,34 @@ function ToolUseBlock({ block }: { block: ToolUseContent }) {
   const mcpServerName = isMCPTool ? block.name.match(/^mcp__(.+?)__/)?.[1] : null;
 
   return (
-    <div className={`rounded-xl border overflow-hidden bg-surface ${
-      isMCPTool ? 'border-purple-500/30 bg-gradient-to-br from-purple-500/5 to-transparent' : 'border-border'
-    }`}>
+    <div
+      className={`rounded-xl border overflow-hidden bg-surface ${
+        isMCPTool
+          ? 'border-purple-500/30 bg-gradient-to-br from-purple-500/5 to-transparent'
+          : 'border-border'
+      }`}
+    >
       <button
         onClick={() => setExpanded(!expanded)}
         className={`w-full px-4 py-3 flex items-center gap-3 transition-colors ${
-          isMCPTool 
-            ? 'bg-purple-500/10 hover:bg-purple-500/20' 
+          isMCPTool
+            ? 'bg-purple-500/10 hover:bg-purple-500/20'
             : 'bg-surface-muted hover:bg-surface-active'
         }`}
       >
-        <div className={`w-6 h-6 rounded-lg flex items-center justify-center ${
-          isMCPTool 
-            ? 'bg-purple-500/20' 
-            : 'bg-accent-muted'
-        }`}>
+        <div
+          className={`w-6 h-6 rounded-lg flex items-center justify-center ${
+            isMCPTool ? 'bg-purple-500/20' : 'bg-accent-muted'
+          }`}
+        >
           {isMCPTool ? (
             <Plug className="w-3.5 h-3.5 text-purple-500" />
           ) : (
-          <Terminal className="w-3.5 h-3.5 text-accent" />
+            <Terminal className="w-3.5 h-3.5 text-accent" />
           )}
         </div>
         <div className="flex-1 text-left">
-        <span className="font-medium text-sm text-text-primary">{getToolTitle(block.name)}</span>
+          <span className="font-medium text-sm text-text-primary">{getToolTitle(block.name)}</span>
           {isMCPTool && mcpServerName && (
             <span className="ml-2 px-1.5 py-0.5 text-xs rounded bg-purple-500/20 text-purple-500">
               {mcpServerName}
@@ -520,9 +546,7 @@ function ToolUseBlock({ block }: { block: ToolUseContent }) {
         <div className="p-4 space-y-4 bg-surface">
           <div>
             <p className="text-xs font-medium text-text-muted mb-2">Request</p>
-            <pre className="code-block text-xs">
-              {JSON.stringify(block.input, null, 2)}
-            </pre>
+            <pre className="code-block text-xs">{JSON.stringify(block.input, null, 2)}</pre>
           </div>
         </div>
       )}
@@ -544,10 +568,10 @@ function TodoWriteBlock({ block }: { block: ToolUseContent }) {
   const todos: TodoItem[] = (block.input as any)?.todos || [];
 
   // Calculate progress
-  const completedCount = todos.filter(t => t.status === 'completed').length;
+  const completedCount = todos.filter((t) => t.status === 'completed').length;
   const totalCount = todos.length;
   const progress = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
-  const inProgressItem = todos.find(t => t.status === 'in_progress');
+  const inProgressItem = todos.find((t) => t.status === 'in_progress');
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -609,7 +633,7 @@ function TodoWriteBlock({ block }: { block: ToolUseContent }) {
 
       {/* Progress bar */}
       <div className="h-0.5 bg-surface-muted">
-        <div 
+        <div
           className="h-full bg-gradient-to-r from-blue-500 to-accent transition-all duration-500"
           style={{ width: `${progress}%` }}
         />
@@ -619,15 +643,13 @@ function TodoWriteBlock({ block }: { block: ToolUseContent }) {
       {expanded && (
         <div className="p-3 space-y-1">
           {todos.map((todo, index) => (
-            <div 
+            <div
               key={todo.id || index}
               className={`flex items-start gap-2.5 px-2 py-1.5 rounded-lg transition-colors ${
                 todo.status === 'in_progress' ? 'bg-accent/5' : ''
               }`}
             >
-              <div className="mt-0.5 flex-shrink-0">
-                {getStatusIcon(todo.status)}
-              </div>
+              <div className="mt-0.5 flex-shrink-0">{getStatusIcon(todo.status)}</div>
               <span className={`text-sm leading-relaxed ${getStatusStyle(todo.status)}`}>
                 {todo.content}
               </span>
@@ -646,26 +668,26 @@ function AskUserQuestionBlock({ block }: { block: ToolUseContent }) {
     (_questionId: string, _answer: string) => {
       setPendingQuestion(null);
     },
-    [setPendingQuestion],
+    [setPendingQuestion]
   );
   const [selections, setSelections] = useState<Record<number, string[]>>({});
   const [submitted, setSubmitted] = useState(false);
 
   // Parse questions from input
   const questions: QuestionItem[] = (block.input as any)?.questions || [];
-  
+
   // Check if this question is the pending one (waiting for response)
   const isPending = pendingQuestion?.toolUseId === block.id;
   const isAnswered = submitted || !isPending;
 
   const handleOptionToggle = (questionIdx: number, label: string, multiSelect: boolean) => {
     if (isAnswered) return; // Don't allow changes after submission
-    
-    setSelections(prev => {
+
+    setSelections((prev) => {
       const current = prev[questionIdx] || [];
       if (multiSelect) {
         if (current.includes(label)) {
-          return { ...prev, [questionIdx]: current.filter(l => l !== label) };
+          return { ...prev, [questionIdx]: current.filter((l) => l !== label) };
         } else {
           return { ...prev, [questionIdx]: [...current, label] };
         }
@@ -677,19 +699,22 @@ function AskUserQuestionBlock({ block }: { block: ToolUseContent }) {
 
   const handleSubmit = () => {
     if (!pendingQuestion || submitted) return;
-    
+
     const answersJson = JSON.stringify(selections);
     console.log('[AskUserQuestionBlock] Submitting answer:', answersJson);
     respondToQuestion(pendingQuestion.questionId, answersJson);
     setSubmitted(true);
   };
 
-  const canSubmit = isPending && !submitted && questions.every((q, idx) => {
-    if (q.options && q.options.length > 0) {
-      return (selections[idx] || []).length > 0;
-    }
-    return true;
-  });
+  const canSubmit =
+    isPending &&
+    !submitted &&
+    questions.every((q, idx) => {
+      if (q.options && q.options.length > 0) {
+        return (selections[idx] || []).length > 0;
+      }
+      return true;
+    });
 
   const getOptionLetter = (index: number) => String.fromCharCode(65 + index);
 
@@ -713,9 +738,7 @@ function AskUserQuestionBlock({ block }: { block: ToolUseContent }) {
             {isAnswered ? 'Questions answered' : 'Please answer to continue'}
           </span>
         </div>
-        {isAnswered && (
-          <CheckCircle2 className="w-5 h-5 text-success ml-auto" />
-        )}
+        {isAnswered && <CheckCircle2 className="w-5 h-5 text-success ml-auto" />}
       </div>
 
       {/* Questions */}
@@ -728,19 +751,17 @@ function AskUserQuestionBlock({ block }: { block: ToolUseContent }) {
                 {q.header}
               </span>
             )}
-            
+
             {/* Question text */}
-            <p className="text-text-primary font-medium text-sm">
-              {q.question}
-            </p>
-            
+            <p className="text-text-primary font-medium text-sm">{q.question}</p>
+
             {/* Options */}
             {q.options && q.options.length > 0 && (
               <div className="space-y-1.5 mt-2">
                 {q.options.map((option, optIdx) => {
                   const isSelected = (selections[qIdx] || []).includes(option.label);
                   const letter = getOptionLetter(optIdx);
-                  
+
                   return (
                     <button
                       key={optIdx}
@@ -757,15 +778,19 @@ function AskUserQuestionBlock({ block }: { block: ToolUseContent }) {
                       }`}
                     >
                       <div className="flex items-start gap-2.5">
-                        <div className={`w-6 h-6 rounded flex items-center justify-center flex-shrink-0 text-xs font-semibold ${
-                          isSelected
-                            ? 'bg-accent text-white'
-                            : 'bg-border-subtle text-text-secondary'
-                        }`}>
+                        <div
+                          className={`w-6 h-6 rounded flex items-center justify-center flex-shrink-0 text-xs font-semibold ${
+                            isSelected
+                              ? 'bg-accent text-white'
+                              : 'bg-border-subtle text-text-secondary'
+                          }`}
+                        >
                           {isSelected ? <Check className="w-3.5 h-3.5" /> : letter}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <span className={`text-sm ${isSelected ? 'text-accent font-medium' : 'text-text-primary'}`}>
+                          <span
+                            className={`text-sm ${isSelected ? 'text-accent font-medium' : 'text-text-primary'}`}
+                          >
                             {option.label}
                           </span>
                           {option.description && (
@@ -803,7 +828,14 @@ function AskUserQuestionBlock({ block }: { block: ToolUseContent }) {
   );
 }
 
-function ToolResultBlock({ block, allBlocks }: { block: ToolResultContent; allBlocks?: ContentBlock[]; message?: Message }) {
+function ToolResultBlock({
+  block,
+  allBlocks,
+}: {
+  block: ToolResultContent;
+  allBlocks?: ContentBlock[];
+  message?: Message;
+}) {
   const [expanded, setExpanded] = useState(false);
 
   // Try to find the tool name from allBlocks (same message)
@@ -932,7 +964,9 @@ function ToolResultBlock({ block, allBlocks }: { block: ToolResultContent; allBl
         ) : (
           <CheckCircle2 className="w-5 h-5 text-success" />
         )}
-        <span className={`font-medium text-sm flex-1 text-left ${block.isError ? 'text-error' : 'text-success'}`}>
+        <span
+          className={`font-medium text-sm flex-1 text-left ${block.isError ? 'text-error' : 'text-success'}`}
+        >
           {summary}
           {hasImages && block.images && (
             <span className="ml-2 text-xs text-text-muted">
@@ -949,9 +983,7 @@ function ToolResultBlock({ block, allBlocks }: { block: ToolResultContent; allBl
 
       {expanded && (
         <div className="p-4 bg-surface space-y-4">
-          <pre className="code-block text-xs whitespace-pre-wrap font-mono">
-            {block.content}
-          </pre>
+          <pre className="code-block text-xs whitespace-pre-wrap font-mono">{block.content}</pre>
 
           {/* Render images if present */}
           {block.images && block.images.length > 0 && (
@@ -985,9 +1017,7 @@ function CodeBlock({ language, children }: { language: string; children: string 
   return (
     <div className="relative group my-3">
       <div className="absolute top-2 right-2 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-        <span className="text-xs text-text-muted px-2 py-1 rounded bg-surface">
-          {language}
-        </span>
+        <span className="text-xs text-text-muted px-2 py-1 rounded bg-surface">{language}</span>
         <button
           onClick={handleCopy}
           className="w-7 h-7 flex items-center justify-center rounded bg-surface hover:bg-surface-hover transition-colors"

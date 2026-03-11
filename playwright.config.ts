@@ -9,6 +9,12 @@ export default defineConfig({
     baseURL: "http://localhost:5173",
     trace: "on-first-retry",
   },
+  webServer: {
+    command: "pnpm dev:all",
+    url: "http://localhost:5173",
+    reuseExistingServer: true,
+    timeout: 120_000,
+  },
   projects: [
     {
       name: "chromium",
