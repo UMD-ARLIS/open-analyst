@@ -62,7 +62,7 @@ CLAUDE.md
 
 # codex
 .codex/*
-AGENTS.md
+# AGENTS.md
 
 dist*
 resources/node
