@@ -1,7 +1,7 @@
 import type { HeadlessConfig } from './types';
 import { createAgentProvider } from './agent/index.server';
 import { getProjectWorkspace } from './filesystem.server';
-import type { Skill, SkillCatalogEntry } from './types';
+import type { McpServerConfig, Skill, SkillCatalogEntry } from './types';
 
 interface ChatMessage {
   role: string;
@@ -18,6 +18,7 @@ interface ChatOptions {
   skills?: Skill[];
   skillCatalog?: SkillCatalogEntry[];
   activeToolNames?: string[];
+  mcpServers?: McpServerConfig[];
   onRunEvent?: (eventType: string, payload: Record<string, unknown>) => void;
 }
 
@@ -55,6 +56,7 @@ export async function runAgentChat(
         skills: options.skills || [],
         skillCatalog: options.skillCatalog || [],
         activeToolNames: options.activeToolNames || [],
+        mcpServers: options.mcpServers || [],
       }
     );
 

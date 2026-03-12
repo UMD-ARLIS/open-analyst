@@ -37,7 +37,6 @@ See:
 Copy these files and fill in the required values:
 
 - `.env.example` -> `.env`
-- `services/strands-agent/.env.example` -> `services/strands-agent/.env`
 
 Required variables:
 
@@ -55,6 +54,17 @@ Optional variables:
 - `ARTIFACT_S3_REGION`
 - `ARTIFACT_S3_PREFIX`
 - `ARTIFACT_S3_ENDPOINT`
+- `ANALYST_MCP_API_KEY`
+- `ANALYST_MCP_POSTGRES_DSN`
+- `ANALYST_MCP_LITELLM_BASE_URL`
+- `ANALYST_MCP_LITELLM_CHAT_MODEL`
+- `ANALYST_MCP_LITELLM_EMBEDDING_MODEL`
+
+The repo-root `.env` is the primary config source for the web app, the Strands agent, and `services/analyst-mcp`.
+If needed, `services/strands-agent/.env` and `services/analyst-mcp/.env` can still be used as local overrides, but they are no longer required for normal development.
+
+If `ANALYST_MCP_POSTGRES_DSN` is omitted, `analyst_mcp` falls back to `DATABASE_URL`.
+When both services share one PostgreSQL database, Open Analyst uses the normal `public` schema and `analyst_mcp` uses its own `analyst_mcp` schema automatically.
 
 ## Local Development
 
@@ -63,13 +73,48 @@ Install dependencies:
 ```bash
 pnpm install
 cd services/strands-agent && uv sync
+cd ../analyst-mcp && uv sync
+cd ../..
 ```
 
-Start Postgres:
+Start Postgres locally:
 
 ```bash
 docker compose up -d
 ```
+
+Or use AWS RDS:
+
+1. Point `DATABASE_URL` at the target database.
+2. If you want `analyst_mcp` on the same database, either set `ANALYST_MCP_POSTGRES_DSN` to the same DSN or omit it and let it fall back to `DATABASE_URL`.
+3. If the database does not exist yet, create it from an existing admin-capable database first.
+4. Run `pnpm db:migrate` once for the Open Analyst app schema.
+5. Start `analyst_mcp`; it will create its own `analyst_mcp` schema and tables on first startup.
+
+Example RDS flow:
+
+```bash
+node - <<'NODE'
+require('dotenv/config');
+const { Client } = require('pg');
+const url = new URL(process.env.DATABASE_URL);
+url.pathname = '/analyst';
+(async () => {
+  const client = new Client({ connectionString: url.toString() });
+  await client.connect();
+  const exists = await client.query("select 1 from pg_database where datname = 'open_analyst'");
+  if (exists.rowCount === 0) {
+    await client.query('CREATE DATABASE open_analyst');
+  }
+  await client.end();
+})();
+NODE
+
+pnpm db:migrate
+```
+
+For the Node app, an RDS development DSN such as `...?sslmode=no-verify` works with the current `pg` driver behavior.
+`analyst_mcp` normalizes that DSN for psycopg automatically, so the same RDS connection settings can be reused there without a separate workaround.
 
 Run the web app:
 
@@ -91,7 +136,23 @@ Run both from the repo root:
 pnpm dev:all
 ```
 
-The web app serves the UI and API routes on port `5173` by default. The Strands service defaults to `8080`.
+The web app serves the UI and API routes on port `5173` by default. The Strands service defaults to `8080`. The vendored Analyst MCP service defaults to `8000`.
+
+After startup, verify the MCP service directly:
+
+```bash
+curl http://localhost:8000/health
+curl -H "x-api-key: $ANALYST_MCP_API_KEY" http://localhost:8000/api/health/details
+curl http://localhost:5173/api/mcp/status
+```
+
+Then in the UI:
+
+1. Open Settings -> MCP.
+2. Enable `Analyst MCP`.
+3. Confirm the URL is `http://localhost:8000/mcp`.
+4. Confirm the `x-api-key` header matches `ANALYST_MCP_API_KEY`.
+5. Start a task chat and pin the connector if you want to force analyst tool usage for a turn.
 
 ## Production-Like Run
 
@@ -129,6 +190,7 @@ pnpm db:studio
 ```bash
 pnpm test -- --run
 pnpm test:agent
+pnpm test:analyst-mcp
 pnpm run build
 ```
 

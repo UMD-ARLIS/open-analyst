@@ -41,6 +41,10 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
   // URL-persisted state
   const deepResearch = searchParams.get('deepResearch') === 'true';
   const collectionParam = searchParams.get('collection');
+  const pinnedConnectorIds = (searchParams.get('mcp') || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
   const headerRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const connectorMeasureRef = useRef<HTMLDivElement>(null);
@@ -217,6 +221,7 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
       projectId,
       taskId,
       collectionId,
+      pinnedMcpServerIds: pinnedConnectorIds,
       skipUserMessage: true,
     }).then(() => revalidate());
   }, [taskId, initialMessages]);
@@ -485,6 +490,7 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
         taskId,
         collectionId,
         deepResearch: deepResearch,
+        pinnedMcpServerIds: pinnedConnectorIds,
       });
 
       // Revalidate route data to pick up new messages from DB
@@ -504,6 +510,32 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
 
   const handleStop = () => {
     stop();
+  };
+
+  const togglePinnedConnector = (connectorId: string) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        const current = new Set(
+          (next.get('mcp') || '')
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean)
+        );
+        if (current.has(connectorId)) {
+          current.delete(connectorId);
+        } else {
+          current.add(connectorId);
+        }
+        if (current.size > 0) {
+          next.set('mcp', Array.from(current).join(','));
+        } else {
+          next.delete('mcp');
+        }
+        return next;
+      },
+      { replace: true }
+    );
   };
 
   const toggleKnowledgePanel = () => {
@@ -526,52 +558,77 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
         {/* Header */}
         <div
           ref={headerRef}
-          className="relative h-14 border-b border-border grid grid-cols-[1fr_auto_1fr] items-center px-6 bg-surface/80 backdrop-blur-sm"
+          className="relative border-b border-border bg-surface/80 backdrop-blur-sm"
         >
-          <div />
-          <h2
-            ref={titleRef}
-            className="font-medium text-text-primary text-center truncate max-w-lg"
-          >
-            {taskTitle}
-          </h2>
-          <div className="flex items-center gap-2 justify-self-end">
-            {activeConnectors.length > 0 && (
-              <>
-                <div
-                  ref={connectorMeasureRef}
-                  aria-hidden="true"
-                  className="absolute left-0 top-0 -z-10 opacity-0 pointer-events-none"
-                >
-                  <div className="flex items-center gap-2 px-2 py-1 rounded-lg border border-purple-500/20">
-                    <Plug className="w-3.5 h-3.5" />
-                    <span className="text-xs font-medium whitespace-nowrap">
-                      {`${activeConnectors.length} connector${activeConnectors.length === 1 ? '' : 's'}`}
+          <div className="grid h-14 grid-cols-[1fr_auto_1fr] items-center px-6">
+            <div />
+            <h2
+              ref={titleRef}
+              className="font-medium text-text-primary text-center truncate max-w-lg"
+            >
+              {taskTitle}
+            </h2>
+            <div className="flex items-center gap-2 justify-self-end">
+              {activeConnectors.length > 0 && (
+                <>
+                  <div
+                    ref={connectorMeasureRef}
+                    aria-hidden="true"
+                    className="absolute left-0 top-0 -z-10 opacity-0 pointer-events-none"
+                  >
+                    <div className="flex items-center gap-2 px-2 py-1 rounded-lg border border-amber-500/20">
+                      <Plug className="w-3.5 h-3.5" />
+                      <span className="text-xs font-medium whitespace-nowrap">
+                        {`${activeConnectors.length} connector${activeConnectors.length === 1 ? '' : 's'}`}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 px-2 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                    <Plug className="w-3.5 h-3.5 text-amber-600" />
+                    <span className="text-xs text-amber-700 font-medium">
+                      {showConnectorLabel
+                        ? `${activeConnectors.length} connector${activeConnectors.length === 1 ? '' : 's'}`
+                        : activeConnectors.length}
                     </span>
                   </div>
-                </div>
-                <div className="flex items-center gap-2 px-2 py-1 rounded-lg bg-purple-500/10 border border-purple-500/20">
-                  <Plug className="w-3.5 h-3.5 text-purple-500" />
-                  <span className="text-xs text-purple-500 font-medium">
-                    {showConnectorLabel
-                      ? `${activeConnectors.length} connector${activeConnectors.length === 1 ? '' : 's'}`
-                      : activeConnectors.length}
-                  </span>
-                </div>
-              </>
-            )}
-            <button
-              onClick={toggleKnowledgePanel}
-              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
-                knowledgePanelOpen
-                  ? 'bg-accent-muted text-accent'
-                  : 'hover:bg-surface-hover text-text-secondary'
-              }`}
-              aria-label={knowledgePanelOpen ? 'Close knowledge panel' : 'Open knowledge panel'}
-            >
-              <BookOpen className="w-4 h-4" />
-            </button>
+                </>
+              )}
+              <button
+                onClick={toggleKnowledgePanel}
+                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                  knowledgePanelOpen
+                    ? 'bg-accent-muted text-accent'
+                    : 'hover:bg-surface-hover text-text-secondary'
+                }`}
+                aria-label={knowledgePanelOpen ? 'Close knowledge panel' : 'Open knowledge panel'}
+              >
+                <BookOpen className="w-4 h-4" />
+              </button>
+            </div>
           </div>
+          {activeConnectors.length > 0 && (
+            <div className="px-6 pb-3 flex flex-wrap gap-2">
+              {activeConnectors.map((connector) => {
+                const isPinned = pinnedConnectorIds.includes(connector.id);
+                return (
+                  <button
+                    key={connector.id}
+                    type="button"
+                    onClick={() => togglePinnedConnector(connector.id)}
+                    className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs transition-colors ${
+                      isPinned
+                        ? 'border-amber-500/40 bg-amber-500/15 text-amber-800'
+                        : 'border-border bg-surface text-text-secondary hover:bg-surface-hover'
+                    }`}
+                  >
+                    <Plug className="w-3.5 h-3.5" />
+                    <span>{connector.alias || connector.name}</span>
+                    <span className="text-[11px] opacity-70">{connector.toolCount} tools</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Messages */}

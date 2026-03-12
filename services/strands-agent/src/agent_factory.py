@@ -1,12 +1,18 @@
 """Creates the Strands Agent with model, tools, and system prompt."""
 
 import os
+import re
+from dataclasses import dataclass
 
 import litellm
+from mcp.client.sse import sse_client
+from mcp.client.stdio import StdioServerParameters, stdio_client
+from mcp.client.streamable_http import streamablehttp_client
 from strands.agent.conversation_manager import SummarizingConversationManager
 from strands import Agent
 from strands.models import LiteLLMModel
 from strands.session import FileSessionManager, S3SessionManager
+from strands.tools.mcp.mcp_client import MCPClient
 
 from config import settings
 from tools import create_project_tools
@@ -36,6 +42,12 @@ You help users research topics, analyze documents, and organize findings into st
 """
 
 
+@dataclass
+class CreatedAgent:
+    agent: Agent
+    mcp_clients: list[MCPClient]
+
+
 def _extract_active_skills(payload: dict) -> list[dict]:
     raw = payload.get("skills", [])
     if not isinstance(raw, list):
@@ -63,6 +75,17 @@ def _extract_active_tool_names(payload: dict) -> set[str]:
     if not isinstance(raw, list):
         return set()
     return {str(tool).strip() for tool in raw if str(tool).strip()}
+
+
+def _extract_mcp_servers(payload: dict) -> list[dict]:
+    raw = payload.get("mcp_servers", [])
+    if not isinstance(raw, list):
+        return []
+    result = []
+    for server in raw:
+        if isinstance(server, dict):
+            result.append(server)
+    return result
 
 
 def _collect_allowed_tools(payload: dict) -> set[str] | None:
@@ -101,6 +124,44 @@ def _build_skill_catalog_prompt(skill_catalog: list[dict]) -> str:
         "Do not answer that question with generic capabilities alone.\n\n"
         "Enabled skill catalog:\n"
         + "\n".join(entries)
+    )
+
+
+def _tool_name(tool_obj) -> str:
+    return (
+        str(getattr(tool_obj, "__name__", "")).strip()
+        or str(getattr(tool_obj, "name", "")).strip()
+        or str(getattr(tool_obj, "tool_name", "")).strip()
+    )
+
+
+def _tool_description(tool_obj) -> str:
+    description = str(getattr(tool_obj, "description", "")).strip()
+    if description:
+        return description
+    doc = str(getattr(tool_obj, "__doc__", "")).strip()
+    return doc.splitlines()[0] if doc else ""
+
+
+def _build_tool_catalog_prompt(tools: list) -> str:
+    entries: list[str] = []
+    for tool_obj in tools:
+        name = _tool_name(tool_obj)
+        if not name:
+            continue
+        description = _tool_description(tool_obj)
+        entry = f"- {name}"
+        if description:
+            entry += f": {description}"
+        entries.append(entry)
+    if not entries:
+        return ""
+    return (
+        "Enabled tool catalog:\n"
+        + "\n".join(entries)
+        + "\n\n"
+        + "If the user asks what tools are available, answer with the exact tool names from this catalog. "
+        + "Prefer MCP-prefixed tool names when an MCP tool is the right answer."
     )
 
 
@@ -215,24 +276,48 @@ def _is_skill_catalog_question(text: str) -> bool:
     )
 
 
-def _build_system_prompt(payload: dict) -> str:
+def _is_tool_catalog_question(text: str) -> bool:
+    lowered = text.lower()
+    return (
+        ("tool" in lowered or "connector" in lowered or "mcp" in lowered)
+        and (
+            "available" in lowered
+            or "what" in lowered
+            or "which" in lowered
+            or "list" in lowered
+            or "have" in lowered
+        )
+    )
+
+
+def _build_system_prompt(payload: dict, tools: list | None = None) -> str:
     """Build the system prompt, optionally augmented with RAG context."""
     base = SYSTEM_PROMPT
     skill_catalog = _extract_skill_catalog(payload)
     skills = _extract_active_skills(payload)
+    last_user = _get_last_user_message(payload.get("messages", []))
     skill_catalog_prompt = _build_skill_catalog_prompt(skill_catalog)
     active_skill_prompt = _build_active_skill_prompt(skills)
+    tool_catalog_prompt = _build_tool_catalog_prompt(tools or []) if _is_tool_catalog_question(last_user) else ""
     if skill_catalog_prompt:
         base += f"\n\n{skill_catalog_prompt}"
     if active_skill_prompt:
         base += f"\n\n{active_skill_prompt}"
+    if tool_catalog_prompt:
+        base += f"\n\n{tool_catalog_prompt}"
 
-    last_user = _get_last_user_message(payload.get("messages", []))
     if skill_catalog and _is_skill_catalog_question(last_user):
         base += (
             "\n\nThe current user is explicitly asking about available skills. "
             "Answer with the exact enabled skill names from the enabled skill catalog, "
             "and give a brief description of each. "
+            "Do not answer that question with generic capabilities alone."
+        )
+    if tools and _is_tool_catalog_question(last_user):
+        base += (
+            "\n\nThe current user is explicitly asking about available tools. "
+            "Answer with the exact tool names from the enabled tool catalog, "
+            "including MCP-prefixed tools when they are available. "
             "Do not answer that question with generic capabilities alone."
         )
 
@@ -314,7 +399,69 @@ def _build_session_manager(payload: dict):
     return FileSessionManager(session_id=session_id, storage_dir=storage_dir)
 
 
-def create_agent(payload: dict) -> Agent:
+def _sanitize_mcp_prefix(server: dict) -> str:
+    raw = (
+        str(server.get("alias") or "").strip()
+        or str(server.get("name") or "").strip()
+        or str(server.get("id") or "").strip()
+        or "server"
+    )
+    slug = re.sub(r"[^a-z0-9]+", "-", raw.lower()).strip("-") or "server"
+    return f"mcp__{slug}_"
+
+
+def _build_mcp_transport(server: dict):
+    server_type = str(server.get("type", "stdio")).strip().lower()
+    headers = server.get("headers")
+    normalized_headers = headers if isinstance(headers, dict) else None
+
+    if server_type == "stdio":
+        command = str(server.get("command") or "").strip()
+        if not command:
+            raise ValueError("MCP stdio server is missing command")
+        args = server.get("args") if isinstance(server.get("args"), list) else []
+        env = server.get("env") if isinstance(server.get("env"), dict) else None
+        params = StdioServerParameters(
+            command=command,
+            args=[str(arg) for arg in args],
+            env={str(key): str(value) for key, value in (env or {}).items()},
+        )
+        return lambda: stdio_client(params)
+
+    url = str(server.get("url") or "").strip()
+    if not url:
+        raise ValueError("MCP network server is missing url")
+    if server_type == "sse":
+        return lambda: sse_client(
+            url,
+            headers=normalized_headers,
+            timeout=settings.request_timeout_seconds,
+            sse_read_timeout=300,
+        )
+    return lambda: streamablehttp_client(
+        url,
+        headers=normalized_headers,
+        timeout=settings.request_timeout_seconds,
+        sse_read_timeout=300,
+    )
+
+
+def _load_mcp_tools(payload: dict) -> tuple[list, list[MCPClient]]:
+    tools: list = []
+    clients: list[MCPClient] = []
+    for server in _extract_mcp_servers(payload):
+        client = MCPClient(
+            _build_mcp_transport(server),
+            startup_timeout=max(30, int(settings.request_timeout_seconds)),
+            prefix=_sanitize_mcp_prefix(server),
+        )
+        client.start()
+        clients.append(client)
+        tools.extend(client.list_tools_sync())
+    return tools, clients
+
+
+def create_agent(payload: dict) -> CreatedAgent:
     """Create a configured Strands Agent from an invocation payload.
 
     Args:
@@ -342,8 +489,10 @@ def create_agent(payload: dict) -> Agent:
         collection_name=payload.get("collection_name", "Task Sources"),
         allowed_tool_names=_collect_allowed_tools(payload),
     )
+    mcp_tools, mcp_clients = _load_mcp_tools(payload)
+    tools.extend(mcp_tools)
 
-    system_prompt = _build_system_prompt(payload)
+    system_prompt = _build_system_prompt(payload, tools)
     session_manager = _build_session_manager(payload)
     conversation_manager = SummarizingConversationManager(
         summary_ratio=0.35,
@@ -354,17 +503,25 @@ def create_agent(payload: dict) -> Agent:
     if not isinstance(hooks, list):
         hooks = []
 
-    return Agent(
-        model=model,
-        tools=tools,
-        system_prompt=system_prompt,
-        agent_id="open-analyst",
-        session_manager=session_manager,
-        conversation_manager=conversation_manager,
-        hooks=hooks,
-        trace_attributes={
-            "project_id": str(payload.get("project_id", "")).strip(),
-            "collection_id": str(payload.get("collection_id", "")).strip(),
-            "session_id": str(payload.get("session_id", "")).strip(),
-        },
+    return CreatedAgent(
+        agent=Agent(
+            model=model,
+            tools=tools,
+            system_prompt=system_prompt,
+            agent_id="open-analyst",
+            session_manager=session_manager,
+            conversation_manager=conversation_manager,
+            hooks=hooks,
+            trace_attributes={
+                "project_id": str(payload.get("project_id", "")).strip(),
+                "collection_id": str(payload.get("collection_id", "")).strip(),
+                "session_id": str(payload.get("session_id", "")).strip(),
+            },
+        ),
+        mcp_clients=mcp_clients,
     )
+
+
+def cleanup_created_agent(created: CreatedAgent) -> None:
+    for client in reversed(created.mcp_clients):
+        client.stop(None, None, None)

@@ -16,6 +16,35 @@ strands_models_mod = types.ModuleType("strands.models")
 strands_models_mod.LiteLLMModel = object
 sys.modules.setdefault("strands.models", strands_models_mod)
 
+strands_tools_mod = types.ModuleType("strands.tools")
+strands_tools_mod.__path__ = []
+sys.modules.setdefault("strands.tools", strands_tools_mod)
+
+strands_tools_mcp_mod = types.ModuleType("strands.tools.mcp")
+strands_tools_mcp_mod.__path__ = []
+sys.modules.setdefault("strands.tools.mcp", strands_tools_mcp_mod)
+
+mcp_client_mod = types.ModuleType("strands.tools.mcp.mcp_client")
+
+
+class FakeMCPClient:
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+
+    def start(self):
+        return self
+
+    def list_tools_sync(self):
+        return []
+
+    def stop(self, exc_type, exc_val, exc_tb):
+        return None
+
+
+mcp_client_mod.MCPClient = FakeMCPClient
+sys.modules.setdefault("strands.tools.mcp.mcp_client", mcp_client_mod)
+
 conversation_mod = types.ModuleType("strands.agent.conversation_manager")
 conversation_mod.SummarizingConversationManager = object
 sys.modules.setdefault("strands.agent.conversation_manager", conversation_mod)
@@ -29,10 +58,32 @@ litellm_mod = types.ModuleType("litellm")
 litellm_mod.modify_params = False
 sys.modules.setdefault("litellm", litellm_mod)
 
+mcp_mod = types.ModuleType("mcp")
+mcp_mod.__path__ = []
+sys.modules.setdefault("mcp", mcp_mod)
+
+mcp_client_pkg = types.ModuleType("mcp.client")
+mcp_client_pkg.__path__ = []
+sys.modules.setdefault("mcp.client", mcp_client_pkg)
+
+mcp_client_sse = types.ModuleType("mcp.client.sse")
+mcp_client_sse.sse_client = lambda *args, **kwargs: None
+sys.modules.setdefault("mcp.client.sse", mcp_client_sse)
+
+mcp_client_stdio = types.ModuleType("mcp.client.stdio")
+mcp_client_stdio.StdioServerParameters = lambda **kwargs: kwargs
+mcp_client_stdio.stdio_client = lambda *args, **kwargs: None
+sys.modules.setdefault("mcp.client.stdio", mcp_client_stdio)
+
+mcp_client_http = types.ModuleType("mcp.client.streamable_http")
+mcp_client_http.streamablehttp_client = lambda *args, **kwargs: None
+sys.modules.setdefault("mcp.client.streamable_http", mcp_client_http)
+
 from agent_factory import (
     _build_active_skill_prompt,
     _build_skill_catalog_prompt,
     _build_system_prompt,
+    _build_tool_catalog_prompt,
     _collect_allowed_tools,
 )
 
@@ -138,3 +189,37 @@ def test_build_system_prompt_prioritizes_exact_skill_names_for_skill_questions()
     assert "Code Operations" in result
     assert "Web Research" in result
     assert "exact enabled skill names" in result
+
+
+def test_build_tool_catalog_prompt_lists_exact_tool_names():
+    class FakeTool:
+        __name__ = "mcp__analyst__search_library"
+        description = "Search the analyst library"
+
+    result = _build_tool_catalog_prompt([FakeTool()])
+
+    assert "Enabled tool catalog" in result
+    assert "mcp__analyst__search_library: Search the analyst library" in result
+    assert "exact tool names" in result
+
+
+def test_build_system_prompt_prioritizes_exact_tool_names_for_tool_questions():
+    class FakeTool:
+        __name__ = "mcp__analyst__search_library"
+        description = "Search the analyst library"
+
+    result = _build_system_prompt(
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "What tools do you have available right now?",
+                }
+            ],
+        },
+        tools=[FakeTool()],
+    )
+
+    assert "enabled tool catalog" in result.lower()
+    assert "mcp__analyst__search_library" in result
+    assert "exact tool names" in result

@@ -10,6 +10,8 @@ import {
 import { createAgentProvider } from '~/lib/agent/index.server';
 import { getProjectWorkspace } from '~/lib/filesystem.server';
 import { resolveModel } from '~/lib/litellm.server';
+import { getSelectedMcpServers } from '~/lib/mcp.server';
+import { buildToolCatalogText, isToolCatalogQuestion } from '~/lib/tool-catalog.server';
 import { applyChatStreamEvent, extractFinalAssistantText } from '~/lib/chat-stream';
 import type { ContentBlock } from '~/lib/types';
 import {
@@ -41,7 +43,7 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   // Validate model against LiteLLM before sending to agent
-  const model = await resolveModel(settings.model);
+  const model = await resolveModel(settings.model, { requireToolSupport: true });
 
   // Build a minimal HeadlessConfig for the agent provider
   const cfg: HeadlessConfig = {
@@ -62,6 +64,9 @@ export async function action({ request }: Route.ActionArgs) {
   const workingDir = getProjectWorkspace(projectId);
   const activeSkills = listActiveSkills();
   const prompt = String(body.prompt || '').trim();
+  const pinnedMcpServerIds = Array.isArray(body.pinnedMcpServerIds)
+    ? body.pinnedMcpServerIds.map((item: unknown) => String(item)).filter(Boolean)
+    : [];
   const requestedChatMessages = requestMessages.length
     ? requestMessages
     : prompt
@@ -70,6 +75,12 @@ export async function action({ request }: Route.ActionArgs) {
   const matchedSkills = selectMatchedSkills(activeSkills, {
     prompt,
     messages: requestedChatMessages,
+  });
+  const activeToolNames = getActiveSkillToolNames(activeSkills);
+  const selectedMcpServers = await getSelectedMcpServers({
+    prompt,
+    messages: requestedChatMessages,
+    pinnedServerIds: pinnedMcpServerIds,
   });
 
   // Reuse existing task or create new one
@@ -131,6 +142,38 @@ export async function action({ request }: Route.ActionArgs) {
       send('task_created', { taskId: task.id });
 
       try {
+        if (isToolCatalogQuestion({ prompt, messages: chatMessages })) {
+          const text = await buildToolCatalogText({
+            activeToolNames,
+            mcpServers: selectedMcpServers,
+          });
+          send('text_delta', { text });
+          send('agent_end', {});
+          send('done', { taskId: task.id });
+          await appendTaskEvent(task.id, 'text_delta', { text, directResponse: true });
+          await appendTaskEvent(task.id, 'agent_end', { directResponse: true });
+          await createMessage(task.id, {
+            role: 'assistant',
+            content: [{ type: 'text', text }],
+          });
+          await updateTask(task.id, {
+            status: 'completed',
+            planSnapshot: {
+              summary: [
+                `Task: ${task.title || 'Untitled task'}`,
+                prompt ? `Latest user request: ${prompt}` : '',
+                matchedSkills.length
+                  ? `Skills used: ${matchedSkills.map((skill) => skill.name).join(', ')}`
+                  : '',
+                `Latest answer: ${text.slice(0, 1200)}`,
+              ]
+                .filter(Boolean)
+                .join('\n'),
+            },
+          });
+          return;
+        }
+
         let contentBlocks: ContentBlock[] = [];
         for await (const event of provider.stream(chatMessages, {
           projectId,
@@ -142,7 +185,8 @@ export async function action({ request }: Route.ActionArgs) {
           deepResearch: body.deepResearch === true,
           skills: matchedSkills,
           skillCatalog: getSkillCatalog(activeSkills),
-          activeToolNames: getActiveSkillToolNames(activeSkills),
+          activeToolNames,
+          mcpServers: selectedMcpServers,
         })) {
           send(event.type, event);
           contentBlocks = applyChatStreamEvent(contentBlocks, event);
