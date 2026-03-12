@@ -79,6 +79,7 @@ vi.mock("~/lib/skills.server", () => ({
 vi.mock("~/lib/mcp.server", () => ({
   getSelectedMcpServers: vi.fn(async () => selectedMcpServers),
   getMcpTools: vi.fn(async () => discoveredMcpTools),
+  applyProjectMcpContext: vi.fn((servers: unknown) => servers),
 }));
 
 import { action } from "~/routes/api.chat.stream";

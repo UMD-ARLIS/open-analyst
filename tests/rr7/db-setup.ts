@@ -17,6 +17,17 @@ export interface TestDb {
   schemaName: string;
 }
 
+function withSearchPath(connectionString: string, schemaName: string): string {
+  const url = new URL(connectionString);
+  const existing = url.searchParams.get("options");
+  const searchPathOption = `-c search_path=${schemaName},public`;
+  url.searchParams.set(
+    "options",
+    existing ? `${existing} ${searchPathOption}` : searchPathOption,
+  );
+  return url.toString();
+}
+
 const DDL = `
 CREATE TABLE projects (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -112,6 +123,7 @@ export async function createTestDb(): Promise<TestDb> {
   }
 
   const schemaName = `test_${randomUUID().replace(/-/g, "_")}`;
+  const schemaScopedUrl = withSearchPath(url, schemaName);
 
   // Use a single client to set up the schema
   const setupClient = new pg.Client({ connectionString: url });
@@ -125,12 +137,7 @@ export async function createTestDb(): Promise<TestDb> {
   // Create the pool with the test schema in search_path
   // Use pool options to set search_path on each connection
   const pool = new Pool({
-    connectionString: url,
-  });
-
-  // Set search_path on each new connection
-  pool.on("connect", (client) => {
-    client.query(`SET search_path TO "${schemaName}", public`);
+    connectionString: schemaScopedUrl,
   });
 
   const db = drizzle(pool, { schema });
