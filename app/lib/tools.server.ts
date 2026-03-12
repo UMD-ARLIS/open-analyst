@@ -124,23 +124,6 @@ const TOOL_DEFS: Array<{
   {
     type: "function",
     function: {
-      name: "arxiv_search",
-      description:
-        "Search arXiv papers and capture results into the project collection",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string" },
-          max_results: { type: "number" },
-          collectionName: { type: "string" },
-        },
-        required: ["query"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
       name: "hf_daily_papers",
       description:
         "Fetch Hugging Face daily papers for a date (YYYY-MM-DD) and capture them",

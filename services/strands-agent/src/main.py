@@ -14,7 +14,7 @@ from strands.hooks.events import (
 )
 from strands.hooks.registry import HookProvider, HookRegistry
 
-from agent_factory import create_agent, _build_prompt
+from agent_factory import create_agent, cleanup_created_agent, _build_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +126,8 @@ def _invoke_sync(payload: dict) -> dict:
         if not isinstance(hooks, list):
             hooks = []
         payload = {**payload, "_hooks": hooks}
-        agent = create_agent(payload)
+        created = create_agent(payload)
+        agent = created.agent
         prompt = _build_prompt(payload.get("messages", []))
         result = agent(prompt)
         return {
@@ -139,6 +140,10 @@ def _invoke_sync(payload: dict) -> dict:
             "text": f"Error: {e}",
             "traces": [],
         }
+    finally:
+        created_ref = locals().get("created")
+        if created_ref is not None:
+            cleanup_created_agent(created_ref)
 
 
 async def _drain_events(queue: asyncio.Queue[dict[str, Any]]) -> AsyncIterator[dict[str, Any]]:
@@ -154,7 +159,9 @@ async def _invoke_stream(payload: dict):
         hooks = []
     hooks = [*hooks, StreamingHookBridge(queue)]
     payload = {**payload, "_hooks": hooks}
-    agent = create_agent(payload)
+    created = None
+    created = create_agent(payload)
+    agent = created.agent
     prompt = _build_prompt(payload.get("messages", []))
     async_task_id = app.add_async_task(
         "strands_stream",
@@ -203,6 +210,8 @@ async def _invoke_stream(payload: dict):
         }
         yield {"type": "error", "error": str(exc)}
     finally:
+        if created is not None:
+            cleanup_created_agent(created)
         app.complete_async_task(async_task_id)
 
 

@@ -1,6 +1,9 @@
 import { getSettings } from '~/lib/db/queries/settings.server';
 import { createTask, updateTask, appendTaskEvent } from '~/lib/db/queries/tasks.server';
 import { getProjectWorkspace } from '~/lib/filesystem.server';
+import { resolveModel } from '~/lib/litellm.server';
+import { getSelectedMcpServers } from '~/lib/mcp.server';
+import { buildToolCatalogText, isToolCatalogQuestion } from '~/lib/tool-catalog.server';
 import {
   getActiveSkillToolNames,
   getSkillCatalog,
@@ -17,16 +20,27 @@ export async function action({ request }: Route.ActionArgs) {
 
   const body = await request.json();
   const settings = await getSettings();
+  const model = await resolveModel(settings.model, { requireToolSupport: true });
+
   const messages = Array.isArray(body.messages) ? body.messages : [];
   const prompt = String(body.prompt || '').trim();
   const projectId = String(body.projectId || settings.activeProjectId || '').trim();
   const collectionId = String(body.collectionId || '').trim();
   const collectionName = String(body.collectionName || '').trim();
   const deepResearch = body.deepResearch === true;
+  const pinnedMcpServerIds = Array.isArray(body.pinnedMcpServerIds)
+    ? body.pinnedMcpServerIds.map((item: unknown) => String(item)).filter(Boolean)
+    : [];
   const activeSkills = listActiveSkills();
   const matchedSkills = selectMatchedSkills(activeSkills, {
     prompt,
     messages,
+  });
+  const activeToolNames = getActiveSkillToolNames(activeSkills);
+  const selectedMcpServers = await getSelectedMcpServers({
+    prompt,
+    messages,
+    pinnedServerIds: pinnedMcpServerIds,
   });
 
   if (!projectId) {
@@ -47,7 +61,7 @@ export async function action({ request }: Route.ActionArgs) {
     apiKey: '',
     baseUrl: '',
     bedrockRegion: 'us-east-1',
-    model: settings.model,
+    model,
     openaiMode: 'chat',
     workingDir: settings.workingDir || process.cwd(),
     workingDirType: settings.workingDirType,
@@ -67,6 +81,36 @@ export async function action({ request }: Route.ActionArgs) {
   });
 
   try {
+    if (isToolCatalogQuestion({ prompt, messages: chatMessages })) {
+      const text = await buildToolCatalogText({
+        activeToolNames,
+        mcpServers: selectedMcpServers,
+      });
+      await appendTaskEvent(task.id, 'chat_completed', {
+        traceCount: 0,
+        directResponse: true,
+      });
+      await updateTask(task.id, {
+        status: 'completed',
+        planSnapshot: {
+          summary: [
+            `Task: ${task.title || 'Untitled task'}`,
+            prompt ? `Latest user request: ${prompt}` : '',
+            `Latest answer: ${text.slice(0, 1200)}`,
+          ]
+            .filter(Boolean)
+            .join('\n'),
+        },
+      });
+      return Response.json({
+        ok: true,
+        text,
+        traces: [],
+        runId: task.id,
+        projectId,
+      });
+    }
+
     const { runAgentChat } = await import('~/lib/chat.server');
     const result = await runAgentChat(cfg, chatMessages, {
       projectId,
@@ -82,7 +126,8 @@ export async function action({ request }: Route.ActionArgs) {
       deepResearch,
       skills: matchedSkills,
       skillCatalog: getSkillCatalog(activeSkills),
-      activeToolNames: getActiveSkillToolNames(activeSkills),
+      activeToolNames,
+      mcpServers: selectedMcpServers,
       onRunEvent: async (eventType: string, payload: Record<string, unknown>) => {
         await appendTaskEvent(task.id, eventType, payload);
       },

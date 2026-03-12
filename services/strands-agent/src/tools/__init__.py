@@ -146,12 +146,11 @@ def create_project_tools(
     # Web, research, and project tools are added in Phase 1.3.3
     try:
         from .web_tools import web_fetch, web_search
-        from .research_tools import arxiv_search, hf_daily_papers, hf_paper, deep_research
+        from .research_tools import hf_daily_papers, hf_paper, deep_research
 
         tools.extend([
             web_fetch,
             web_search,
-            arxiv_search,
             hf_daily_papers,
             hf_paper,
             deep_research,

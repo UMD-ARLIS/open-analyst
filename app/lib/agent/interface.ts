@@ -1,4 +1,4 @@
-import type { Skill, SkillCatalogEntry } from '../types';
+import type { McpServerConfig, Skill, SkillCatalogEntry } from '../types';
 
 export interface AgentEvent {
   type:
@@ -37,6 +37,7 @@ export interface AgentChatOptions {
   skills?: Skill[];
   skillCatalog?: SkillCatalogEntry[];
   activeToolNames?: string[];
+  mcpServers?: McpServerConfig[];
 }
 
 export interface AgentTrace {
