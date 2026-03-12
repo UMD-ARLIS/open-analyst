@@ -10,7 +10,6 @@ import type {
   HeadlessDocument,
   HeadlessRagResult,
 } from "~/lib/headless-api";
-import type { ArtifactMeta } from "~/lib/types";
 import {
   Database,
   Plus,
@@ -20,15 +19,15 @@ import {
   Upload,
 } from "lucide-react";
 import { useAppStore } from "~/lib/store";
-import { DocumentPreview } from "./DocumentPreview";
 import { AlertDialog } from "./AlertDialog";
 import { FileViewerPanel } from "./FileViewerPanel";
 import { formatRelativeTime } from "~/lib/format";
+import { useAppStore } from "~/lib/store";
 
 export function KnowledgeWorkspace() {
   const params = useParams();
   const projectId = params.projectId!;
-  const { openFileViewer, fileViewerArtifact, closeFileViewer } = useAppStore();
+  const { openFileViewer, fileViewerArtifact } = useAppStore();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Active collection from URL
@@ -69,7 +68,6 @@ export function KnowledgeWorkspace() {
   const [showAllCollections, setShowAllCollections] = useState(false);
   const [sourceFilter, setSourceFilter] = useState("");
   const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [sourceUrl, setSourceUrl] = useState("");
   const [uploading, setUploading] = useState(false);
   const [ragQuery, setRagQuery] = useState("");
@@ -152,6 +150,20 @@ export function KnowledgeWorkspace() {
     }
   };
 
+  const handleOpenDocument = (doc: HeadlessDocument) => {
+    const artifactUrl = `/api/projects/${projectId}/documents/${doc.id}/artifact`;
+    const meta = doc.metadata || {};
+    openFileViewer({
+      documentId: doc.id,
+      filename: (meta.filename as string) || doc.title || "artifact",
+      mimeType: (meta.mimeType as string) || "application/octet-stream",
+      size: typeof meta.size === "number" ? meta.size : 0,
+      artifactUrl,
+      downloadUrl: `${artifactUrl}?download=1`,
+      title: doc.title || undefined,
+    });
+  };
+
   // Build collection name map for the sources table
   const collectionNameMap: Record<string, string> = {};
   for (const col of collections) {
@@ -167,33 +179,6 @@ export function KnowledgeWorkspace() {
     const colName = (doc.collectionId ? collectionNameMap[doc.collectionId] || "" : "").toLowerCase();
     return title.includes(lower) || sourceType.includes(lower) || colName.includes(lower);
   });
-
-  const selectedDocument = documents.find((d) => d.id === selectedDocumentId);
-
-  const buildArtifactMeta = (doc: HeadlessDocument): ArtifactMeta => {
-    const metadata =
-      doc.metadata && typeof doc.metadata === "object"
-        ? (doc.metadata as Record<string, unknown>)
-        : {};
-    const artifactUrl =
-      typeof metadata.artifactUrl === "string" && metadata.artifactUrl
-        ? metadata.artifactUrl
-        : `/api/projects/${projectId}/documents/${doc.id}/artifact`;
-    const downloadUrl =
-      typeof metadata.downloadUrl === "string" && metadata.downloadUrl
-        ? metadata.downloadUrl
-        : `${artifactUrl}?download=1`;
-
-    return {
-      documentId: doc.id,
-      filename: (metadata.filename as string) || doc.title,
-      mimeType: (metadata.mimeType as string) || "application/octet-stream",
-      size: (metadata.bytes as number) || 0,
-      artifactUrl,
-      downloadUrl,
-      title: doc.title,
-    };
-  };
 
   // Collections display: show first 10 or all
   const COLLECTION_LIMIT = 10;
@@ -369,30 +354,8 @@ export function KnowledgeWorkspace() {
                   filteredDocuments.map((doc) => (
                     <tr
                       key={doc.id}
-                      onClick={() => {
-                        const metadata =
-                          doc.metadata && typeof doc.metadata === "object"
-                            ? (doc.metadata as Record<string, unknown>)
-                            : {};
-                        const hasArtifact =
-                          (typeof metadata.artifactUrl === "string" &&
-                            metadata.artifactUrl.length > 0) ||
-                          Boolean(doc.storageUri);
-                        if (hasArtifact) {
-                          setSelectedDocumentId(null);
-                          openFileViewer(buildArtifactMeta(doc));
-                          return;
-                        }
-                        closeFileViewer();
-                        setSelectedDocumentId(
-                          selectedDocumentId === doc.id ? null : doc.id
-                        );
-                      }}
-                      className={`border-b border-border last:border-b-0 cursor-pointer transition-colors ${
-                        selectedDocumentId === doc.id
-                          ? "bg-accent-muted"
-                          : "hover:bg-surface-hover"
-                      }`}
+                      onClick={() => handleOpenDocument(doc)}
+                      className="border-b border-border last:border-b-0 cursor-pointer transition-colors hover:bg-surface-hover"
                     >
                       <td className="px-4 py-2.5">
                         <div className="flex items-center gap-2">
@@ -430,18 +393,6 @@ export function KnowledgeWorkspace() {
             </table>
           </div>
 
-          {/* Document preview */}
-          {selectedDocument && (
-            <div className="card p-4 mt-4">
-              <h3 className="text-sm font-semibold mb-2">
-                {selectedDocument.title}
-              </h3>
-              <DocumentPreview
-                projectId={projectId}
-                document={selectedDocument}
-              />
-            </div>
-          )}
         </section>
 
         {/* RAG Search */}

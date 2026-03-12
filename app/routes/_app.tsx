@@ -6,6 +6,7 @@ import { PermissionDialog } from '~/components/PermissionDialog';
 import { ConfigModal } from '~/components/ConfigModal';
 import { TopNav } from '~/components/TopNav';
 import { SandboxSyncToast } from '~/components/SandboxSyncToast';
+import { FileViewerPanel } from '~/components/FileViewerPanel';
 import type { AppConfig } from '~/lib/types';
 import { getBrowserConfig, saveBrowserConfig } from '~/lib/browser-config';
 import { headlessSaveConfig } from '~/lib/headless-api';
@@ -100,6 +101,8 @@ export default function AppLayout() {
         <main className="flex-1 flex flex-col overflow-hidden bg-background">
           <Outlet />
         </main>
+
+        <FileViewerPanel />
       </div>
 
       {pendingPermission && <PermissionDialog permission={pendingPermission} />}

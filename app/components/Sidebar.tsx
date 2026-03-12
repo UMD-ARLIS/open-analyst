@@ -71,12 +71,6 @@ export function Sidebar() {
     }
   };
 
-  const handleNewCollection = () => {
-    if (activeProjectId) {
-      navigate(`/projects/${activeProjectId}/knowledge`);
-    }
-  };
-
   return (
     <div
       className={`bg-surface border-r border-border flex flex-col overflow-hidden transition-all duration-200 ${
@@ -92,18 +86,10 @@ export function Sidebar() {
         {/* === KNOWLEDGE ROUTE: Collections list === */}
         {!sidebarCollapsed && activeProjectId && isKnowledgeRoute && (
           <div className="space-y-1">
-            <div className="flex items-center justify-between mb-2">
+            <div className="mb-2">
               <div className="text-xs uppercase tracking-wide text-text-muted px-1">
                 Collections
               </div>
-              <button
-                onClick={handleNewCollection}
-                className="btn btn-primary text-xs px-2.5 py-1"
-                aria-label="New collection"
-              >
-                <Plus className="w-3 h-3" />
-                New
-              </button>
             </div>
             {collections.length === 0 ? (
               <div className="text-sm text-text-muted px-1 py-2">
@@ -132,13 +118,6 @@ export function Sidebar() {
 
         {sidebarCollapsed && activeProjectId && isKnowledgeRoute && (
           <div className="flex flex-col items-center gap-1">
-            <button
-              onClick={handleNewCollection}
-              className="w-8 h-8 rounded-lg flex items-center justify-center bg-accent text-white hover:bg-accent-hover"
-              aria-label="New collection"
-            >
-              <Plus className="w-4 h-4" />
-            </button>
             {collections.slice(0, 8).map((col) => (
               <button
                 key={col.id}

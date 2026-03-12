@@ -10,7 +10,6 @@ import {
   type HeadlessCollection,
 } from '~/lib/headless-api';
 import { KnowledgePanel } from './KnowledgePanel';
-import { FileViewerPanel } from './FileViewerPanel';
 import { Send, Square, Plus, Loader2, Plug, X, BookOpen } from 'lucide-react';
 
 interface ChatViewProps {
@@ -823,12 +822,6 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
       </div>
       {knowledgePanelOpen && (
         <KnowledgePanel projectId={projectId} onClose={toggleKnowledgePanel} />
-      )}
-      {fileViewerArtifact && !knowledgePanelOpen && (
-        <FileViewerPanel onOpenKnowledge={() => {
-          closeFileViewer();
-          toggleKnowledgePanel();
-        }} />
       )}
     </div>
   );
