@@ -227,15 +227,13 @@ def create_app() -> FastAPI:
     async def api_get_paper(
         identifier: str,
         provider: str | None = None,
-        include_graph: bool = True,
-        graph_limit: int = Query(default=40, ge=1, le=200),
     ):
         analyst_service: AnalystService = app.state.service
         detail = await analyst_service.paper_detail(
             identifier,
             provider=provider,
-            include_graph=include_graph,
-            graph_limit=graph_limit,
+            include_graph=False,
+            graph_limit=1,
         )
         if detail is None:
             raise HTTPException(status_code=404, detail="paper_not_found")

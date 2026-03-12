@@ -98,7 +98,7 @@ async def test_search_literature_normalizes_openalex(tmp_path: Path, monkeypatch
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_download_and_index_pdf(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_download_articles_store_artifacts_without_local_indexing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     configure_test_env(monkeypatch, tmp_path)
     monkeypatch.setenv("ANALYST_MCP_ALLOW_EMBEDDING_FALLBACK", "true")
     service = AnalystService(Settings())
@@ -117,8 +117,9 @@ async def test_download_and_index_pdf(tmp_path: Path, monkeypatch: pytest.Monkey
     finally:
         await service.close()
     assert results[0].bytes_written > 0
-    assert Path(results[0].extracted_text_path).exists()
-    assert await service.chunk_index.read_chunks()
+    assert results[0].path.endswith(".pdf")
+    assert results[0].extracted_text_path is None
+    assert await service.chunk_index.read_chunks() == []
 
 
 @pytest.mark.asyncio
@@ -216,7 +217,7 @@ async def test_collect_articles_searches_then_downloads(tmp_path: Path, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_health_details_reports_rag_unavailable_without_litellm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_health_details_reports_tool_service_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     configure_test_env(monkeypatch, tmp_path)
     service = AnalystService(Settings())
     try:
@@ -224,10 +225,10 @@ async def test_health_details_reports_rag_unavailable_without_litellm(tmp_path: 
     finally:
         await service.close()
 
-    assert health.ok is False
+    assert health.ok is True
     assert health.rag_available is False
     assert health.synthesis_available is False
-    assert any(component.name == "embeddings" and component.ok is False for component in health.components)
+    assert any(component.name == "providers" and component.ok is True for component in health.components)
 
 
 def test_settings_fall_back_to_database_url_and_normalize_no_verify(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -279,19 +280,6 @@ async def test_postgres_collection_store_interpolates_table_names(monkeypatch: p
     assert "{self.collection_papers_table}" not in executed[0]
     assert "FROM " in executed[0]
     assert "LEFT JOIN " in executed[0]
-
-
-@pytest.mark.asyncio
-async def test_rag_query_fails_when_embedding_or_chat_models_are_unavailable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    configure_test_env(monkeypatch, tmp_path)
-    service = AnalystService(Settings())
-    try:
-        with pytest.raises(AnalystMcpUnavailableError) as exc:
-            await service.rag_query("What does the corpus say about autonomy?")
-    finally:
-        await service.close()
-
-    assert exc.value.code in {"embeddings_unavailable", "embedding_unavailable", "chat_model_unavailable"}
 
 
 @pytest.mark.asyncio
@@ -560,7 +548,7 @@ def test_api_capabilities_and_collections(tmp_path: Path, monkeypatch: pytest.Mo
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_download_articles_survives_when_rag_is_unavailable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_download_articles_return_stored_artifacts_without_indexing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     configure_test_env(monkeypatch, tmp_path)
     service = AnalystService(Settings())
     paper = PaperRecord(
@@ -586,9 +574,8 @@ async def test_download_articles_survives_when_rag_is_unavailable(tmp_path: Path
         await service.close()
 
     assert len(results) == 1
-    assert results[0].index_status == "unavailable"
-    assert results[0].index_error is not None
-    assert results[0].extracted_text_path is not None
+    assert results[0].path.endswith(".pdf")
+    assert results[0].extracted_text_path is None
 
 
 def test_api_create_collection_accepts_json_body(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -610,48 +597,6 @@ def test_api_create_collection_accepts_json_body(tmp_path: Path, monkeypatch: py
     assert payload["default_sources"] == ["openalex", "arxiv"]
     assert listing.status_code == 200
     assert listing.json()["collections"][0]["name"] == "field-notes"
-
-
-@pytest.mark.asyncio
-async def test_rag_query_filters_by_collection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    configure_test_env(monkeypatch, tmp_path)
-    monkeypatch.setenv("ANALYST_MCP_ALLOW_EMBEDDING_FALLBACK", "true")
-    service = AnalystService(Settings())
-    try:
-        await service.repository.save_paper(
-            PaperRecord(
-                canonical_id="paper:rag",
-                provider="openalex",
-                source_id="W7",
-                title="RAG Collection Paper",
-                abstract="Embodied AI retrieval.",
-            )
-        )
-        artifact_path = tmp_path / "articles" / "openalex" / "W7" / "W7.txt"
-        artifact_path.parent.mkdir(parents=True, exist_ok=True)
-        artifact_path.write_text("embodied ai retrieval grounding passage")
-        await service.rag.index_download(
-            DownloadResult(
-                canonical_id="paper:rag",
-                provider="openalex",
-                path=str(artifact_path),
-                bytes_written=39,
-                collections=["query:embodied-ai"],
-            )
-        )
-        monkeypatch.setattr(
-            service.llm,
-            "answer",
-            lambda question, chunks, current_date: asyncio.sleep(
-                0,
-                result="Grounded answer for collection filtering test.",
-            ),
-        )
-        response = await service.rag.query("embodied ai", collections=["query:embodied-ai"], limit=5)
-    finally:
-        await service.close()
-    assert response.supporting_chunks
-    assert response.supporting_chunks[0].canonical_id == "paper:rag"
 
 
 @pytest.mark.asyncio

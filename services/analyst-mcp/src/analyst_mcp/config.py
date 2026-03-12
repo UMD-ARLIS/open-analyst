@@ -62,6 +62,8 @@ class Settings(BaseSettings):
     default_result_limit: int = 10
     chunk_size: int = 1400
     chunk_overlap: int = 200
+    embedding_batch_size: int = Field(default=8, ge=1, le=64)
+    embedding_batch_char_limit: int = Field(default=12000, ge=1000, le=200000)
     embedding_dimensions: int = Field(default=384, ge=8)
     rag_min_score: float = Field(default=0.2, ge=0.0, le=1.0)
     rag_max_matches: int = Field(default=24, ge=1, le=200)

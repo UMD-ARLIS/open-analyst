@@ -43,6 +43,27 @@ def _extract_tool_result_text(result: dict | None) -> str:
     return "\n".join(lines).strip()
 
 
+def _extract_tool_result_data(result: dict | None):
+    if not isinstance(result, dict):
+        return None
+    parts = result.get("content", [])
+    if not isinstance(parts, list):
+        return None
+
+    json_parts: list[object] = []
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        if "json" in part:
+            json_parts.append(part["json"])
+        elif "document" in part:
+            json_parts.append(part["document"])
+
+    if not json_parts:
+        return None
+    return json_parts[0] if len(json_parts) == 1 else json_parts
+
+
 class StreamingHookBridge(HookProvider):
     def __init__(self, queue: asyncio.Queue[dict[str, Any]]):
         self.queue = queue
@@ -78,7 +99,9 @@ class StreamingHookBridge(HookProvider):
 
     def _after_tool_call(self, event: AfterToolCallEvent) -> None:
         output = _extract_tool_result_text(event.result)
-        status = "error" if event.exception or event.result.get("status") == "error" else "completed"
+        payload = _extract_tool_result_data(event.result)
+        result_status = event.result.get("status") if isinstance(event.result, dict) else None
+        status = "error" if event.exception or result_status == "error" else "completed"
         if event.exception and not output:
             output = str(event.exception)
         self._emit(
@@ -87,6 +110,7 @@ class StreamingHookBridge(HookProvider):
                 "toolName": event.tool_use.get("name", ""),
                 "toolUseId": event.tool_use.get("toolUseId", ""),
                 "toolOutput": output,
+                "toolResultData": payload,
                 "toolStatus": status,
             }
         )

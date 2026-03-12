@@ -89,7 +89,15 @@ function getAnalystMcpDefaults(): { url: string; apiKey: string } {
   };
 }
 
-function isAnalystMcpServer(server: Partial<McpServerConfig>): boolean {
+const LOCAL_RESEARCH_TOOL_NAMES = new Set([
+  'web_search',
+  'web_fetch',
+  'deep_research',
+  'hf_daily_papers',
+  'hf_paper',
+]);
+
+export function isAnalystMcpServer(server: Partial<McpServerConfig>): boolean {
   const name = String(server.name || '').trim().toLowerCase();
   const alias = String(server.alias || '').trim().toLowerCase();
   const id = String(server.id || '').trim().toLowerCase();
@@ -171,6 +179,34 @@ function isToolCatalogPrompt(text: string): boolean {
   );
 }
 
+function isResearchAcquisitionPrompt(text: string): boolean {
+  const keywords = [
+    'paper',
+    'papers',
+    'article',
+    'articles',
+    'literature',
+    'research',
+    'study',
+    'studies',
+    'citation',
+    'citations',
+    'journal',
+    'journals',
+    'arxiv',
+    'openalex',
+    'semantic scholar',
+    'collection',
+    'collections',
+    'review',
+    'collect',
+    'download',
+    'index',
+    'ingest',
+  ];
+  return keywords.some((keyword) => text.includes(keyword));
+}
+
 function getResearchPromptBias(server: McpServerConfig, fullText: string): number {
   const aliasText = [server.name, server.alias].filter(Boolean).join(' ').toLowerCase();
   const looksLikeAnalystServer =
@@ -196,6 +232,12 @@ function getResearchPromptBias(server: McpServerConfig, fullText: string): numbe
     'review',
     'rag',
     'grounded',
+    'collect',
+    'download',
+    'index',
+    'ingest',
+    'journal',
+    'scholar',
   ];
 
   let score = 0;
@@ -206,6 +248,15 @@ function getResearchPromptBias(server: McpServerConfig, fullText: string): numbe
   }
 
   if (score > 0 && fullText.includes('search')) {
+    score += 8;
+  }
+  if (score > 0 && fullText.includes('collect')) {
+    score += 10;
+  }
+  if (score > 0 && fullText.includes('download')) {
+    score += 8;
+  }
+  if (score > 0 && fullText.includes('index')) {
     score += 8;
   }
   if (score > 0 && (fullText.includes('find') || fullText.includes('look up'))) {
@@ -470,6 +521,9 @@ export async function getSelectedMcpServers(
       for (const alias of aliases) {
         if (alias && fullText.includes(alias)) score += 20;
       }
+      if (isAnalystMcpServer(server) && isResearchAcquisitionPrompt(fullText)) {
+        score += 100;
+      }
       score += getResearchPromptBias(server, fullText);
       for (const tool of result.inspection?.tools || []) {
         const name = tool.name.toLowerCase();
@@ -507,4 +561,15 @@ export function applyProjectMcpContext(
       },
     };
   });
+}
+
+export function filterLocalToolsForSelectedMcpServers(
+  toolNames: string[],
+  servers: Partial<McpServerConfig>[]
+): string[] {
+  if (!servers.some((server) => isAnalystMcpServer(server))) {
+    return toolNames;
+  }
+
+  return toolNames.filter((toolName) => !LOCAL_RESEARCH_TOOL_NAMES.has(String(toolName).trim()));
 }

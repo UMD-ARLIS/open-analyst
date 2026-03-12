@@ -22,7 +22,7 @@ def build_mcp_server(service: AnalystService) -> FastMCP:
     ) -> dict:
         return (await service.search_literature(query, sources, date_from, date_to, limit)).model_dump(mode="json")
 
-    @mcp.tool(description="Search providers, then download and index the matched articles for local analysis.")
+    @mcp.tool(description="Search providers, then download and store the matched articles for local analysis.")
     async def collect_articles(
         query: Annotated[str, Field(description="Natural language search query")],
         sources: Annotated[list[str] | None, Field(description="Subset of providers to search")] = None,
@@ -34,7 +34,7 @@ def build_mcp_server(service: AnalystService) -> FastMCP:
     ) -> dict:
         return (await service.collect_articles(query, sources, date_from, date_to, limit, preferred_formats, collection_name=collection_name)).model_dump(mode="json")
 
-    @mcp.tool(description="Search providers and queue artifact collection/indexing as a background job.")
+    @mcp.tool(description="Search providers and queue artifact collection as a background job.")
     async def start_collect_articles(
         query: Annotated[str, Field(description="Natural language search query")],
         sources: Annotated[list[str] | None, Field(description="Subset of providers to search")] = None,
@@ -50,21 +50,23 @@ def build_mcp_server(service: AnalystService) -> FastMCP:
     async def get_paper(
         identifier: Annotated[str, Field(description="Canonical paper id or provider-specific id")],
         provider: Annotated[str | None, Field(description="Optional provider hint")] = None,
-        include_graph: Annotated[bool, Field(description="Include graph neighborhood in the response")] = False,
         include_artifacts: Annotated[bool, Field(description="Include locally stored artifacts in the response")] = True,
     ) -> dict:
-        detail = await service.paper_detail(identifier, provider=provider, include_graph=include_graph, graph_limit=40 if include_graph else 1)
+        detail = await service.paper_detail(
+            identifier,
+            provider=provider,
+            include_graph=False,
+            graph_limit=1,
+        )
         if detail is None:
             return {"error": "paper_not_found", "identifier": identifier}
         payload = {"paper": detail.paper.model_dump(mode="json")}
         if include_artifacts:
             payload["artifacts"] = [artifact.model_dump(mode="json") for artifact in detail.artifacts]
             payload["external_links"] = detail.external_links
-        if include_graph and detail.graph is not None:
-            payload["graph"] = detail.graph.model_dump(mode="json")
         return payload
 
-    @mcp.tool(description="Download articles to organized local or object storage and index them for RAG.")
+    @mcp.tool(description="Download articles to organized local or object storage.")
     async def download_articles(
         identifiers: Annotated[list[str], Field(description="Canonical or source-specific paper identifiers")],
         preferred_formats: Annotated[list[str], Field(description="Preferred artifact order such as ['pdf']")] = ["pdf"],
@@ -72,7 +74,7 @@ def build_mcp_server(service: AnalystService) -> FastMCP:
         results = await service.download_articles(identifiers, preferred_formats)
         return [result.model_dump(mode="json") for result in results]
 
-    @mcp.tool(description="Queue article downloads and indexing as a background job.")
+    @mcp.tool(description="Queue article downloads as a background job.")
     async def start_download_articles(
         identifiers: Annotated[list[str], Field(description="Canonical or source-specific paper identifiers")],
         preferred_formats: Annotated[list[str], Field(description="Preferred artifact order such as ['pdf']")] = ["pdf"],
@@ -86,7 +88,7 @@ def build_mcp_server(service: AnalystService) -> FastMCP:
     ) -> list[dict]:
         return [artifact.model_dump(mode="json") for artifact in await service.list_artifacts(identifier, provider=provider)]
 
-    @mcp.tool(description="List the named paper collections available for reuse with RAG and collection management.")
+    @mcp.tool(description="List the named paper collections available for acquisition and collection management.")
     async def list_collections() -> list[dict]:
         return [collection.model_dump(mode="json") for collection in await service.list_collections()]
 
@@ -152,7 +154,7 @@ def build_mcp_server(service: AnalystService) -> FastMCP:
     ) -> dict:
         return (await service.collect_collection_artifacts(name, preferred_formats)).model_dump(mode="json")
 
-    @mcp.tool(description="Download and index artifacts for every paper in a named collection.")
+    @mcp.tool(description="Download artifacts for every paper in a named collection.")
     async def index_collection(
         name: Annotated[str, Field(description="Collection name")],
         preferred_formats: Annotated[list[str], Field(description="Preferred artifact order such as ['pdf']")] = ["pdf"],
@@ -178,63 +180,6 @@ def build_mcp_server(service: AnalystService) -> FastMCP:
         limit: Annotated[int, Field(description="Maximum jobs to return", ge=1, le=100)] = 25,
     ) -> dict:
         return (await service.list_jobs(limit=limit)).model_dump(mode="json")
-
-    @mcp.tool(description="Traverse the academic knowledge graph around one or more seed papers.")
-    async def graph_lookup(
-        seed_ids: Annotated[list[str], Field(description="Canonical paper ids")],
-        limit: Annotated[int, Field(description="Maximum graph relationships to return", ge=1, le=100)] = 25,
-    ) -> dict:
-        return (await service.graph_lookup(seed_ids, limit=limit)).model_dump(mode="json")
-
-    @mcp.tool(description="Recommend related papers using graph structure and citation signals.")
-    async def recommend_papers(
-        query_or_ids: Annotated[list[str], Field(description="Canonical paper ids or title fragments")],
-        limit: Annotated[int, Field(description="Maximum recommendations", ge=1, le=25)] = 10,
-    ) -> dict:
-        return (await service.recommend(query_or_ids, limit=limit)).model_dump(mode="json")
-
-    @mcp.tool(description="Query the local indexed article corpus and return grounded retrieval results.")
-    async def rag_query(
-        question: Annotated[str, Field(description="Research question")],
-        collections: Annotated[list[str] | None, Field(description="Optional collection names")]=None,
-        limit: Annotated[int, Field(description="Maximum supporting chunks", ge=1, le=20)] = 6,
-    ) -> dict:
-        return (await service.rag_query(question, collections=collections, limit=limit)).model_dump(mode="json")
-
-    @mcp.tool(description="Scan recent papers over a lookback window and return a concise analyst summary.")
-    async def daily_scan_summary(
-        query: Annotated[str, Field(description="Topic or query to scan for")],
-        sources: Annotated[list[str] | None, Field(description="Subset of providers to search")] = None,
-        lookback_days: Annotated[int, Field(description="How many days back to scan", ge=1, le=30)] = 1,
-        limit: Annotated[int, Field(description="Maximum papers to include", ge=1, le=25)] = 10,
-    ) -> dict:
-        return (await service.daily_scan_summary(query, sources, lookback_days=lookback_days, limit=limit)).model_dump(mode="json")
-
-    @mcp.tool(description="Produce a structured literature review using search, recommendations, and optional grounded retrieval.")
-    async def literature_review(
-        query: Annotated[str, Field(description="Literature review topic or question")],
-        sources: Annotated[list[str] | None, Field(description="Subset of providers to search")] = None,
-        date_from: Annotated[str | None, Field(description="Inclusive YYYY-MM-DD lower bound")] = None,
-        date_to: Annotated[str | None, Field(description="Inclusive YYYY-MM-DD upper bound")] = None,
-        limit: Annotated[int, Field(description="Maximum papers to review", ge=1, le=25)] = 10,
-        include_recommendations: Annotated[bool, Field(description="Include graph-based recommendation expansion")] = True,
-        collect: Annotated[bool, Field(description="Download and index matched papers before review")] = False,
-        preferred_formats: Annotated[list[str], Field(description="Preferred artifact order when collect=true")] = ["pdf"],
-        rag_limit: Annotated[int, Field(description="Maximum supporting chunks when collect=true", ge=1, le=20)] = 6,
-    ) -> dict:
-        return (
-            await service.literature_review(
-                query=query,
-                sources=sources,
-                date_from=date_from,
-                date_to=date_to,
-                limit=limit,
-                include_recommendations=include_recommendations,
-                collect=collect,
-                preferred_formats=preferred_formats,
-                rag_limit=rag_limit,
-            )
-        ).model_dump(mode="json")
 
     @mcp.tool(description="Describe the MCP server capabilities, workflows, and collection model.")
     async def describe_capabilities() -> dict:
@@ -284,9 +229,5 @@ def build_mcp_server(service: AnalystService) -> FastMCP:
     async def paper_resource(canonical_id: str) -> dict:
         paper = await service.get_paper(canonical_id)
         return {} if paper is None else paper.model_dump(mode="json")
-
-    @mcp.resource("graph://paper/{canonical_id}", description="Graph neighborhood for a canonical paper id.")
-    async def graph_resource(canonical_id: str) -> dict:
-        return (await service.graph_lookup([canonical_id])).model_dump(mode="json")
 
     return mcp

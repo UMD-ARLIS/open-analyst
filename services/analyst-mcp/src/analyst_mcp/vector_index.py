@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import math
 import re
 import tempfile
@@ -23,6 +24,7 @@ from .errors import AnalystMcpUnavailableError
 from .models import ChunkRecord
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
+logger = logging.getLogger(__name__)
 
 
 class EmbeddingService:
@@ -31,18 +33,81 @@ class EmbeddingService:
 
     async def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
         if self.settings.litellm_embedding_model and self.settings.litellm_base_url:
+            prepared = [text.replace("\x00", " ").strip() for text in texts]
+            if not any(prepared):
+                raise AnalystMcpUnavailableError(
+                    "embedding_input_empty",
+                    "Embedding input was empty after text extraction.",
+                )
             headers = {"Content-Type": "application/json"}
             if self.settings.litellm_api_key:
                 headers["Authorization"] = f"Bearer {self.settings.litellm_api_key.get_secret_value()}"
             async with httpx.AsyncClient(timeout=httpx.Timeout(self.settings.request_timeout_seconds)) as client:
-                response = await client.post(
-                    f"{self.settings.litellm_base_url.rstrip('/')}/embeddings",
-                    headers=headers,
-                    json={"model": self.settings.litellm_embedding_model, "input": list(texts)},
+                embeddings: list[list[float]] = []
+                current_batch: list[str] = []
+                current_chars = 0
+
+                async def flush_batch() -> None:
+                    nonlocal current_batch, current_chars, embeddings
+                    if not current_batch:
+                        return
+                    try:
+                        response = await client.post(
+                            f"{self.settings.litellm_base_url.rstrip('/')}/embeddings",
+                            headers=headers,
+                            json={"model": self.settings.litellm_embedding_model, "input": current_batch},
+                        )
+                        response.raise_for_status()
+                    except httpx.HTTPStatusError as exc:
+                        detail = exc.response.text.strip()
+                        code = (
+                            "embedding_request_too_large"
+                            if exc.response.status_code == 400
+                            else "embedding_gateway_error"
+                        )
+                        raise AnalystMcpUnavailableError(
+                            code,
+                            detail or f"Embedding request failed with HTTP {exc.response.status_code}.",
+                        ) from exc
+                    except httpx.HTTPError as exc:
+                        raise AnalystMcpUnavailableError(
+                            "embedding_gateway_error",
+                            f"Embedding request failed: {exc}",
+                        ) from exc
+
+                    payload = response.json()
+                    data = payload.get("data")
+                    if not isinstance(data, list):
+                        raise AnalystMcpUnavailableError(
+                            "embedding_invalid_response",
+                            "Embedding response did not include a data array.",
+                        )
+                    embeddings.extend([item["embedding"] for item in data if isinstance(item, dict) and "embedding" in item])
+                    current_batch = []
+                    current_chars = 0
+
+                for text in prepared:
+                    candidate_chars = current_chars + len(text)
+                    if current_batch and (
+                        len(current_batch) >= self.settings.embedding_batch_size
+                        or candidate_chars > self.settings.embedding_batch_char_limit
+                    ):
+                        await flush_batch()
+                    current_batch.append(text[: self.settings.embedding_batch_char_limit])
+                    current_chars += len(current_batch[-1])
+                await flush_batch()
+
+            if len(embeddings) != len(prepared):
+                logger.warning(
+                    "embedding_count_mismatch expected=%d actual=%d",
+                    len(prepared),
+                    len(embeddings),
                 )
-                response.raise_for_status()
-                payload = response.json()
-            return [item["embedding"] for item in payload["data"]]
+                raise AnalystMcpUnavailableError(
+                    "embedding_invalid_response",
+                    "Embedding response size did not match the requested chunk count.",
+                )
+            return embeddings
         if not self.settings.allow_embedding_fallback:
             raise AnalystMcpUnavailableError(
                 "embedding_unavailable",

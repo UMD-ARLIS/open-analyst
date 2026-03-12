@@ -3,6 +3,7 @@ import { createDocument, updateDocumentMetadata } from "~/lib/db/queries/documen
 import { getProject } from "~/lib/db/queries/projects.server";
 import { storeArtifact } from "~/lib/artifacts.server";
 import { buildProjectArtifactUrls } from "~/lib/project-storage.server";
+import { refreshDocumentKnowledgeIndex } from "~/lib/knowledge-index.server";
 import type { Route } from "./+types/api.projects.$projectId.import.file";
 
 function inferExtension(contentType: string): string {
@@ -132,5 +133,6 @@ export async function action({ request, params }: Route.ActionArgs) {
     downloadUrl: links.downloadUrl,
     workspaceSlug: project.workspaceSlug,
   });
-  return Response.json({ document: updated }, { status: 201 });
+  const indexed = await refreshDocumentKnowledgeIndex(projectId, document.id);
+  return Response.json({ document: indexed || updated }, { status: 201 });
 }

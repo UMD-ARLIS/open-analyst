@@ -48,6 +48,7 @@ Optional variables:
 - `LITELLM_BASE_URL`
 - `STRANDS_URL`
 - `NODE_API_BASE_URL`
+- `STRANDS_POSTGRES_DSN`
 - `ARTIFACT_STORAGE_BACKEND`
 - `PROJECT_WORKSPACES_ROOT`
 - `ARTIFACT_LOCAL_DIR`
@@ -65,7 +66,9 @@ The repo-root `.env` is the primary config source for the web app, the Strands a
 If needed, `services/strands-agent/.env` and `services/analyst-mcp/.env` can still be used as local overrides, but they are no longer required for normal development.
 
 If `ANALYST_MCP_POSTGRES_DSN` is omitted, `analyst_mcp` falls back to `DATABASE_URL`.
+If `STRANDS_POSTGRES_DSN` is omitted, the Strands agent also falls back to `DATABASE_URL`.
 When both services share one PostgreSQL database, Open Analyst uses the normal `public` schema and `analyst_mcp` uses its own `analyst_mcp` schema automatically.
+Strands session persistence is also stored in PostgreSQL and is no longer tied to S3 artifact storage.
 
 ## Local Development
 
@@ -73,9 +76,7 @@ Install dependencies:
 
 ```bash
 pnpm install
-cd services/strands-agent && uv sync
-cd ../analyst-mcp && uv sync
-cd ../..
+pnpm setup:python
 ```
 
 Step-by-step startup:
@@ -85,6 +86,18 @@ Step-by-step startup:
 3. Run `pnpm db:migrate`.
 4. Start the full stack with `pnpm dev:all`.
 5. In the UI, enable `Analyst MCP` under Settings -> MCP.
+
+Python service environments live outside the repo by default:
+
+- `~/.venvs/open-analyst-strands-agent`
+- `~/.venvs/open-analyst-analyst-mcp`
+
+You can override those paths from the root `.env` with:
+
+- `OPEN_ANALYST_AGENT_VENV`
+- `OPEN_ANALYST_ANALYST_MCP_VENV`
+
+This keeps `.venv` directories out of `services/` so the web dev server does not exhaust Linux file watchers.
 
 Start Postgres locally:
 
@@ -123,7 +136,7 @@ pnpm db:migrate
 ```
 
 For the Node app, an RDS development DSN such as `...?sslmode=no-verify` works with the current `pg` driver behavior.
-`analyst_mcp` normalizes that DSN for psycopg automatically, so the same RDS connection settings can be reused there without a separate workaround.
+`analyst_mcp` and the Strands agent normalize that DSN for psycopg automatically, so the same RDS connection settings can be reused there without a separate workaround.
 
 Run the web app:
 
@@ -131,7 +144,13 @@ Run the web app:
 pnpm dev
 ```
 
-`pnpm dev` runs React Router/Vite in polling mode and ignores generated folders such as `.venv/` and `__pycache__/` to avoid Linux watcher exhaustion in this mixed TS/Python repo.
+`pnpm dev` uses normal filesystem events by default. If you are on a mounted/network filesystem and need polling, use:
+
+```bash
+pnpm dev:polling
+```
+
+Vite ignores generated folders such as `.venv/`, `.pytest_cache/`, `build/`, `test-results/`, and the Python service trees during watch mode.
 
 Run the Strands agent in a second terminal:
 
@@ -146,6 +165,12 @@ pnpm dev:all
 ```
 
 The web app serves the UI and API routes on port `5173` by default. The Strands service defaults to `8080`. The vendored Analyst MCP service defaults to `8000`.
+
+If you still have old in-repo virtualenvs from an earlier setup, remove them after running `pnpm setup:python`:
+
+```bash
+rm -rf services/strands-agent/.venv services/analyst-mcp/.venv
+```
 
 ## Project Workspaces And Artifact Storage
 
@@ -201,6 +226,25 @@ Useful chat tools for stored artifacts:
 - local project artifacts: `collection_artifact_metadata`
 - analyst collections with artifact links: `mcp__analyst__collection_artifact_metadata`
 
+## Resetting Chat State
+
+To clear Open Analyst chat history, Strands session rows, local file-based Strands sessions, and old `strands-sessions` S3 objects:
+
+```bash
+pnpm reset:chat-state
+```
+
+This intentionally deletes:
+
+- `tasks`
+- `messages`
+- `task_events`
+- `strands_sessions`
+- `strands_session_agents`
+- `strands_session_messages`
+
+It does not delete project documents or artifact objects outside the `strands-sessions` prefix.
+
 ## Production-Like Run
 
 Build and serve the web app:
@@ -238,8 +282,16 @@ pnpm db:studio
 pnpm test -- --run
 pnpm test:agent
 pnpm test:analyst-mcp
+pnpm validate:inventory
+pnpm validate:full
+pnpm validate:full:live
 pnpm run build
 ```
+
+Validation reports are written to `test-results/validation/`. The validation matrix and manual checklist live in:
+
+- `docs/VALIDATION.md`
+- `scripts/validation/matrix.json`
 
 For linting and formatting, prefer direct commands against the current source tree:
 

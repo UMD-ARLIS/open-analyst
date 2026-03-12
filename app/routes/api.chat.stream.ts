@@ -1,5 +1,6 @@
 import { getSettings } from '~/lib/db/queries/settings.server';
 import { getProject } from '~/lib/db/queries/projects.server';
+import { ensureTaskCollection } from '~/lib/task-collection.server';
 import {
   createTask,
   getTask,
@@ -11,8 +12,13 @@ import {
 import { createAgentProvider } from '~/lib/agent/index.server';
 import { getProjectWorkspace } from '~/lib/filesystem.server';
 import { resolveModel } from '~/lib/litellm.server';
-import { applyProjectMcpContext, getSelectedMcpServers } from '~/lib/mcp.server';
+import {
+  applyProjectMcpContext,
+  filterLocalToolsForSelectedMcpServers,
+  getSelectedMcpServers,
+} from '~/lib/mcp.server';
 import { buildToolCatalogText, isToolCatalogQuestion } from '~/lib/tool-catalog.server';
+import { syncAnalystCollectionToTaskCollection } from '~/lib/analyst-mcp-sync.server';
 import { applyChatStreamEvent, extractFinalAssistantText } from '~/lib/chat-stream';
 import type { ContentBlock } from '~/lib/types';
 import {
@@ -77,12 +83,17 @@ export async function action({ request }: Route.ActionArgs) {
     prompt,
     messages: requestedChatMessages,
   });
-  const activeToolNames = getActiveSkillToolNames(activeSkills);
   const selectedMcpServers = await getSelectedMcpServers({
     prompt,
     messages: requestedChatMessages,
     pinnedServerIds: pinnedMcpServerIds,
   });
+  const matchedToolNames = getActiveSkillToolNames(matchedSkills);
+  const fallbackToolNames = getActiveSkillToolNames(activeSkills);
+  const activeToolNames = filterLocalToolsForSelectedMcpServers(
+    matchedToolNames.length > 0 ? matchedToolNames : fallbackToolNames,
+    selectedMcpServers
+  );
   const project = await getProject(projectId);
   if (!project) {
     return Response.json({ error: `Project not found: ${projectId}` }, { status: 404 });
@@ -105,6 +116,13 @@ export async function action({ request }: Route.ActionArgs) {
       status: 'running',
     });
   }
+
+  const taskCollection = await ensureTaskCollection(
+    task,
+    projectId,
+    String(body.collectionId || '').trim() || undefined,
+    String(body.collectionName || '').trim() || undefined
+  );
 
   const persistedMessages = requestedChatMessages.length === 0 ? await listMessages(task.id) : [];
   const chatMessages = requestedChatMessages.length
@@ -166,6 +184,9 @@ export async function action({ request }: Route.ActionArgs) {
           await updateTask(task.id, {
             status: 'completed',
             planSnapshot: {
+              ...(task.planSnapshot && typeof task.planSnapshot === 'object'
+                ? (task.planSnapshot as Record<string, unknown>)
+                : {}),
               summary: [
                 `Task: ${task.title || 'Untitled task'}`,
                 prompt ? `Latest user request: ${prompt}` : '',
@@ -187,8 +208,8 @@ export async function action({ request }: Route.ActionArgs) {
           workingDir,
           sessionId: task.id,
           taskSummary: previousSummary,
-          collectionId: String(body.collectionId || '').trim() || undefined,
-          collectionName: String(body.collectionName || '').trim() || 'Task Sources',
+          collectionId: taskCollection.id,
+          collectionName: taskCollection.name,
           deepResearch: body.deepResearch === true,
           skills: matchedSkills,
           skillCatalog: getSkillCatalog(activeSkills),
@@ -205,9 +226,40 @@ export async function action({ request }: Route.ActionArgs) {
             toolUseId: event.toolUseId,
             toolInput: event.toolInput,
             toolOutput: event.toolOutput,
+            toolResultData: event.toolResultData,
             toolStatus: event.toolStatus,
             error: event.error,
           });
+
+          if (event.type === 'tool_call_end' && event.toolStatus !== 'error' && event.toolName) {
+            const syncResult = await syncAnalystCollectionToTaskCollection({
+              projectId,
+              task,
+              collectionId: taskCollection.id,
+              collectionName: taskCollection.name,
+              toolName: event.toolName,
+              toolResultData: event.toolResultData,
+              mcpServers: runtimeMcpServers,
+            });
+            if (syncResult) {
+              const syncText =
+                syncResult.mirrored > 0
+                  ? `Added ${syncResult.mirrored} collected article${syncResult.mirrored === 1 ? '' : 's'} to ${syncResult.collectionName}.`
+                  : `No collected articles were added to ${syncResult.collectionName}.`;
+              const syncEvent = {
+                type: 'status' as const,
+                status: 'running' as const,
+                phase: 'collection_sync',
+                text:
+                  syncResult.skipped.length > 0
+                    ? `${syncText} Skipped: ${syncResult.skipped.join('; ')}`
+                    : syncText,
+              };
+              send(syncEvent.type, syncEvent);
+              contentBlocks = applyChatStreamEvent(contentBlocks, syncEvent);
+              await appendTaskEvent(task.id, syncEvent.type, syncEvent);
+            }
+          }
         }
 
         const fullText = extractFinalAssistantText(contentBlocks);
@@ -221,12 +273,16 @@ export async function action({ request }: Route.ActionArgs) {
         await updateTask(task.id, {
           status: 'completed',
           planSnapshot: {
+            ...(task.planSnapshot && typeof task.planSnapshot === 'object'
+              ? (task.planSnapshot as Record<string, unknown>)
+              : {}),
             summary: [
               `Task: ${task.title || 'Untitled task'}`,
               prompt ? `Latest user request: ${prompt}` : '',
               matchedSkills.length
                 ? `Skills used: ${matchedSkills.map((skill) => skill.name).join(', ')}`
                 : '',
+              `Task collection: ${taskCollection.name}`,
               fullText ? `Latest answer: ${fullText.slice(0, 1200)}` : '',
             ]
               .filter(Boolean)

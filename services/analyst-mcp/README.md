@@ -136,15 +136,25 @@ pytest
 ## MCP tools
 - `search_literature(query, sources, date_from, date_to, limit)`
 - `collect_articles(query, sources, date_from, date_to, limit, preferred_formats)`
-- `get_paper(identifier, provider, include_graph)`
-- `list_paper_artifacts(identifier, provider)`
-- `collection_artifact_metadata(name, limit)`
+- `start_collect_articles(query, sources, date_from, date_to, limit, preferred_formats)`
+- `get_paper(identifier, provider)`
 - `download_articles(identifiers, preferred_formats)`
-- `graph_lookup(seed_ids, limit)`
-- `recommend_papers(query_or_ids, limit)`
-- `rag_query(question, collections, limit)`
-- `daily_scan_summary(query, sources, lookback_days, limit)`
-- `literature_review(query, sources, date_from, date_to, limit, include_recommendations, collect, preferred_formats, rag_limit)`
+- `start_download_articles(identifiers, preferred_formats)`
+- `list_paper_artifacts(identifier, provider)`
+- `list_collections()`
+- `create_collection(name, description, default_sources)`
+- `get_collection(name, limit)`
+- `add_papers_to_collection(name, identifiers, provider)`
+- `remove_papers_from_collection(name, identifiers, provider)`
+- `collection_search(name, query, limit)`
+- `collection_artifact_metadata(name, limit)`
+- `collect_collection_artifacts(name, preferred_formats)`
+- `index_collection(name, preferred_formats)`
+- `start_collect_collection_artifacts(name, preferred_formats)`
+- `get_job(job_id)`
+- `list_jobs(limit)`
+- `describe_capabilities()`
+- `storage_health()`
 - `ingest_status(provider)`
 - `bootstrap_preflight(projected_bytes, projected_memory_gb)`
 - `bootstrap_openalex_snapshot(max_files, updated_since)`
@@ -181,7 +191,6 @@ s3://<bucket>/<prefix>/<workspace-slug>/<provider>/<source_id>/<source_id>.<suff
 ## MCP resources
 - `time://today`
 - `paper://{canonical_id}`
-- `graph://paper/{canonical_id}`
 
 ## Provider notes
 - arXiv: the implementation enforces a conservative `1 request / 3 seconds` limiter and is designed to prefer bulk/OAI-style workflows for large syncs.
@@ -192,7 +201,7 @@ s3://<bucket>/<prefix>/<workspace-slug>/<provider>/<source_id>/<source_id>.<suff
 1. Use `search_literature` or `collect_articles` with a date window.
 2. Let the service persist only normalized metadata for search hits.
 3. Download PDFs/source files only for the selected hits.
-4. Use `rag_query` over the stored local corpus.
+4. Mirror successful artifacts into Open Analyst for project knowledge indexing and retrieval.
 
 Example:
 

@@ -88,13 +88,27 @@ mcp_client_http = types.ModuleType("mcp.client.streamable_http")
 mcp_client_http.streamablehttp_client = lambda *args, **kwargs: None
 sys.modules.setdefault("mcp.client.streamable_http", mcp_client_http)
 
+postgres_session_manager_mod = types.ModuleType("postgres_session_manager")
+
+
+class FakePostgresSessionManager:
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+
+
+postgres_session_manager_mod.PostgresSessionManager = FakePostgresSessionManager
+sys.modules.setdefault("postgres_session_manager", postgres_session_manager_mod)
+
 from agent_factory import (
     _build_active_skill_prompt,
     _build_skill_catalog_prompt,
+    _build_session_manager,
     _build_system_prompt,
     _build_tool_catalog_prompt,
     _collect_allowed_tools,
 )
+from config import settings
 
 
 def test_build_skill_catalog_prompt_includes_enabled_skill_summaries():
@@ -236,3 +250,23 @@ def test_build_system_prompt_prioritizes_exact_tool_names_for_tool_questions():
     assert "enabled tool catalog" in result.lower()
     assert "mcp__analyst__search_library" in result
     assert "exact tool names" in result
+
+
+def test_build_session_manager_uses_postgres_dsn(monkeypatch):
+    monkeypatch.setattr(settings, "strands_postgres_dsn", "postgresql://session-db")
+    monkeypatch.setattr(settings, "database_url", None)
+
+    manager = _build_session_manager({"session_id": "task-123"})
+
+    assert isinstance(manager, FakePostgresSessionManager)
+    assert manager.kwargs == {"session_id": "task-123", "dsn": "postgresql://session-db"}
+
+
+def test_build_session_manager_falls_back_to_database_url(monkeypatch):
+    monkeypatch.setattr(settings, "strands_postgres_dsn", None)
+    monkeypatch.setattr(settings, "database_url", "postgresql://fallback-db")
+
+    manager = _build_session_manager({"session_id": "task-123"})
+
+    assert isinstance(manager, FakePostgresSessionManager)
+    assert manager.kwargs == {"session_id": "task-123", "dsn": "postgresql://fallback-db"}

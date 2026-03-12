@@ -5,6 +5,7 @@ export const env = createEnv({
   server: {
     LITELLM_BASE_URL: z.string().url().default("http://localhost:4000"),
     LITELLM_API_KEY: z.string().default(""),
+    LITELLM_EMBEDDING_MODEL: z.string().default(""),
     STRANDS_URL: z.string().url().default("http://localhost:8080"),
     DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
     PROJECT_WORKSPACES_ROOT: z.string().default(""),

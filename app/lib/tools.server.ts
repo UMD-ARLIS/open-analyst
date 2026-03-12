@@ -222,6 +222,22 @@ const TOOL_DEFS: Array<{
   {
     type: "function",
     function: {
+      name: "generate_file",
+      description:
+        "Generate a binary or structured file by running Python code with an OUTPUT_PATH target",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          python_code: { type: "string" },
+        },
+        required: ["path", "python_code"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "execute_command",
       description: "Run a shell command in the working directory",
       parameters: {

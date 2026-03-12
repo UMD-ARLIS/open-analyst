@@ -312,7 +312,7 @@ class StubService:
             service_name="analyst-mcp",
             current_date="2026-03-09",
             providers=["arxiv", "openalex", "semantic_scholar"],
-            mcp_tools=["search_literature", "list_collections", "index_collection", "rag_query"],
+            mcp_tools=["search_literature", "collect_articles", "list_collections", "index_collection"],
             workflows=["Search providers", "Create named collections"],
             artifact_storage_backend="local",
             artifact_storage_detail="Local storage root is /tmp/articles.",
@@ -381,11 +381,6 @@ async def test_mcp_lists_all_expected_tools(tmp_path: Path, monkeypatch: pytest.
         "start_collect_collection_artifacts",
         "get_job",
         "list_jobs",
-        "graph_lookup",
-        "recommend_papers",
-        "rag_query",
-        "daily_scan_summary",
-        "literature_review",
         "describe_capabilities",
         "storage_health",
         "ingest_status",
@@ -438,40 +433,36 @@ async def test_mcp_get_paper_tool_returns_structured_error_for_missing_paper(tmp
 
 
 @pytest.mark.asyncio
-async def test_mcp_get_paper_tool_includes_graph_and_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_mcp_get_paper_tool_returns_artifacts_without_graph_payload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     configure_test_env(monkeypatch, tmp_path)
     mcp = build_mcp_server(StubService(Settings()))
 
-    payload = _tool_payload(await mcp.call_tool("get_paper", {"identifier": "paper:embodied-ai-2026", "include_graph": True, "include_artifacts": True}))
+    payload = _tool_payload(await mcp.call_tool("get_paper", {"identifier": "paper:embodied-ai-2026", "include_artifacts": True}))
 
     assert payload["paper"]["provider"] == "openalex"
     assert payload["artifacts"][0]["kind"] == "pdf"
-    assert payload["graph"]["edges"][0]["relation"] == "HAS_TOPIC"
+    assert "graph" not in payload
 
 
 @pytest.mark.asyncio
-async def test_mcp_download_articles_tool_returns_indexed_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_mcp_download_articles_tool_returns_stored_artifact_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     configure_test_env(monkeypatch, tmp_path)
     mcp = build_mcp_server(StubService(Settings()))
 
     payload = _tool_payload(await mcp.call_tool("download_articles", {"identifiers": ["paper:embodied-ai-2026"], "preferred_formats": ["pdf"]}))
 
     assert isinstance(payload, list)
-    assert payload[0]["extracted_text_path"].endswith(".txt")
+    assert payload[0]["path"].endswith(".pdf")
 
 
 @pytest.mark.asyncio
-async def test_mcp_list_artifacts_and_graph_and_recommendation_tools(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_mcp_list_artifacts_tool_returns_stored_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     configure_test_env(monkeypatch, tmp_path)
     mcp = build_mcp_server(StubService(Settings()))
 
     artifacts = _tool_payload(await mcp.call_tool("list_paper_artifacts", {"identifier": "paper:embodied-ai-2026"}))
-    graph = _tool_payload(await mcp.call_tool("graph_lookup", {"seed_ids": ["paper:embodied-ai-2026"], "limit": 10}))
-    recs = _tool_payload(await mcp.call_tool("recommend_papers", {"query_or_ids": ["paper:embodied-ai-2026"], "limit": 5}))
 
     assert artifacts[0]["mime_type"] == "application/pdf"
-    assert graph["nodes"][0]["node_id"] == "paper:embodied-ai-2026"
-    assert recs["recommendations"][0]["canonical_id"] == "paper:human-machine-teaming-2025"
 
 
 @pytest.mark.asyncio
@@ -503,21 +494,19 @@ async def test_mcp_collection_and_capability_tools_return_collection_state(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_mcp_rag_daily_scan_and_literature_review_tools_return_grounded_payloads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_mcp_removed_rag_and_graph_tools_are_not_exposed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     configure_test_env(monkeypatch, tmp_path)
     mcp = build_mcp_server(StubService(Settings()))
 
-    rag = _tool_payload(await mcp.call_tool("rag_query", {"question": "What does the corpus say about contested logistics?", "collections": ["query:embodied-ai"], "limit": 4}))
-    scan = _tool_payload(await mcp.call_tool("daily_scan_summary", {"query": "embodied ai", "sources": ["openalex"], "lookback_days": 2, "limit": 5}))
-    review = _tool_payload(await mcp.call_tool(
+    for tool_name in [
+        "graph_lookup",
+        "recommend_papers",
+        "rag_query",
+        "daily_scan_summary",
         "literature_review",
-        {"query": "embodied ai logistics", "sources": ["openalex"], "limit": 5, "include_recommendations": True, "collect": True, "preferred_formats": ["pdf"], "rag_limit": 4},
-    ))
-
-    assert rag["supporting_chunks"][0]["canonical_id"] == "paper:embodied-ai-2026"
-    assert "Recent work emphasizes embodied autonomy" in scan["summary"]
-    assert review["recommendations"][0]["provider"] == "semantic_scholar"
-    assert review["supporting_chunks"][0]["score"] == pytest.approx(0.92)
+    ]:
+        with pytest.raises(ToolError, match=f"Unknown tool: {tool_name}"):
+            await mcp.call_tool(tool_name, {})
 
 
 @pytest.mark.asyncio
@@ -546,11 +535,11 @@ async def test_mcp_resources_return_serialized_context(tmp_path: Path, monkeypat
 
     today = list(await mcp.read_resource("time://today"))
     paper = list(await mcp.read_resource("paper://id/paper:embodied-ai-2026"))
-    graph = list(await mcp.read_resource("graph://paper/paper:embodied-ai-2026"))
 
     assert service.settings.timezone in _resource_text(today)
     assert json.loads(_resource_text(paper))["title"] == service.paper.title
-    assert json.loads(_resource_text(graph))["edges"][0]["relation"] == "HAS_TOPIC"
+    with pytest.raises(ValueError, match="Unknown resource"):
+        await mcp.read_resource("graph://paper/paper:embodied-ai-2026")
 
 
 @pytest.mark.asyncio

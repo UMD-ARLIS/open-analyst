@@ -1,10 +1,16 @@
 import { getSettings } from '~/lib/db/queries/settings.server';
 import { getProject } from '~/lib/db/queries/projects.server';
+import { ensureTaskCollection } from '~/lib/task-collection.server';
 import { createTask, updateTask, appendTaskEvent } from '~/lib/db/queries/tasks.server';
 import { getProjectWorkspace } from '~/lib/filesystem.server';
 import { resolveModel } from '~/lib/litellm.server';
-import { applyProjectMcpContext, getSelectedMcpServers } from '~/lib/mcp.server';
+import {
+  applyProjectMcpContext,
+  filterLocalToolsForSelectedMcpServers,
+  getSelectedMcpServers,
+} from '~/lib/mcp.server';
 import { buildToolCatalogText, isToolCatalogQuestion } from '~/lib/tool-catalog.server';
+import { syncAnalystCollectionToTaskCollection } from '~/lib/analyst-mcp-sync.server';
 import {
   getActiveSkillToolNames,
   getSkillCatalog,
@@ -37,12 +43,17 @@ export async function action({ request }: Route.ActionArgs) {
     prompt,
     messages,
   });
-  const activeToolNames = getActiveSkillToolNames(activeSkills);
   const selectedMcpServers = await getSelectedMcpServers({
     prompt,
     messages,
     pinnedServerIds: pinnedMcpServerIds,
   });
+  const matchedToolNames = getActiveSkillToolNames(matchedSkills);
+  const fallbackToolNames = getActiveSkillToolNames(activeSkills);
+  const activeToolNames = filterLocalToolsForSelectedMcpServers(
+    matchedToolNames.length > 0 ? matchedToolNames : fallbackToolNames,
+    selectedMcpServers
+  );
 
   if (!projectId) {
     return Response.json(
@@ -83,6 +94,12 @@ export async function action({ request }: Route.ActionArgs) {
     type: 'chat',
     status: 'running',
   });
+  const taskCollection = await ensureTaskCollection(
+    task,
+    projectId,
+    collectionId || undefined,
+    collectionName || undefined
+  );
   await appendTaskEvent(task.id, 'chat_requested', {
     messageCount: chatMessages.length,
   });
@@ -100,9 +117,13 @@ export async function action({ request }: Route.ActionArgs) {
       await updateTask(task.id, {
         status: 'completed',
         planSnapshot: {
+          ...(task.planSnapshot && typeof task.planSnapshot === 'object'
+            ? (task.planSnapshot as Record<string, unknown>)
+            : {}),
           summary: [
             `Task: ${task.title || 'Untitled task'}`,
             prompt ? `Latest user request: ${prompt}` : '',
+            `Task collection: ${taskCollection.name}`,
             `Latest answer: ${text.slice(0, 1200)}`,
           ]
             .filter(Boolean)
@@ -128,8 +149,8 @@ export async function action({ request }: Route.ActionArgs) {
         typeof (task.planSnapshot as { summary?: unknown }).summary === 'string'
           ? String((task.planSnapshot as { summary: string }).summary)
           : '',
-      collectionId: collectionId || undefined,
-      collectionName: collectionName || 'Task Sources',
+      collectionId: taskCollection.id,
+      collectionName: taskCollection.name,
       deepResearch,
       skills: matchedSkills,
       skillCatalog: getSkillCatalog(activeSkills),
@@ -137,14 +158,29 @@ export async function action({ request }: Route.ActionArgs) {
       mcpServers: runtimeMcpServers,
       onRunEvent: async (eventType: string, payload: Record<string, unknown>) => {
         await appendTaskEvent(task.id, eventType, payload);
+        if (eventType === 'tool_call_end' && payload.toolStatus !== 'error' && typeof payload.toolName === 'string') {
+          await syncAnalystCollectionToTaskCollection({
+            projectId,
+            task,
+            collectionId: taskCollection.id,
+            collectionName: taskCollection.name,
+            toolName: payload.toolName,
+            toolResultData: payload.toolResultData,
+            mcpServers: runtimeMcpServers,
+          });
+        }
       },
     });
     await updateTask(task.id, {
       status: 'completed',
       planSnapshot: {
+        ...(task.planSnapshot && typeof task.planSnapshot === 'object'
+          ? (task.planSnapshot as Record<string, unknown>)
+          : {}),
         summary: [
           `Task: ${task.title || 'Untitled task'}`,
           prompt ? `Latest user request: ${prompt}` : '',
+          `Task collection: ${taskCollection.name}`,
           result.text ? `Latest answer: ${result.text.slice(0, 1200)}` : '',
         ]
           .filter(Boolean)

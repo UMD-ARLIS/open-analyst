@@ -2,6 +2,7 @@
 
 import os
 import re
+import logging
 from dataclasses import dataclass
 
 import litellm
@@ -11,11 +12,18 @@ from mcp.client.streamable_http import streamablehttp_client
 from strands.agent.conversation_manager import SummarizingConversationManager
 from strands import Agent
 from strands.models import LiteLLMModel
-from strands.session import FileSessionManager, S3SessionManager
 from strands.tools.mcp.mcp_client import MCPClient
 
+try:
+    from strands.event_loop._retry import ModelRetryStrategy
+except Exception:  # pragma: no cover - test stubs replace the strands package
+    ModelRetryStrategy = None
+
 from config import settings
+from postgres_session_manager import PostgresSessionManager
 from tools import create_project_tools
+
+logger = logging.getLogger(__name__)
 
 # Bedrock requires conversations to start with a user message.
 # This tells LiteLLM to auto-rewrite system messages for compatibility.
@@ -28,14 +36,19 @@ CORE_TOOL_NAMES = {
     "generate_file",
 }
 
+
+def _build_retry_strategy():
+    if ModelRetryStrategy is None:
+        return None
+    return ModelRetryStrategy(max_attempts=4, initial_delay=2, max_delay=24)
+
 SYSTEM_PROMPT = """You are Open Analyst, an AI research assistant.
 
 You help users research topics, analyze documents, and organize findings into structured projects.
 
 ## Capabilities
 - File operations: read, write, edit, list, search files in the project workspace
-- Web research: fetch web pages, search the web, search arXiv, browse HuggingFace papers
-- Deep research: conduct multi-step research with automated source gathering and synthesis
+- External research tools: web search/fetch, analyst MCP literature search and collection, Hugging Face paper browsing
 - Project management: organize findings into collections, query project knowledge base
 
 ## Guidelines
@@ -43,6 +56,8 @@ You help users research topics, analyze documents, and organize findings into st
 - Organize captured content into appropriate collections
 - Be concise but thorough in analysis
 - When uncertain, acknowledge limitations and suggest next steps
+- When analyst MCP tools are available and the task involves papers, articles, literature search, collection, download, or indexing, prefer the analyst MCP tools over built-in web research tools.
+- Do not answer literature-acquisition requests from general knowledge when an appropriate analyst MCP tool is available.
 - For binary file formats (.docx, .xlsx, .pptx, .pdf, images), you MUST use the generate_file tool with Python code that writes to the path in the OUTPUT_PATH environment variable. NEVER use execute_command to generate files. Do not use write_file for binary content. Do not use read_file on binary files.
 - write_file is for text-based files only (code, CSV, JSON, HTML, Markdown, etc.)
 """
@@ -207,7 +222,7 @@ def _build_active_skill_prompt(skills: list[dict]) -> str:
 
         return resolved
 
-    def _read_reference_excerpt(path_value: str, limit: int = 2400) -> str:
+    def _read_reference_excerpt(path_value: str, limit: int = 1200) -> str:
         try:
             with open(path_value, "r", encoding="utf-8", errors="ignore") as handle:
                 text = handle.read(limit + 1).strip()
@@ -241,7 +256,7 @@ def _build_active_skill_prompt(skills: list[dict]) -> str:
                 + "\n".join(f"- {item}" for item in reference_paths)
             )
             excerpts: list[str] = []
-            for ref_path in reference_paths[:2]:
+            for ref_path in reference_paths[:1]:
                 excerpt = _read_reference_excerpt(ref_path)
                 if excerpt:
                     excerpts.append(f"[{ref_path}]\n{excerpt}")
@@ -344,7 +359,7 @@ def _build_system_prompt(payload: dict, tools: list | None = None) -> str:
 
             api = ProjectAPI(api_base_url, project_id)
             if last_user:
-                rag = api.rag_query(last_user, limit=6)
+                rag = api.rag_query(last_user, limit=3)
                 results = rag.get("results", [])
                 if results:
                     ctx = "\n\n".join(
@@ -390,19 +405,10 @@ def _build_session_manager(payload: dict):
     if not session_id:
         return None
 
-    bucket = str(payload.get("session_s3_bucket", "")).strip()
-    if bucket:
-        prefix = str(payload.get("session_s3_prefix", "strands/sessions")).strip()
-        region_name = str(payload.get("session_s3_region", "")).strip() or None
-        return S3SessionManager(
-            session_id=session_id,
-            bucket=bucket,
-            prefix=prefix,
-            region_name=region_name,
-        )
-
-    storage_dir = str(payload.get("session_storage_dir", "")).strip() or None
-    return FileSessionManager(session_id=session_id, storage_dir=storage_dir)
+    dsn = settings.psycopg_session_postgres_dsn
+    if not dsn:
+        raise ValueError("Strands session persistence requires STRANDS_POSTGRES_DSN or DATABASE_URL")
+    return PostgresSessionManager(session_id=session_id, dsn=dsn)
 
 
 def _sanitize_mcp_prefix(server: dict) -> str:
@@ -482,6 +488,7 @@ def create_agent(payload: dict) -> CreatedAgent:
             "api_key": settings.litellm_api_key,
             "base_url": settings.litellm_base_url,
             "use_litellm_proxy": True,
+            "max_retries": 0,
         },
         model_id=payload["model_id"],
     )
@@ -499,10 +506,19 @@ def create_agent(payload: dict) -> CreatedAgent:
     tools.extend(mcp_tools)
 
     system_prompt = _build_system_prompt(payload, tools)
+    logger.info(
+        "agent_request_shape model=%s messages=%d system_prompt_chars=%d skills=%d mcp_servers=%d tools=%d",
+        payload["model_id"],
+        len(payload.get("messages", []) if isinstance(payload.get("messages"), list) else []),
+        len(system_prompt),
+        len(_extract_active_skills(payload)),
+        len(_extract_mcp_servers(payload)),
+        len(tools),
+    )
     session_manager = _build_session_manager(payload)
     conversation_manager = SummarizingConversationManager(
-        summary_ratio=0.35,
-        preserve_recent_messages=12,
+        summary_ratio=0.25,
+        preserve_recent_messages=8,
     )
 
     hooks = payload.get("_hooks", [])
@@ -517,6 +533,7 @@ def create_agent(payload: dict) -> CreatedAgent:
             agent_id="open-analyst",
             session_manager=session_manager,
             conversation_manager=conversation_manager,
+            retry_strategy=_build_retry_strategy(),
             hooks=hooks,
             trace_attributes={
                 "project_id": str(payload.get("project_id", "")).strip(),

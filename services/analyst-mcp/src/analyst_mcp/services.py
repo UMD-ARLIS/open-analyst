@@ -687,6 +687,29 @@ class CollectionService:
         return papers
 
 
+class NullChunkIndex:
+    async def initialize(self) -> None:
+        return None
+
+    async def read_chunks(self, _paper_ids: Sequence[str] = ()) -> list[ChunkRecord]:
+        return []
+
+    async def replace_chunks(
+        self,
+        _canonical_id: str,
+        _chunks: Sequence[ChunkRecord],
+        _embeddings: Sequence[Sequence[float]],
+    ) -> None:
+        return None
+
+    async def search(
+        self,
+        _query_embedding: Sequence[float],
+        _limit: int,
+    ) -> list[ChunkRecord]:
+        return []
+
+
 class JobTracker:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -1133,6 +1156,11 @@ class RagIndexService:
             extracted_path.write_text(text)
         result.extracted_text_path = str(extracted_path)
         chunks = self.chunk_text(result.canonical_id, text)
+        if not chunks:
+            raise AnalystMcpUnavailableError(
+                "extracted_text_empty",
+                f"No indexable text was extracted for {result.canonical_id}.",
+            )
         for chunk in chunks:
             chunk.metadata.update(
                 {
@@ -1396,12 +1424,8 @@ class AnalystService:
         providers = [ArxivProvider(settings, self.client), OpenAlexProvider(settings, self.client), SemanticScholarProvider(settings, self.client)]
         self.providers = ProviderRegistry(providers)
         self.downloads = DownloadService(settings, self.client)
-        self.llm = LiteLLMService(settings)
-        self.embedder = EmbeddingService(settings)
-        self.chunk_index = PostgresVectorIndex(settings) if settings.postgres_dsn else LocalChunkIndex(settings)
+        self.chunk_index = NullChunkIndex()
         self.collections = CollectionService(self.collection_store, self.repository, self.chunk_index, self.downloads)
-        self.rag = RagIndexService(settings, self.repository, self.llm, self.embedder, self.chunk_index, self.downloads.object_store, collection_store=self.collection_store)
-        self.recommendations = RecommendationService(self.graph_store, self.repository)
         self.openalex_bulk = OpenAlexBulkIngester(settings, self.client, providers[1], self.repository, self.graph_store)
         self.arxiv_bulk = ArxivBulkIngester(settings, self.downloads.object_store)
         self.ingestion = IngestionService(settings, self.providers, self.graph_store, self.repository, arxiv_bulk=self.arxiv_bulk)
@@ -1410,7 +1434,7 @@ class AnalystService:
     async def initialize(self) -> None:
         await self.repository.initialize()
         await self.collections.initialize()
-        await self.rag.initialize()
+        await self.chunk_index.initialize()
 
     async def close(self) -> None:
         await self.client.aclose()
@@ -1421,16 +1445,6 @@ class AnalystService:
 
     async def health_details(self) -> HealthDetailsResponse:
         storage = await self.downloads.storage_health()
-        embedding_ready = bool(
-            self.settings.litellm_base_url and self.settings.litellm_embedding_model
-        )
-        chat_ready = bool(
-            self.settings.litellm_base_url and self.settings.litellm_chat_model
-        )
-        vector_ready = bool(self.settings.postgres_dsn or self.settings.index_root.exists())
-        graph_ready = bool(self.settings.neo4j_uri and self.settings.neo4j_password) or isinstance(
-            self.graph_store, InMemoryGraphStore
-        )
         components = [
             HealthComponent(
                 name="storage",
@@ -1438,39 +1452,10 @@ class AnalystService:
                 detail=storage.detail,
             ),
             HealthComponent(
-                name="embeddings",
-                ok=embedding_ready,
+                name="providers",
+                ok=True,
                 detail=(
-                    "LiteLLM embedding endpoint configured."
-                    if embedding_ready
-                    else "ANALYST_MCP_LITELLM_BASE_URL and ANALYST_MCP_LITELLM_EMBEDDING_MODEL must both be configured."
-                ),
-            ),
-            HealthComponent(
-                name="synthesis",
-                ok=chat_ready,
-                detail=(
-                    "LiteLLM chat endpoint configured."
-                    if chat_ready
-                    else "ANALYST_MCP_LITELLM_BASE_URL and ANALYST_MCP_LITELLM_CHAT_MODEL must both be configured."
-                ),
-            ),
-            HealthComponent(
-                name="vector_index",
-                ok=vector_ready,
-                detail=(
-                    "Vector index backend configured."
-                    if vector_ready
-                    else "No vector index backend is configured."
-                ),
-            ),
-            HealthComponent(
-                name="graph",
-                ok=graph_ready,
-                detail=(
-                    "Graph backend available."
-                    if graph_ready
-                    else "Graph backend is unavailable."
+                    "External provider search, fetch, and download tools are available."
                 ),
             ),
         ]
@@ -1480,27 +1465,10 @@ class AnalystService:
             service_name=self.settings.service_name,
             current_date=current_date,
             components=components,
-            rag_available=storage.ok and embedding_ready and chat_ready and vector_ready,
-            synthesis_available=chat_ready,
+            rag_available=False,
+            synthesis_available=False,
             search_available=True,
         )
-
-    async def require_rag_health(self) -> None:
-        health = await self.health_details()
-        if health.rag_available:
-            return
-        failing = next((component for component in health.components if not component.ok), None)
-        detail = failing.detail if failing is not None else "RAG prerequisites are unavailable."
-        code = f"{failing.name}_unavailable" if failing is not None else "rag_unavailable"
-        raise AnalystMcpUnavailableError(code, detail)
-
-    async def require_synthesis_health(self) -> None:
-        health = await self.health_details()
-        if health.synthesis_available:
-            return
-        failing = next((component for component in health.components if component.name == "synthesis"), None)
-        detail = failing.detail if failing is not None else "Synthesis prerequisites are unavailable."
-        raise AnalystMcpUnavailableError("chat_model_unavailable", detail)
 
     async def search_literature(self, query: str, sources: list[str] | None, date_from: str | None, date_to: str | None, limit: int) -> SearchResponse:
         papers = await self.providers.search_all(query=query, limit=limit, sources=sources, date_from=date_from, date_to=date_to)
@@ -1529,9 +1497,9 @@ class AnalystService:
             if paper is None:
                 continue
             download = await self.downloads.download_paper(paper, preferred_formats)
-            indexed = await self._index_download_if_available(download)
-            await self._invalidate_collections(indexed.collections)
-            results.append(indexed)
+            stored = await self._index_download_if_available(download)
+            await self._invalidate_collections(stored.collections)
+            results.append(stored)
         return results
 
     async def collect_articles(
@@ -1559,7 +1527,8 @@ class AnalystService:
                 skipped_ids.append(paper.canonical_id)
                 skip_reasons[paper.canonical_id] = str(exc)
                 continue
-            downloaded.append(await self._index_download_if_available(download))
+            stored = await self._index_download_if_available(download)
+            downloaded.append(stored)
         await self._invalidate_collections([collection_name])
         return CollectionResponse(
             query=query,
@@ -1661,7 +1630,8 @@ class AnalystService:
                 skipped_ids.append(paper.canonical_id)
                 skip_reasons[paper.canonical_id] = str(exc)
                 continue
-            downloaded.append(await self._index_download_if_available(download))
+            stored = await self._index_download_if_available(download)
+            downloaded.append(stored)
         await self._invalidate_collections([name])
         return CollectionResponse(
             query=f"collection:{name}",
@@ -1758,7 +1728,7 @@ class AnalystService:
         self,
         identifier: str,
         provider: str | None = None,
-        include_graph: bool = True,
+        include_graph: bool = False,
         graph_limit: int = 40,
     ) -> PaperDetailResponse | None:
         paper = await self.get_paper(identifier, provider=provider)
@@ -1899,11 +1869,6 @@ class AnalystService:
                 "start_collect_collection_artifacts",
                 "get_job",
                 "list_jobs",
-                "graph_lookup",
-                "recommend_papers",
-                "rag_query",
-                "daily_scan_summary",
-                "literature_review",
                 "describe_capabilities",
                 "storage_health",
                 "ingest_status",
@@ -1913,8 +1878,8 @@ class AnalystService:
                 "fetch_arxiv_archive_members",
             ],
             workflows=[
-                "Search providers or a collection for top papers",
-                "Create named collections and reuse them for RAG",
+                "Search external providers for papers and metadata",
+                "Create named collections to organize acquisition workflows",
                 "Queue artifact collection/download jobs and monitor progress live",
                 "Open stored artifacts or fall back to external paper/source links",
             ],
@@ -1926,14 +1891,13 @@ class AnalystService:
         return await self.downloads.storage_health()
 
     async def _run_download_job(self, job_id: str, papers: Sequence[PaperRecord], preferred_formats: Sequence[str]) -> None:
-        await self.jobs.update_job(job_id, status="running", started_at=datetime.now(UTC), message="Downloading and indexing papers.")
+        await self.jobs.update_job(job_id, status="running", started_at=datetime.now(UTC), message="Downloading and storing papers.")
         artifacts_created = 0
         chunks_indexed = 0
         try:
             for index, paper in enumerate(papers, start=1):
                 download = await self.downloads.download_paper(paper, preferred_formats)
-                indexed = await self._index_download_if_available(download)
-                chunks_indexed += 1 if indexed.index_status == "indexed" else 0
+                await self._index_download_if_available(download)
                 artifacts_created += 1
                 await self.jobs.update_job(
                     job_id,
@@ -1957,23 +1921,23 @@ class AnalystService:
         artifacts_created = 0
         chunks_indexed = 0
         skipped = 0
+        last_failure = ""
         try:
             for index, paper in enumerate(papers, start=1):
                 try:
                     download = await self.downloads.download_paper(paper, preferred_formats)
                     download.collections = [collection_name]
-                    indexed = await self._index_download_if_available(download)
-                except Exception:
-                    skipped += 1
-                else:
+                    await self._index_download_if_available(download)
                     artifacts_created += 1
-                    chunks_indexed += 1 if indexed.index_status == "indexed" else 0
+                except Exception as exc:
+                    skipped += 1
+                    last_failure = f"{paper.canonical_id}: {exc}"
                 await self.jobs.update_job(
                     job_id,
                     progress_current=index,
                     artifacts_created=artifacts_created,
                     chunks_indexed=chunks_indexed,
-                    detail=f"skipped={skipped}",
+                    detail=f"skipped={skipped}" + (f" last_failure={last_failure}" if last_failure else ""),
                     message=f"Processed {index}/{len(papers)} papers for {collection_name}.",
                 )
             await self._invalidate_collections([collection_name])
@@ -1996,12 +1960,7 @@ class AnalystService:
                 await self.collections.invalidate(name)
 
     async def _index_download_if_available(self, download: DownloadResult) -> DownloadResult:
-        try:
-            return await self.rag.index_download(download)
-        except AnalystMcpUnavailableError as exc:
-            download.index_status = "unavailable"
-            download.index_error = exc.detail
-            return download
+        return download
 
     def _query_collection_name(self, query: str) -> str:
         normalized = re.sub(r"[^a-z0-9]+", "-", query.lower()).strip("-")

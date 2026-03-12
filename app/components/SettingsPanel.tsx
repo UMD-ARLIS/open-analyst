@@ -480,7 +480,6 @@ function ConnectorsTab({ initialServers, initialPresets }: { initialServers?: an
         {servers.map((server) => {
           const status = statuses.find((s) => s.id === server.id);
           const count = tools.filter((t) => t.serverId === server.id).length || status?.toolCount || 0;
-          const ragAvailable = status?.health?.rag_available;
           return (
             <div
               key={server.id}
@@ -495,15 +494,6 @@ function ConnectorsTab({ initialServers, initialPresets }: { initialServers?: an
                 </div>
                 {status?.error && (
                   <div className="text-xs text-error mt-1">{status.error}</div>
-                )}
-                {status?.connected && status.health && ragAvailable === false && (
-                  <div className="text-xs text-amber-700 mt-1">
-                    RAG unavailable: {String(
-                      (Array.isArray(status.health.components)
-                        ? status.health.components.find((item: any) => item?.ok === false)?.detail
-                        : '') || 'connector prerequisites are missing'
-                    )}
-                  </div>
                 )}
               </div>
               <div className="flex gap-2">

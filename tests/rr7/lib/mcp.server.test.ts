@@ -1,7 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { getMcpPresets, getSelectedMcpServers, listMcpServers } from '../../../app/lib/mcp.server';
+import {
+  filterLocalToolsForSelectedMcpServers,
+  getMcpPresets,
+  getSelectedMcpServers,
+  listMcpServers,
+} from '../../../app/lib/mcp.server';
 import { createTempDataDir, cleanupTempDataDir } from '../setup';
 
 describe('mcp.server', () => {
@@ -118,5 +123,66 @@ describe('mcp.server', () => {
 
     expect(selected).toHaveLength(1);
     expect(selected[0].name).toBe('Analyst MCP');
+  });
+
+  it('auto-selects analyst MCP for collection-oriented research prompts', async () => {
+    process.env.ANALYST_MCP_API_KEY = 'secret-key';
+
+    const configPath = path.join(tempDir, 'mcp-servers.json');
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify(
+        [
+          {
+            id: 'mcp-analystMcp-1',
+            name: 'Analyst MCP',
+            alias: 'analyst',
+            type: 'http',
+            url: 'http://localhost:8000/mcp/',
+            headers: {
+              'x-api-key': 'secret-key',
+            },
+            enabled: true,
+          },
+        ],
+        null,
+        2
+      ),
+      'utf8'
+    );
+
+    const selected = await getSelectedMcpServers(
+      {
+        prompt: 'Collect and index recent journal articles about autonomous maritime ISR for this task.',
+        messages: [
+          {
+            role: 'user',
+            content: 'Collect and index recent journal articles about autonomous maritime ISR for this task.',
+          },
+        ],
+      },
+      tempDir
+    );
+
+    expect(selected).toHaveLength(1);
+    expect(selected[0].name).toBe('Analyst MCP');
+  });
+
+  it('filters competing local research tools when analyst MCP is selected', () => {
+    const filtered = filterLocalToolsForSelectedMcpServers(
+      ['read_file', 'web_search', 'deep_research', 'collection_artifact_metadata'],
+      [
+        {
+          id: 'mcp-analystMcp-1',
+          name: 'Analyst MCP',
+          alias: 'analyst',
+          type: 'http',
+          url: 'http://localhost:8000/mcp/',
+          enabled: true,
+        },
+      ]
+    );
+
+    expect(filtered).toEqual(['read_file', 'collection_artifact_metadata']);
   });
 });
