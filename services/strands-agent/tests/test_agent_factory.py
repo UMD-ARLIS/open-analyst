@@ -138,6 +138,7 @@ def test_collect_allowed_tools_prefers_explicit_active_tool_names():
         "read_file",
         "web_fetch",
         "collection_overview",
+        "collection_artifact_metadata",
         "capture_artifact",
     }
 
@@ -157,6 +158,7 @@ def test_collect_allowed_tools_falls_back_to_skill_tools():
         "write_file",
         "web_fetch",
         "collection_overview",
+        "collection_artifact_metadata",
         "capture_artifact",
     }
 

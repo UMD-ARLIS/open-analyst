@@ -11,7 +11,7 @@ from .file_tools import (
     read_file,
     write_file,
 )
-from .project_tools import capture_artifact, collection_overview
+from .project_tools import capture_artifact, collection_artifact_metadata, collection_overview
 
 
 def create_file_tools(workspace_dir: str) -> list:
@@ -127,6 +127,16 @@ def create_project_tools(
 
     capture_artifact_bound.__name__ = "capture_artifact"
 
+    @tool
+    def collection_artifact_metadata_bound(collection_id_override: str = "") -> str:
+        return collection_artifact_metadata(
+            collection_id=collection_id_override or collection_id,
+            project_id=project_id,
+            api_base_url=api_base_url,
+        )
+
+    collection_artifact_metadata_bound.__name__ = "collection_artifact_metadata"
+
     # Web, research, and project tools are added in Phase 1.3.3
     try:
         from .web_tools import web_fetch, web_search
@@ -139,6 +149,7 @@ def create_project_tools(
             hf_paper,
             deep_research,
             collection_overview_bound,
+            collection_artifact_metadata_bound,
             capture_artifact_bound,
         ])
     except ImportError:
