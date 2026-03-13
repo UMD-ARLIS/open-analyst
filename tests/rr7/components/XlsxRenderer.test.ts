@@ -3,15 +3,12 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const mockRead = vi.fn();
-const mockUtils = {
-  sheet_to_json: vi.fn(),
-};
+const mockReadXlsxFile = vi.fn();
+const mockReadSheetNames = vi.fn();
 
-vi.mock('xlsx', () => ({
-  default: { read: (...args: any[]) => mockRead(...args), utils: mockUtils },
-  read: (...args: any[]) => mockRead(...args),
-  utils: mockUtils,
+vi.mock('read-excel-file/browser', () => ({
+  default: (...args: any[]) => mockReadXlsxFile(...args),
+  readSheetNames: (...args: any[]) => mockReadSheetNames(...args),
 }));
 
 async function waitFor(
@@ -32,8 +29,8 @@ async function waitFor(
 
 describe('XlsxRenderer', () => {
   beforeEach(() => {
-    mockRead.mockReset();
-    mockUtils.sheet_to_json.mockReset();
+    mockReadXlsxFile.mockReset();
+    mockReadSheetNames.mockReset();
   });
 
   afterEach(() => {
@@ -44,10 +41,9 @@ describe('XlsxRenderer', () => {
   async function renderComponent(url: string) {
     vi.resetModules();
 
-    vi.doMock('xlsx', () => ({
-      default: { read: (...args: any[]) => mockRead(...args), utils: mockUtils },
-      read: (...args: any[]) => mockRead(...args),
-      utils: mockUtils,
+    vi.doMock('read-excel-file/browser', () => ({
+      default: (...args: any[]) => mockReadXlsxFile(...args),
+      readSheetNames: (...args: any[]) => mockReadSheetNames(...args),
     }));
 
     const { XlsxRenderer } = await import('~/components/file-renderers/XlsxRenderer');
@@ -72,7 +68,7 @@ describe('XlsxRenderer', () => {
     expect(container.textContent).toContain('Loading');
   });
 
-  it('fetches URL, parses with XLSX, renders table rows', async () => {
+  it('fetches URL, parses with ExcelJS, renders table rows', async () => {
     const arrayBuffer = new ArrayBuffer(8);
     vi.stubGlobal(
       'fetch',
@@ -84,11 +80,8 @@ describe('XlsxRenderer', () => {
       )
     );
 
-    mockRead.mockReturnValue({
-      SheetNames: ['Sheet1'],
-      Sheets: { Sheet1: {} },
-    });
-    mockUtils.sheet_to_json.mockReturnValue([
+    mockReadSheetNames.mockResolvedValue(['Sheet1']);
+    mockReadXlsxFile.mockResolvedValue([
       ['Name', 'Age'],
       ['Alice', 30],
     ]);
@@ -96,6 +89,7 @@ describe('XlsxRenderer', () => {
     const container = await renderComponent('/api/test.xlsx');
     await waitFor(() => {
       expect(container.querySelector('table')).not.toBeNull();
+      expect(container.textContent).toContain('Alice');
     });
   });
 
@@ -111,11 +105,10 @@ describe('XlsxRenderer', () => {
       )
     );
 
-    mockRead.mockReturnValue({
-      SheetNames: ['Sheet1', 'Sheet2'],
-      Sheets: { Sheet1: {}, Sheet2: {} },
-    });
-    mockUtils.sheet_to_json.mockReturnValue([['A', 'B']]);
+    mockReadSheetNames.mockResolvedValue(['Sheet1', 'Sheet2']);
+    mockReadXlsxFile
+      .mockResolvedValueOnce([['A', 'B']])
+      .mockResolvedValueOnce([['C', 'D']]);
 
     const container = await renderComponent('/api/test.xlsx');
     await waitFor(() => {

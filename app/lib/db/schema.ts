@@ -8,22 +8,7 @@ import {
   boolean,
   index,
   uniqueIndex,
-  customType,
 } from "drizzle-orm/pg-core";
-
-// Custom type for pgvector — nullable vector(1536)
-const vector = customType<{ data: number[]; driverParam: string }>({
-  dataType() {
-    return "vector(1536)";
-  },
-  toDriver(value: number[]): string {
-    return `[${value.join(",")}]`;
-  },
-  fromDriver(value: unknown): number[] {
-    // pgvector returns "[1,2,3]" string
-    return JSON.parse(value as string);
-  },
-});
 
 // --- projects ---
 
@@ -92,7 +77,7 @@ export const documents = pgTable(
     storageUri: text("storage_uri"),
     content: text("content"),
     metadata: jsonb("metadata").default({}),
-    embedding: vector("embedding"),
+    embedding: jsonb("embedding").$type<number[] | null>(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },

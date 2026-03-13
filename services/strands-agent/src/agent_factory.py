@@ -65,6 +65,19 @@ You help users research topics, analyze documents, and organize findings into st
 - write_file is for text-based files only (code, CSV, JSON, HTML, Markdown, etc.)
 """
 
+RESEARCH_WORKER_PROMPT = """You are the Open Analyst research worker.
+
+You are not the final user-facing assistant. Your job is to gather evidence efficiently and return a compact bundle for the primary chat agent.
+
+Output requirements:
+- Use only the available research, retrieval, and MCP tools that materially improve the answer.
+- Return concise working notes, not a final polished response.
+- Organize the output under these headings: Question, Findings, Sources, Open Questions.
+- For Findings, prefer short bullets with concrete evidence.
+- For Sources, include stable URLs, artifact links, or canonical identifiers when available.
+- If a tool fails or evidence is incomplete, say so plainly under Open Questions.
+"""
+
 
 @dataclass
 class CreatedAgent:
@@ -316,7 +329,8 @@ def _is_tool_catalog_question(text: str) -> bool:
 
 def _build_system_prompt(payload: dict, tools: list | None = None) -> str:
     """Build the system prompt, optionally augmented with RAG context."""
-    base = SYSTEM_PROMPT
+    worker_role = str(payload.get("worker_role", "")).strip()
+    base = RESEARCH_WORKER_PROMPT if worker_role == "research" else SYSTEM_PROMPT
     skill_catalog = _extract_skill_catalog(payload)
     skills = _extract_active_skills(payload)
     last_user = _get_last_user_message(payload.get("messages", []))
@@ -351,6 +365,14 @@ def _build_system_prompt(payload: dict, tools: list | None = None) -> str:
             "\n\nTask memory summary from earlier work in this task. "
             "Use it to maintain continuity, but prefer newer user instructions if they conflict.\n\n"
             f"{task_summary}"
+        )
+
+    research_evidence = str(payload.get("research_evidence", "")).strip()
+    if research_evidence and worker_role != "research":
+        base += (
+            "\n\nA bounded research worker already gathered evidence for this turn. "
+            "Use it as working notes, verify consistency, and produce the final user-facing answer.\n\n"
+            f"{research_evidence}"
         )
 
     # RAG context injection: query the Node.js project store for relevant docs

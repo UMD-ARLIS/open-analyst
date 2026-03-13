@@ -15,6 +15,7 @@ from strands.hooks.events import (
 from strands.hooks.registry import HookProvider, HookRegistry
 
 from agent_factory import create_agent, cleanup_created_agent, _build_prompt
+from research_worker import run_research_worker, should_run_research_worker
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +147,14 @@ def _extract_text(result) -> str:
 def _invoke_sync(payload: dict) -> dict:
     """Non-streaming invocation — returns full result as JSON."""
     try:
+        if should_run_research_worker(payload):
+            try:
+                payload = {
+                    **payload,
+                    "research_evidence": run_research_worker(payload),
+                }
+            except Exception:
+                logger.exception("Research worker failed during sync invocation; continuing without worker context")
         hooks = payload.get("_hooks", [])
         if not isinstance(hooks, list):
             hooks = []
@@ -178,6 +187,38 @@ async def _drain_events(queue: asyncio.Queue[dict[str, Any]]) -> AsyncIterator[d
 async def _invoke_stream(payload: dict):
     """Streaming invocation — yields SSE events as they arrive."""
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+    if should_run_research_worker(payload):
+        queue.put_nowait(
+            {
+                "type": "status",
+                "status": "running",
+                "phase": "research",
+                "text": "Research specialist gathering evidence",
+            }
+        )
+        try:
+            payload = {
+                **payload,
+                "research_evidence": await asyncio.to_thread(run_research_worker, payload),
+            }
+            queue.put_nowait(
+                {
+                    "type": "status",
+                    "status": "running",
+                    "phase": "research",
+                    "text": "Research evidence bundle ready",
+                }
+            )
+        except Exception:
+            logger.exception("Research worker failed during streaming invocation; continuing without worker context")
+            queue.put_nowait(
+                {
+                    "type": "status",
+                    "status": "running",
+                    "phase": "research",
+                    "text": "Research specialist failed; continuing with primary agent only",
+                }
+            )
     hooks = payload.get("_hooks", [])
     if not isinstance(hooks, list):
         hooks = []
