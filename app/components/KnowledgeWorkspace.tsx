@@ -18,14 +18,13 @@ import {
 } from "lucide-react";
 import { useAppStore } from "~/lib/store";
 import { AlertDialog } from "./AlertDialog";
-import { FileViewerPanel } from "./FileViewerPanel";
 import { AddSourceModal } from "./AddSourceModal";
 import { formatRelativeTime } from "~/lib/format";
 
 export function KnowledgeWorkspace() {
   const params = useParams();
   const projectId = params.projectId!;
-  const { openFileViewer, fileViewerArtifact } = useAppStore();
+  const { openFileViewer } = useAppStore();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Active collection from URL
@@ -394,7 +393,6 @@ export function KnowledgeWorkspace() {
         onCancel={() => setDeleteTarget(null)}
       />
       </div>
-      {fileViewerArtifact && <FileViewerPanel />}
     </div>
   );
 }
