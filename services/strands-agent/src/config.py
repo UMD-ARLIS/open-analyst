@@ -6,8 +6,19 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-REPO_ROOT_ENV = Path(__file__).resolve().parents[3] / ".env"
-SERVICE_ENV = Path(__file__).resolve().parents[1] / ".env"
+def _env_files(current_file: Path) -> tuple[Path, ...]:
+    seen: set[Path] = set()
+    env_files: list[Path] = []
+    for parent in current_file.resolve().parents:
+        env_path = parent / ".env"
+        if env_path in seen:
+            continue
+        seen.add(env_path)
+        env_files.append(env_path)
+    return tuple(env_files)
+
+
+ENV_FILES = _env_files(Path(__file__))
 
 
 class Settings(BaseSettings):
@@ -20,7 +31,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="",
-        env_file=(REPO_ROOT_ENV, SERVICE_ENV),
+        env_file=ENV_FILES,
         extra="ignore",
     )
 

@@ -12,6 +12,11 @@ interface SheetData {
 
 const MAX_ROWS = 1000;
 
+function normalizeRowValues(values: unknown): unknown[] {
+  if (!Array.isArray(values)) return [];
+  return values;
+}
+
 export function XlsxRenderer({ url }: XlsxRendererProps) {
   const [sheets, setSheets] = useState<SheetData[] | null>(null);
   const [activeSheet, setActiveSheet] = useState(0);
@@ -25,13 +30,17 @@ export function XlsxRenderer({ url }: XlsxRendererProps) {
         const res = await fetch(url);
         if (!res.ok) throw new Error(`Failed to fetch: ${res.status}`);
         const arrayBuffer = await res.arrayBuffer();
-        const XLSX = await import('xlsx');
-        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-        const parsed: SheetData[] = workbook.SheetNames.map((name: string) => {
-          const sheet = workbook.Sheets[name];
-          const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as unknown[][];
-          return { name, rows };
+        const blob = new Blob([arrayBuffer], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         });
+        const { default: readXlsxFile, readSheetNames } = await import('read-excel-file/browser');
+        const sheetNames = await readSheetNames(blob);
+        const parsed: SheetData[] = await Promise.all(
+          sheetNames.map(async (sheetName) => ({
+            name: sheetName,
+            rows: (await readXlsxFile(blob, { sheet: sheetName })).map((row) => normalizeRowValues(row)),
+          }))
+        );
         if (!cancelled) setSheets(parsed);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load spreadsheet');

@@ -264,6 +264,30 @@ def test_build_system_prompt_prioritizes_exact_tool_names_for_tool_questions():
     assert "exact tool names" in result
 
 
+def test_build_system_prompt_switches_to_research_worker_prompt():
+    result = _build_system_prompt(
+        {
+            "worker_role": "research",
+            "messages": [{"role": "user", "content": "Find me recent research on autonomy"}],
+        }
+    )
+
+    assert "research worker" in result.lower()
+    assert "Question, Findings, Sources, Open Questions" in result
+
+
+def test_build_system_prompt_includes_research_evidence_for_primary_agent():
+    result = _build_system_prompt(
+        {
+            "messages": [{"role": "user", "content": "Summarize the evidence"}],
+            "research_evidence": "Research worker evidence bundle:\nQuestion\nFindings",
+        }
+    )
+
+    assert "bounded research worker already gathered evidence" in result
+    assert "Research worker evidence bundle" in result
+
+
 def test_build_session_manager_uses_postgres_dsn(monkeypatch):
     monkeypatch.setattr(settings, "strands_postgres_dsn", "postgresql://session-db")
     monkeypatch.setattr(settings, "database_url", None)

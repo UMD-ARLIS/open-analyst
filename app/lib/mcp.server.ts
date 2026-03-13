@@ -65,7 +65,19 @@ function getCacheKey(server: McpServerConfig): string {
 }
 
 function defaultMcpServers(): McpServerConfig[] {
+  const analystDefaults = getAnalystMcpDefaults();
   return [
+    {
+      id: 'mcp-analystMcp-default',
+      name: 'Analyst MCP',
+      alias: 'analyst',
+      type: 'http',
+      url: analystDefaults.url,
+      headers: {
+        'x-api-key': analystDefaults.apiKey,
+      },
+      enabled: true,
+    },
     {
       id: 'mcp-example-filesystem',
       name: 'Filesystem (Example)',
@@ -80,11 +92,12 @@ function defaultMcpServers(): McpServerConfig[] {
 }
 
 function getAnalystMcpDefaults(): { url: string; apiKey: string } {
+  const host = String(process.env.ANALYST_MCP_HOST || ANALYST_MCP_DEFAULT_HOST).trim() || ANALYST_MCP_DEFAULT_HOST;
   const port = String(process.env.ANALYST_MCP_PORT || ANALYST_MCP_DEFAULT_PORT).trim() || ANALYST_MCP_DEFAULT_PORT;
   const apiKey =
     String(process.env.ANALYST_MCP_API_KEY || '').trim() || ANALYST_MCP_DEFAULT_API_KEY;
   return {
-    url: `http://${ANALYST_MCP_DEFAULT_HOST}:${port}${ANALYST_MCP_DEFAULT_PATH}`,
+    url: `http://${host}:${port}${ANALYST_MCP_DEFAULT_PATH}`,
     apiKey,
   };
 }

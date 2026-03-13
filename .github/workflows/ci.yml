@@ -7,6 +7,24 @@ on:
     branches: [main]
 
 jobs:
+  node-security:
+    name: Node / security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Audit production dependencies
+        run: pnpm audit:prod
+
   node-tests:
     name: Node / ${{ matrix.suite.name }}
     runs-on: ubuntu-latest

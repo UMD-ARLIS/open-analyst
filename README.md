@@ -138,6 +138,17 @@ pnpm db:migrate
 For the Node app, an RDS development DSN such as `...?sslmode=no-verify` works with the current `pg` driver behavior.
 `analyst_mcp` and the Strands agent normalize that DSN for psycopg automatically, so the same RDS connection settings can be reused there without a separate workaround.
 
+For the production-style Docker stack, use:
+
+```bash
+bash scripts/docker-prod.sh up --build
+```
+
+That wrapper checks `.env`:
+
+- if `DATABASE_URL` is set, it uses the external database and does not launch the bundled Postgres service
+- if `DATABASE_URL` is missing, it automatically adds the local `pgvector/pgvector:pg16` service
+
 Run the web app:
 
 ```bash
