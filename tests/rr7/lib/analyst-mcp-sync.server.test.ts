@@ -157,4 +157,95 @@ describe("syncAnalystCollectionToTaskCollection", () => {
       "doc-1"
     );
   });
+
+  it("parses JSON tool output when toolResultData is missing", async () => {
+    documentQueryMocks.getDocumentBySourceUri.mockResolvedValue(null);
+    documentQueryMocks.createDocument.mockResolvedValue({ id: "doc-1" });
+    knowledgeIndexMocks.refreshDocumentKnowledgeIndex.mockResolvedValue({
+      id: "doc-1",
+    });
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    fetchSpy
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            papers: [
+              {
+                canonical_id: "paper-1",
+                provider: "openalex",
+                source_id: "W123",
+                title: "Autonomous Maritime ISR",
+                abstract: "Study of ISR workflows.",
+                url: "https://example.test/paper-1",
+                pdf_url: "https://example.test/paper-1.pdf",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            items: [
+              {
+                paper: {
+                  canonical_id: "paper-1",
+                  provider: "openalex",
+                  source_id: "W123",
+                  title: "Autonomous Maritime ISR",
+                },
+                artifacts: [
+                  {
+                    kind: "pdf",
+                    label: "PDF",
+                    suffix: ".pdf",
+                    path: "s3://bucket/projects/task-1/paper-1.pdf",
+                    mime_type: "application/pdf",
+                    artifact_url:
+                      "/api/projects/project-1/analyst-mcp/papers/paper-1/artifact",
+                    download_url:
+                      "/api/projects/project-1/analyst-mcp/papers/paper-1/artifact?download=1",
+                  },
+                ],
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      );
+
+    const result = await syncAnalystCollectionToTaskCollection({
+      projectId: "project-1",
+      task: { id: "task-1" } as never,
+      collectionId: "collection-1",
+      collectionName: "Task Sources",
+      toolName: "mcp__analyst__collect_articles",
+      toolResultData: null,
+      toolOutput: JSON.stringify({
+        collection_name: "task-collection",
+        downloaded: [{ canonical_id: "paper-1" }],
+      }),
+      mcpServers: [
+        {
+          id: "analyst-mcp",
+          name: "Analyst MCP",
+          alias: "analyst",
+          type: "http",
+          url: "http://localhost:8000/mcp/",
+          headers: { "x-api-key": "test" },
+          enabled: true,
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      mirrored: 1,
+      skipped: [],
+      collectionName: "Task Sources",
+    });
+    expect(documentQueryMocks.createDocument).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
 });

@@ -61,6 +61,22 @@ function findAnalystCollectionName(toolResultData: unknown): string {
   return firstString(data?.collection_name);
 }
 
+function parseJsonText(value: string): unknown {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function resolveToolResultData(toolResultData: unknown, toolOutput?: string): unknown {
+  const direct = getJsonRecord(toolResultData);
+  if (direct) return direct;
+  return parseJsonText(firstString(toolOutput));
+}
+
 function findSuccessfulCanonicalIds(toolResultData: unknown): Set<string> {
   const data = getJsonRecord(toolResultData);
   const downloaded = Array.isArray(data?.downloaded) ? data?.downloaded : [];
@@ -125,15 +141,17 @@ export async function syncAnalystCollectionToTaskCollection(args: {
   collectionName: string;
   toolName: string;
   toolResultData: unknown;
+  toolOutput?: string;
   mcpServers: McpServerConfig[];
 }): Promise<MirrorResult | null> {
   const server = findAnalystServer(args.mcpServers, args.toolName);
-  const analystCollectionName = findAnalystCollectionName(args.toolResultData);
+  const resolvedResultData = resolveToolResultData(args.toolResultData, args.toolOutput);
+  const analystCollectionName = findAnalystCollectionName(resolvedResultData);
   if (!server || !analystCollectionName) {
     return null;
   }
 
-  const successfulIds = findSuccessfulCanonicalIds(args.toolResultData);
+  const successfulIds = findSuccessfulCanonicalIds(resolvedResultData);
   if (successfulIds.size === 0) {
     return {
       mirrored: 0,

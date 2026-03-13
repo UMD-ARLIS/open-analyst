@@ -166,6 +166,7 @@ export async function action({ request }: Route.ActionArgs) {
             collectionName: taskCollection.name,
             toolName: payload.toolName,
             toolResultData: payload.toolResultData,
+            toolOutput: typeof payload.toolOutput === 'string' ? payload.toolOutput : undefined,
             mcpServers: runtimeMcpServers,
           });
         }

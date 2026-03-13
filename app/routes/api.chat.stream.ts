@@ -239,6 +239,7 @@ export async function action({ request }: Route.ActionArgs) {
               collectionName: taskCollection.name,
               toolName: event.toolName,
               toolResultData: event.toolResultData,
+              toolOutput: event.toolOutput,
               mcpServers: runtimeMcpServers,
             });
             if (syncResult) {

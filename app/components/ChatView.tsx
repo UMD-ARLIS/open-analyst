@@ -215,7 +215,7 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
     if (!hasOnlyUserMessage) return;
 
     autoStreamedRef.current = true;
-    const collectionId = activeCollectionByProject[projectId] || '';
+    const collectionId = collectionParam || '';
 
     sendMessage({
       prompt: '',
@@ -482,8 +482,7 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
 
     setIsSubmitting(true);
     try {
-      const collectionId =
-        collectionParam || activeCollectionByProject[projectId] || projectCollections[0]?.id;
+      const collectionId = collectionParam || '';
 
       await sendMessage({
         prompt: currentPrompt.trim(),
