@@ -379,7 +379,12 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
                 ) : null}
               </div>
               <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4">
-                <DocumentPreview projectId={projectId} document={selectedDocument} className="max-w-none" />
+                <DocumentPreview
+                  projectId={projectId}
+                  document={selectedDocument}
+                  className="max-w-none"
+                  showArtifactPreview={false}
+                />
               </div>
             </>
           ) : (

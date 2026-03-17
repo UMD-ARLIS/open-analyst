@@ -6,6 +6,7 @@ interface DocumentPreviewProps {
   document: HeadlessDocument;
   maxTextLength?: number;
   className?: string;
+  showArtifactPreview?: boolean;
 }
 
 function getMetadataString(
@@ -21,6 +22,7 @@ export function DocumentPreview({
   document,
   maxTextLength,
   className = "",
+  showArtifactPreview = true,
 }: DocumentPreviewProps) {
   const mimeType = getMetadataString(document.metadata, "mimeType");
   const isPdf =
@@ -34,8 +36,8 @@ export function DocumentPreview({
     typeof maxTextLength === "number" && maxTextLength > 0
       ? (document.content || "").slice(0, maxTextLength)
       : document.content || "";
-  const hasArtifact = Boolean(artifactUrl);
-  const pdfPreviewUrl = useArtifactObjectUrl(artifactUrl, isPdf && hasArtifact);
+  const hasArtifact = showArtifactPreview && Boolean(artifactUrl);
+  const pdfPreviewUrl = useArtifactObjectUrl(artifactUrl, showArtifactPreview && isPdf && hasArtifact);
 
   return (
     <div className={`space-y-3 ${className}`.trim()}>
