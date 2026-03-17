@@ -4,7 +4,7 @@ Open Analyst is a project-oriented research workspace with:
 
 - a React Router 7 web app in `app/`
 - server-side API routes in the same React Router app
-- a separate Python Strands agent service in `services/strands-agent/`
+- a separate Python LangGraph runtime service in `services/langgraph-runtime/`
 - a separate Analyst MCP service in `services/analyst-mcp/`
 - Postgres persistence via Drizzle
 
@@ -15,11 +15,11 @@ At runtime the system looks like this:
 1. The browser loads the React Router app.
 2. UI components call same-origin `/api/*` routes.
 3. API routes read and write project data in Postgres.
-4. Chat routes proxy model/tool execution to the Strands agent service.
-5. The agent can use Analyst MCP for paper acquisition and artifact workflows.
-6. The agent calls back into the Node app for project retrieval and source capture.
+4. Project run routes proxy model/tool execution to the LangGraph runtime service.
+5. The runtime can use Analyst MCP for paper acquisition and artifact workflows.
+6. The runtime and web app coordinate around project runs, evidence, artifacts, and canvas documents.
 
-Chat responses are streamed back as structured progress events plus the final answer. Tool calls, status updates, and the final assistant text are stored on the task so the UI can resume live task state cleanly. Each task also keeps a compact app-side summary, while the Strands service maintains its own session state and conversation summary keyed by the task id.
+Run responses are streamed back as structured progress events plus the final answer. Tool calls, status updates, plans, evidence, and final assistant text are stored on project runs so the UI can resume live workspace state cleanly.
 
 See:
 
@@ -49,9 +49,8 @@ Common optional variables:
 
 - `LITELLM_BASE_URL`
 - `LITELLM_EMBEDDING_MODEL`
-- `STRANDS_URL`
+- `LANGGRAPH_RUNTIME_URL`
 - `NODE_API_BASE_URL`
-- `STRANDS_POSTGRES_DSN`
 - `ARTIFACT_STORAGE_BACKEND`
 - `PROJECT_WORKSPACES_ROOT`
 - `ARTIFACT_LOCAL_DIR`
@@ -66,13 +65,11 @@ Common optional variables:
 - `ANALYST_MCP_LITELLM_CHAT_MODEL`
 - `ANALYST_MCP_LITELLM_EMBEDDING_MODEL`
 
-The repo-root `.env` is the primary config source for the web app, the Strands agent, and `services/analyst-mcp`.
-If needed, `services/strands-agent/.env` and `services/analyst-mcp/.env` can still be used as local overrides, but they are no longer required for normal development.
+The repo-root `.env` is the primary config source for the web app, the LangGraph runtime, and `services/analyst-mcp`.
+If needed, `services/langgraph-runtime/.env` and `services/analyst-mcp/.env` can still be used as local overrides, but they are no longer required for normal development.
 
 If `ANALYST_MCP_POSTGRES_DSN` is omitted, `analyst_mcp` falls back to `DATABASE_URL`.
-If `STRANDS_POSTGRES_DSN` is omitted, the Strands agent also falls back to `DATABASE_URL`.
 When both services share one PostgreSQL database, Open Analyst uses the normal `public` schema and `analyst_mcp` uses its own `analyst_mcp` schema automatically.
-Strands session persistence is also stored in PostgreSQL and is no longer tied to S3 artifact storage.
 
 ## Fresh Pull Checklist
 
@@ -160,7 +157,7 @@ Step-by-step startup:
 
 Python service environments live outside the repo by default:
 
-- `~/.venvs/open-analyst-strands-agent`
+- `~/.venvs/open-analyst-runtime`
 - `~/.venvs/open-analyst-analyst-mcp`
 
 You can override those paths from the root `.env` with:
@@ -234,10 +231,10 @@ pnpm dev:polling
 
 Vite ignores generated folders such as `.venv/`, `.pytest_cache/`, `build/`, `test-results/`, and the Python service trees during watch mode.
 
-Run the Strands agent in a second terminal:
+Run the LangGraph runtime in a second terminal:
 
 ```bash
-pnpm dev:agent
+pnpm dev:runtime
 ```
 
 Run both from the repo root:
@@ -246,12 +243,12 @@ Run both from the repo root:
 pnpm dev:all
 ```
 
-The web app serves the UI and API routes on port `5173` by default. The Strands service defaults to `8080`. The vendored Analyst MCP service defaults to `8000`.
+The web app serves the UI and API routes on port `5173` by default. The LangGraph runtime defaults to `8080`. The vendored Analyst MCP service defaults to `8000`.
 
 If you still have old in-repo virtualenvs from an earlier setup, remove them after running `pnpm setup:python`:
 
 ```bash
-rm -rf services/strands-agent/.venv services/analyst-mcp/.venv
+rm -rf services/langgraph-runtime/.venv services/analyst-mcp/.venv
 ```
 
 ## Project Workspaces And Artifact Storage
@@ -345,16 +342,7 @@ To clear Open Analyst chat history, Strands session rows, local file-based Stran
 pnpm reset:chat-state
 ```
 
-This intentionally deletes:
-
-- `tasks`
-- `messages`
-- `task_events`
-- `strands_sessions`
-- `strands_session_agents`
-- `strands_session_messages`
-
-It does not delete project documents or artifact objects outside the `strands-sessions` prefix.
+This intentionally deletes project run state and any remaining legacy task/session state. It does not delete project documents or artifact objects outside the runtime/session prefixes.
 
 ## Production-Like Run
 
@@ -365,7 +353,7 @@ pnpm build
 pnpm start
 ```
 
-`pnpm start` only serves the React Router build. The Strands agent is still a separate process and must be started independently, for example with `pnpm dev:agent` or a process manager that points `STRANDS_URL` at the running agent service.
+`pnpm start` only serves the React Router build. The LangGraph runtime remains a separate process and must be started independently, for example with `pnpm dev:runtime` or a process manager that points `LANGGRAPH_RUNTIME_URL` at the running runtime service.
 
 ## Database
 
@@ -391,7 +379,7 @@ pnpm db:studio
 
 ```bash
 pnpm test -- --run
-pnpm test:agent
+pnpm test:runtime
 pnpm test:analyst-mcp
 pnpm validate:inventory
 pnpm validate:full
@@ -415,17 +403,17 @@ pnpm exec prettier --check "app/**/*.{ts,tsx,css}" "tests/**/*.ts" "*.md"
 
 - A `project` is the top-level unit.
 - A project contains `collections` and `documents`.
-- A project also contains `tasks`.
-- A task contains `messages` and `task_events`.
-- Chat can use project knowledge through the RAG endpoint.
+- A project contains threads, runs, evidence, artifacts, and canvas documents.
+- A run contains steps, approvals, and generated output.
+- Retrieval and source workflows stay project-scoped.
 
 ## Important Paths
 
 - `app/routes.ts`: route tree for UI pages and `/api/*` resources
 - `app/components/`: primary UI components
 - `app/lib/db/`: Drizzle schema and query layer
-- `app/lib/agent/`: Node-side agent provider abstraction
-- `app/lib/chat-stream.ts`: structured chat event folding
-- `services/strands-agent/src/`: Python agent entrypoint and tool implementations
+- `app/lib/project-runtime.server.ts`: Node-to-runtime orchestration helpers
+- `app/lib/runtime-client.server.ts`: HTTP client for the runtime service
+- `services/langgraph-runtime/src/`: Python runtime entrypoint and graph implementation
 - `drizzle/`: generated SQL migrations
 - `docs/`: current architecture and repository documentation

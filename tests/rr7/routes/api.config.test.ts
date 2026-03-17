@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { loader, action } from "../../../app/routes/api.config";
 import { createMockActionArgs, getJsonResponse } from "./helpers";
 
@@ -15,7 +15,7 @@ describe("api.config", () => {
   it("POST saves config", async () => {
     const args = createMockActionArgs("POST", "/api/config", {
       model: "bedrock-claude-opus-4.6",
-      agentBackend: "strands",
+      agentBackend: "langgraph",
     });
     const response = await action(args as never);
     const data = (await getJsonResponse(response)) as {

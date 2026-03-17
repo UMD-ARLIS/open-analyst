@@ -29,7 +29,7 @@ describe("settings queries", () => {
       .values({
         userId: "test-user",
         model: "bedrock-claude-opus-4.6",
-        agentBackend: "strands",
+        agentBackend: "langgraph",
       })
       .returning();
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   useFetcher,
   useMatches,
@@ -7,53 +7,57 @@ import {
   useSearchParams,
 } from "react-router";
 import { useAppStore } from "~/lib/store";
-import { ArrowRight, FolderOpen, FlaskConical, BookOpen } from "lucide-react";
+import { ArrowRight, FolderOpen, FlaskConical, BookOpen, ScrollText, Layers3, Package, PenSquare } from "lucide-react";
 import { AlertDialog } from "./AlertDialog";
 import { formatRelativeTime } from "~/lib/format";
+import { headlessCreateRun } from "~/lib/headless-api";
+
+interface RunsLoaderData {
+  runs?: Array<{
+    id: string;
+    title: string;
+    status: string;
+    updatedAt: string | Date;
+  }>;
+}
 
 export function QuickStartDashboard() {
   const navigate = useNavigate();
   const params = useParams();
   const matches = useMatches();
   const [searchParams, setSearchParams] = useSearchParams();
+  const fetcher = useFetcher();
   const { workingDir, setWorkingDir } =
     useAppStore();
-  const fetcher = useFetcher();
-  const taskFetcher = useFetcher<{ taskId?: string }>();
 
   const projectId = params.projectId!;
 
-  // Get tasks from loader data
-  const projectMatch = matches.find(
-    (m) => m.id && m.pathname.includes("/projects/")
-  );
-  const tasks: Array<{
-    id: string;
-    title: string;
-    status: string;
-    updatedAt: string | Date;
-  }> = (projectMatch?.data as any)?.tasks || [];
+  // Get runs from loader data
+  const projectMatch = matches.find((m) => {
+    const data = m.data as RunsLoaderData | undefined;
+    return Array.isArray(data?.runs);
+  });
+  const runs = ((projectMatch?.data as RunsLoaderData | undefined)?.runs ?? []);
 
   const [prompt, setPrompt] = useState("");
   const [showWorkdirDialog, setShowWorkdirDialog] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const deepResearch = searchParams.get("deepResearch") === "true";
-  const isSubmitting = taskFetcher.state !== "idle";
 
-  // Navigate once task is created — fetcher completion also triggers loader revalidation
-  useEffect(() => {
-    if (taskFetcher.data?.taskId) {
-      navigate(`/projects/${projectId}/tasks/${taskFetcher.data.taskId}`);
-    }
-  }, [taskFetcher.data, navigate, projectId]);
-
-  const handleStartTask = () => {
+  const handleStartTask = async () => {
     const text = prompt.trim();
     if (!text || isSubmitting) return;
-    taskFetcher.submit(
-      { projectId, prompt: text, deepResearch },
-      { method: "POST", action: "/api/tasks/create", encType: "application/json" }
-    );
+    setIsSubmitting(true);
+    try {
+      const { run } = await headlessCreateRun(projectId, {
+        prompt: text,
+        mode: deepResearch ? "deep_research" : "chat",
+      });
+      navigate(`/projects/${projectId}/runs/${run.id}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const toggleDeepResearch = () => {
@@ -87,7 +91,7 @@ export function QuickStartDashboard() {
         {/* Task input */}
         <div className="mb-10">
           <h2 className="text-xl font-semibold mb-4 text-center">
-            What do you want to work on?
+            What should the analyst workspace do next?
           </h2>
           <div className="relative">
             <textarea
@@ -123,18 +127,41 @@ export function QuickStartDashboard() {
           </div>
         </div>
 
-        {/* Recent tasks */}
-        {tasks.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-10">
+          <button className="card card-hover p-4 text-left" onClick={() => navigate(`/projects/${projectId}/evidence`)}>
+            <ScrollText className="w-5 h-5 text-accent mb-3" />
+            <div className="text-sm font-medium">Evidence</div>
+            <div className="text-xs text-text-muted mt-1">Source-backed findings and citations</div>
+          </button>
+          <button className="card card-hover p-4 text-left" onClick={() => navigate(`/projects/${projectId}/canvas`)}>
+            <PenSquare className="w-5 h-5 text-accent mb-3" />
+            <div className="text-sm font-medium">Canvas</div>
+            <div className="text-xs text-text-muted mt-1">Draft, compare, and promote deliverables</div>
+          </button>
+          <button className="card card-hover p-4 text-left" onClick={() => navigate(`/projects/${projectId}/artifacts`)}>
+            <Package className="w-5 h-5 text-accent mb-3" />
+            <div className="text-sm font-medium">Artifacts</div>
+            <div className="text-xs text-text-muted mt-1">Versioned outputs and generated files</div>
+          </button>
+          <button className="card card-hover p-4 text-left" onClick={() => navigate(`/projects/${projectId}/knowledge`)}>
+            <Layers3 className="w-5 h-5 text-accent mb-3" />
+            <div className="text-sm font-medium">Sources</div>
+            <div className="text-xs text-text-muted mt-1">Collections, imports, and retrieval data</div>
+          </button>
+        </div>
+
+        {/* Recent runs */}
+        {runs.length > 0 && (
           <div className="mb-10">
             <h3 className="text-sm font-medium text-text-muted uppercase tracking-wide mb-3">
-              Recent Tasks
+              Recent Runs
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {tasks.slice(0, 6).map((task) => (
+              {runs.slice(0, 6).map((task) => (
                 <button
                   key={task.id}
                   onClick={() =>
-                    navigate(`/projects/${projectId}/tasks/${task.id}`)
+                    navigate(`/projects/${projectId}/runs/${task.id}`)
                   }
                   className="card card-hover p-4 text-left"
                 >
@@ -176,12 +203,12 @@ export function QuickStartDashboard() {
           </button>
           <button
             onClick={() =>
-              navigate(`/projects/${projectId}/knowledge`)
+              navigate(`/projects/${projectId}/evidence`)
             }
             className="flex items-center gap-1.5 hover:text-text-primary transition-colors"
           >
             <BookOpen className="w-4 h-4" />
-            Manage knowledge
+            Review evidence
           </button>
         </div>
       </div>

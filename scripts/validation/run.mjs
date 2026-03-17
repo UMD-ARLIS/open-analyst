@@ -52,9 +52,9 @@ function buildSteps(options) {
       required: true,
     },
     {
-      id: "pytest-agent",
-      label: "Strands agent pytest suite",
-      command: ["pnpm", "test:agent"],
+      id: "pytest-runtime",
+      label: "LangGraph runtime pytest suite",
+      command: ["pnpm", "test:runtime"],
       required: true,
     },
     {

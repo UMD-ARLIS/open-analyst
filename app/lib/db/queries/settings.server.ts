@@ -18,7 +18,7 @@ const DEFAULTS: SettingsData = {
   workingDir: null,
   workingDirType: "local",
   s3Uri: null,
-  agentBackend: "strands",
+  agentBackend: "langgraph",
   devLogsEnabled: false,
 };
 

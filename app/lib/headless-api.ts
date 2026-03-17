@@ -49,142 +49,6 @@ export async function headlessGetWorkingDir(): Promise<{
   return requestJson('/workdir');
 }
 
-export type HeadlessTraceStep = {
-  id: string;
-  type: 'tool_call' | 'tool_result';
-  status: 'running' | 'completed' | 'error';
-  title: string;
-  toolName?: string;
-  toolInput?: Record<string, unknown>;
-  toolOutput?: string;
-};
-
-export async function headlessChat(
-  messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
-  prompt: string,
-  projectId?: string,
-  options?: { collectionId?: string; collectionName?: string; deepResearch?: boolean }
-): Promise<{ text: string; traces: HeadlessTraceStep[]; runId?: string; projectId?: string }> {
-  const result = await requestJson<{
-    ok: boolean;
-    text: string;
-    traces?: HeadlessTraceStep[];
-    runId?: string;
-    projectId?: string;
-  }>('/chat', {
-    method: 'POST',
-    body: JSON.stringify({
-      messages,
-      prompt,
-      projectId,
-      collectionId: options?.collectionId,
-      collectionName: options?.collectionName,
-      deepResearch: Boolean(options?.deepResearch),
-    }),
-  });
-  return {
-    text: result.text || '',
-    traces: Array.isArray(result.traces) ? result.traces : [],
-    runId: result.runId,
-    projectId: result.projectId,
-  };
-}
-
-export interface StreamEvent {
-  type: string;
-  text?: string;
-  phase?: string;
-  status?: 'running' | 'completed' | 'error';
-  toolName?: string;
-  toolUseId?: string;
-  toolInput?: Record<string, unknown>;
-  toolOutput?: string;
-  toolStatus?: 'running' | 'completed' | 'error';
-  error?: string;
-  runId?: string;
-  timestamp?: number;
-}
-
-export async function headlessChatStream(
-  messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
-  prompt: string,
-  projectId?: string,
-  options?: {
-    taskId?: string;
-    collectionId?: string;
-    collectionName?: string;
-    deepResearch?: boolean;
-  },
-  onEvent?: (event: StreamEvent) => void
-): Promise<{ text: string; runId?: string; taskId?: string }> {
-  const res = await fetch(`${getHeadlessApiBase()}/api/chat/stream`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      messages,
-      prompt,
-      projectId,
-      taskId: options?.taskId,
-      collectionId: options?.collectionId,
-      collectionName: options?.collectionName,
-      deepResearch: Boolean(options?.deepResearch),
-    }),
-  });
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `HTTP ${res.status}`);
-  }
-
-  const reader = res.body?.getReader();
-  if (!reader) throw new Error('No response body');
-
-  const decoder = new TextDecoder();
-  let fullText = '';
-  let runId: string | undefined;
-  let taskId: string | undefined;
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    let currentEvent = '';
-    for (const line of lines) {
-      if (line.startsWith('event: ')) {
-        currentEvent = line.slice(7).trim();
-      } else if (line.startsWith('data: ') && currentEvent) {
-        try {
-          const data = JSON.parse(line.slice(6)) as StreamEvent;
-          data.type = currentEvent;
-
-          if (currentEvent === 'task_created' && (data as any).taskId) {
-            taskId = (data as any).taskId;
-          }
-          if (currentEvent === 'text_delta' && data.text) {
-            fullText += data.text;
-          }
-          if (currentEvent === 'done') {
-            if (data.runId) runId = data.runId;
-            if ((data as any).taskId) taskId = (data as any).taskId;
-          }
-
-          onEvent?.(data);
-        } catch {
-          // Skip malformed events
-        }
-        currentEvent = '';
-      }
-    }
-  }
-
-  return { text: fullText, runId, taskId };
-}
-
 export async function headlessGetTools(): Promise<Array<{ name: string; description: string }>> {
   const result = await requestJson<{ tools?: Array<{ name: string; description: string }> }>(
     '/tools'
@@ -238,11 +102,101 @@ export interface HeadlessRunEvent {
 
 export interface HeadlessRun {
   id: string;
-  type: string;
+  threadId?: string | null;
+  title: string;
+  mode: string;
   status: string;
-  prompt: string;
-  output: string;
-  events: HeadlessRunEvent[];
+  intent: string;
+  latestOutput: string;
+  plan?: Array<Record<string, unknown>>;
+  runtimeState?: Record<string, unknown>;
+  startedAt?: number | string | null;
+  completedAt?: number | string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface HeadlessRunStep {
+  id: string;
+  runId: string;
+  stepType: string;
+  actor: string;
+  title: string;
+  status: string;
+  payload?: Record<string, unknown>;
+  startedAt?: number | string | null;
+  completedAt?: number | string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface HeadlessApproval {
+  id: string;
+  runId: string;
+  stepId?: string | null;
+  kind: string;
+  status: string;
+  title: string;
+  description: string;
+  requestPayload?: Record<string, unknown>;
+  responsePayload?: Record<string, unknown>;
+  createdAt: number;
+  updatedAt: number;
+  resolvedAt?: number | string | null;
+}
+
+export interface HeadlessEvidenceItem {
+  id: string;
+  projectId: string;
+  runId?: string | null;
+  collectionId?: string | null;
+  documentId?: string | null;
+  artifactId?: string | null;
+  title: string;
+  evidenceType: string;
+  sourceUri?: string | null;
+  citationText: string;
+  extractedText: string;
+  confidence: string;
+  provenance?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface HeadlessArtifact {
+  id: string;
+  projectId: string;
+  runId?: string | null;
+  title: string;
+  kind: string;
+  mimeType: string;
+  storageUri?: string | null;
+  metadata?: Record<string, unknown>;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface HeadlessArtifactVersion {
+  id: string;
+  artifactId: string;
+  version: number;
+  title: string;
+  changeSummary: string;
+  storageUri?: string | null;
+  contentText: string;
+  metadata?: Record<string, unknown>;
+  createdAt: number;
+}
+
+export interface HeadlessCanvasDocument {
+  id: string;
+  projectId: string;
+  artifactId?: string | null;
+  title: string;
+  documentType: string;
+  content?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
   createdAt: number;
   updatedAt: number;
 }
@@ -477,15 +431,174 @@ export async function headlessGetRuns(projectId: string): Promise<HeadlessRun[]>
 export async function headlessGetRun(
   projectId: string,
   runId: string
-): Promise<HeadlessRun | null> {
+): Promise<{ run: HeadlessRun | null; approvals: HeadlessApproval[] }> {
   try {
-    const response = await requestJson<{ run?: HeadlessRun }>(
+    const response = await requestJson<{ run?: HeadlessRun; approvals?: HeadlessApproval[] }>(
       `/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}`
     );
-    return response.run || null;
+    return {
+      run: response.run || null,
+      approvals: Array.isArray(response.approvals) ? response.approvals : [],
+    };
   } catch {
-    return null;
+    return { run: null, approvals: [] };
   }
+}
+
+export async function headlessCreateRun(
+  projectId: string,
+  payload: { prompt: string; threadId?: string; mode?: string }
+): Promise<{ run: HeadlessRun; thread: { id: string; title: string } }> {
+  return requestJson(`/projects/${encodeURIComponent(projectId)}/runs`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function headlessGetRunSteps(
+  projectId: string,
+  runId: string
+): Promise<HeadlessRunStep[]> {
+  const response = await requestJson<{ steps?: HeadlessRunStep[] }>(
+    `/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/steps`
+  );
+  return Array.isArray(response.steps) ? response.steps : [];
+}
+
+export interface HeadlessRunStreamEvent {
+  type: string;
+  text?: string;
+  phase?: string;
+  status?: string;
+  actor?: string;
+  plan?: Array<Record<string, unknown>>;
+  evidence?: Array<Record<string, unknown>>;
+  error?: string;
+}
+
+export async function headlessStreamRun(
+  projectId: string,
+  runId: string,
+  onEvent?: (event: HeadlessRunStreamEvent) => void
+): Promise<void> {
+  const res = await fetch(
+    `${getHeadlessApiBase()}/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/stream`
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `HTTP ${res.status}`);
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("No response body");
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let currentEvent = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (line.startsWith("event: ")) {
+        currentEvent = line.slice(7).trim();
+      } else if (line.startsWith("data: ") && currentEvent) {
+        try {
+          const data = JSON.parse(line.slice(6)) as HeadlessRunStreamEvent;
+          data.type = currentEvent;
+          onEvent?.(data);
+        } catch {
+          // skip malformed event
+        }
+        currentEvent = "";
+      }
+    }
+  }
+}
+
+export async function headlessInterruptRun(
+  projectId: string,
+  runId: string,
+  reason?: string
+): Promise<{ run: HeadlessRun }> {
+  return requestJson(`/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/interrupt`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export async function headlessApproveRun(
+  projectId: string,
+  runId: string,
+  approvalId: string,
+  approved: boolean,
+  response: Record<string, unknown> = {}
+): Promise<{ approval: HeadlessApproval }> {
+  return requestJson(`/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ approvalId, approved, response }),
+  });
+}
+
+export async function headlessGetEvidence(
+  projectId: string,
+  options?: { runId?: string; collectionId?: string }
+): Promise<HeadlessEvidenceItem[]> {
+  const params = new URLSearchParams();
+  if (options?.runId) params.set("runId", options.runId);
+  if (options?.collectionId) params.set("collectionId", options.collectionId);
+  const response = await requestJson<{ evidence?: HeadlessEvidenceItem[] }>(
+    `/projects/${encodeURIComponent(projectId)}/evidence${params.toString() ? `?${params.toString()}` : ""}`
+  );
+  return Array.isArray(response.evidence) ? response.evidence : [];
+}
+
+export async function headlessGetArtifacts(projectId: string): Promise<{
+  artifacts: HeadlessArtifact[];
+  versionsByArtifactId: Record<string, number>;
+}> {
+  const response = await requestJson<{
+    artifacts?: HeadlessArtifact[];
+    versionsByArtifactId?: Record<string, number>;
+  }>(`/projects/${encodeURIComponent(projectId)}/artifacts`);
+  return {
+    artifacts: Array.isArray(response.artifacts) ? response.artifacts : [],
+    versionsByArtifactId:
+      response.versionsByArtifactId && typeof response.versionsByArtifactId === "object"
+        ? response.versionsByArtifactId
+        : {},
+  };
+}
+
+export async function headlessCreateCanvasDocument(
+  projectId: string,
+  payload: {
+    artifactId?: string | null;
+    title: string;
+    documentType?: string;
+    content?: Record<string, unknown>;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<HeadlessCanvasDocument> {
+  const response = await requestJson<{ document: HeadlessCanvasDocument }>(
+    `/projects/${encodeURIComponent(projectId)}/canvas-documents`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }
+  );
+  return response.document;
+}
+
+export async function headlessGetCanvasDocuments(projectId: string): Promise<HeadlessCanvasDocument[]> {
+  const response = await requestJson<{ documents?: HeadlessCanvasDocument[] }>(
+    `/projects/${encodeURIComponent(projectId)}/canvas-documents`
+  );
+  return Array.isArray(response.documents) ? response.documents : [];
 }
 
 export interface HeadlessCredential {

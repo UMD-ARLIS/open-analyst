@@ -12,7 +12,7 @@ fi
 
 usage() {
   cat <<'EOF'
-Usage: scripts/python-service.sh <setup|run|test> <agent|analyst-mcp>
+Usage: scripts/python-service.sh <setup|run|test> <runtime|analyst-mcp>
 EOF
 }
 
@@ -25,9 +25,9 @@ if [[ -z "$command_name" || -z "$service_name" ]]; then
 fi
 
 case "$service_name" in
-  agent)
-    service_dir="$repo_root/services/strands-agent"
-    venv_dir="${OPEN_ANALYST_AGENT_VENV:-$HOME/.venvs/open-analyst-strands-agent}"
+  runtime)
+    service_dir="$repo_root/services/langgraph-runtime"
+    venv_dir="${OPEN_ANALYST_RUNTIME_VENV:-$HOME/.venvs/open-analyst-langgraph-runtime}"
     run_args=("python" "src/main.py")
     test_args=("pytest" "tests/" "-v")
     ;;

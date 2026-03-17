@@ -69,8 +69,7 @@
         "coverage": "automated-local",
         "tests": [
           "tests/rr7/lib/skills.server.test.ts",
-          "services/strands-agent/tests/test_web_tools.py",
-          "services/strands-agent/tests/test_research_tools.py"
+          "services/langgraph-runtime/tests/test_graph.py"
         ]
       },
       {
@@ -78,9 +77,7 @@
         "coverage": "automated-local",
         "tests": [
           "tests/rr7/lib/skills.server.test.ts",
-          "services/strands-agent/tests/test_file_tools.py",
-          "services/strands-agent/tests/test_command_tools.py",
-          "services/strands-agent/tests/test_generate_tools.py"
+          "services/langgraph-runtime/tests/test_graph.py"
         ]
       }
     ]
@@ -90,7 +87,7 @@
       "name": "list_directory",
       "coverage": "automated-local",
       "tests": [
-        "services/strands-agent/tests/test_file_tools.py",
+        "services/langgraph-runtime/tests/test_graph.py",
         "tests/rr7/integration/api-parity.test.ts"
       ]
     },
@@ -98,89 +95,83 @@
       "name": "read_file",
       "coverage": "automated-local",
       "tests": [
-        "services/strands-agent/tests/test_file_tools.py",
-        "tests/rr7/routes/api.chat.stream.test.ts"
+        "services/langgraph-runtime/tests/test_graph.py"
       ]
     },
     {
       "name": "write_file",
       "coverage": "automated-local",
       "tests": [
-        "services/strands-agent/tests/test_file_tools.py",
-        "services/strands-agent/tests/test_project_tools.py"
+        "services/langgraph-runtime/tests/test_graph.py"
       ]
     },
     {
       "name": "edit_file",
       "coverage": "automated-local",
       "tests": [
-        "services/strands-agent/tests/test_file_tools.py"
+        "services/langgraph-runtime/tests/test_graph.py"
       ]
     },
     {
       "name": "glob",
       "coverage": "automated-local",
       "tests": [
-        "services/strands-agent/tests/test_file_tools.py"
+        "services/langgraph-runtime/tests/test_graph.py"
       ]
     },
     {
       "name": "grep",
       "coverage": "automated-local",
       "tests": [
-        "services/strands-agent/tests/test_file_tools.py"
+        "services/langgraph-runtime/tests/test_graph.py"
       ]
     },
     {
       "name": "web_fetch",
       "coverage": "automated-local",
       "tests": [
-        "services/strands-agent/tests/test_web_tools.py",
-        "tests/rr7/lib/chat-stream.test.ts"
+        "services/langgraph-runtime/tests/test_graph.py"
       ]
     },
     {
       "name": "web_search",
       "coverage": "automated-local",
       "tests": [
-        "services/strands-agent/tests/test_web_tools.py",
-        "tests/rr7/lib/agent/strands.test.ts"
+        "services/langgraph-runtime/tests/test_graph.py"
       ]
     },
     {
       "name": "hf_daily_papers",
       "coverage": "automated-local",
       "tests": [
-        "services/strands-agent/tests/test_research_tools.py"
+        "services/langgraph-runtime/tests/test_graph.py"
       ]
     },
     {
       "name": "hf_paper",
       "coverage": "automated-local",
       "tests": [
-        "services/strands-agent/tests/test_research_tools.py"
+        "services/langgraph-runtime/tests/test_graph.py"
       ]
     },
     {
       "name": "deep_research",
       "coverage": "automated-local",
       "tests": [
-        "services/strands-agent/tests/test_research_tools.py",
-        "tests/rr7/lib/agent/strands.test.ts"
+        "services/langgraph-runtime/tests/test_graph.py"
       ]
     },
     {
       "name": "collection_overview",
       "coverage": "automated-local",
       "tests": [
-        "services/strands-agent/tests/test_project_tools.py"
+        "services/langgraph-runtime/tests/test_graph.py"
       ]
     },
     {
       "name": "collection_artifact_metadata",
       "coverage": "automated-local",
       "tests": [
-        "services/strands-agent/tests/test_project_tools.py",
         "tests/rr7/routes/api.analyst-mcp-artifact-proxy.test.ts"
       ]
     },
@@ -188,7 +179,6 @@
       "name": "capture_artifact",
       "coverage": "automated-local",
       "tests": [
-        "services/strands-agent/tests/test_auto_capture.py",
         "tests/rr7/routes/api.artifacts.capture.test.ts"
       ]
     },
@@ -196,15 +186,14 @@
       "name": "generate_file",
       "coverage": "automated-local",
       "tests": [
-        "services/strands-agent/tests/test_generate_tools.py",
-        "services/strands-agent/tests/test_agent_factory.py"
+        "services/langgraph-runtime/tests/test_graph.py"
       ]
     },
     {
       "name": "execute_command",
       "coverage": "automated-local",
       "tests": [
-        "services/strands-agent/tests/test_command_tools.py"
+        "services/langgraph-runtime/tests/test_graph.py"
       ]
     }
   ],
@@ -425,11 +414,10 @@
       ]
     },
     {
-      "id": "chat-task-view",
+      "id": "run-workspace",
       "coverage": "automated-live",
       "tests": [
-        "tests/e2e/chat.spec.ts",
-        "tests/rr7/routes/api.chat.stream.test.ts"
+        "tests/e2e/sidebar.spec.ts"
       ]
     },
     {
@@ -532,10 +520,10 @@
       ]
     },
     {
-      "id": "task-chat-completion",
+      "id": "project-run-completion",
       "coverage": "automated-live",
       "tests": [
-        "tests/e2e/chat.spec.ts"
+        "tests/e2e/sidebar.spec.ts"
       ]
     },
     {
@@ -550,7 +538,6 @@
       "id": "local-artifact-capture",
       "coverage": "automated-local",
       "tests": [
-        "services/strands-agent/tests/test_auto_capture.py",
         "tests/rr7/routes/api.artifacts.capture.test.ts"
       ]
     },
@@ -558,8 +545,7 @@
       "id": "mcp-discovery-and-tool-catalog",
       "coverage": "automated-local",
       "tests": [
-        "tests/rr7/lib/mcp.server.test.ts",
-        "tests/rr7/routes/api.chat.stream.test.ts"
+        "tests/rr7/lib/mcp.server.test.ts"
       ]
     },
     {
@@ -570,7 +556,7 @@
       ]
     },
     {
-      "id": "strands-session-persistence-after-restart",
+      "id": "runtime-run-persistence-after-restart",
       "coverage": "manual-live",
       "tests": []
     },

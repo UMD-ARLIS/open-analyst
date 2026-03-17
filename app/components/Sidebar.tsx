@@ -1,11 +1,10 @@
-import { useFetcher, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { useAppStore } from "~/lib/store";
 import {
   Settings,
-  Trash2,
 } from "lucide-react";
 
-interface SidebarTask {
+interface SidebarRun {
   id: string;
   title: string | null;
   status: string | null;
@@ -19,12 +18,12 @@ interface SidebarCollection {
 }
 
 interface SidebarProps {
-  tasks: SidebarTask[];
+  runs: SidebarRun[];
   collections: SidebarCollection[];
   documentCounts: Record<string, number>;
 }
 
-export function Sidebar({ tasks, collections, documentCounts }: SidebarProps) {
+export function Sidebar({ runs, collections, documentCounts }: SidebarProps) {
   const { sidebarCollapsed, isConfigured } = useAppStore();
   const navigate = useNavigate();
   const params = useParams();
@@ -33,26 +32,9 @@ export function Sidebar({ tasks, collections, documentCounts }: SidebarProps) {
   const activeProjectId = params.projectId || null;
   const isKnowledgeRoute = location.pathname.endsWith("/knowledge");
 
-  // Only used for delete mutations — not data loading
-  const taskFetcher = useFetcher({ key: `sidebar-task-action-${activeProjectId}` });
-
   // Determine active IDs from URL
-  const activeTaskId = params.taskId || null;
+  const activeRunId = params.runId || null;
   const activeCollectionId = searchParams.get("collection") || null;
-
-  const handleDeleteTask = (taskId: string) => {
-    if (!activeProjectId) return;
-    taskFetcher.submit(
-      {},
-      {
-        method: "DELETE",
-        action: `/api/projects/${activeProjectId}/tasks/${taskId}`,
-      }
-    );
-    if (activeTaskId === taskId) {
-      navigate(`/projects/${activeProjectId}`);
-    }
-  };
 
   const handleCollectionClick = (collectionId: string) => {
     if (activeProjectId) {
@@ -126,24 +108,24 @@ export function Sidebar({ tasks, collections, documentCounts }: SidebarProps) {
           </div>
         )}
 
-        {/* === NON-KNOWLEDGE ROUTE: Task list === */}
+        {/* === NON-KNOWLEDGE ROUTE: Run list === */}
         {!sidebarCollapsed && activeProjectId && !isKnowledgeRoute && (
           <div className="space-y-1">
             <div className="mb-2">
               <div className="text-xs uppercase tracking-wide text-text-muted px-1">
-                Tasks
+                Runs
               </div>
             </div>
-            {tasks.length === 0 ? (
+            {runs.length === 0 ? (
               <div className="text-sm text-text-muted px-1 py-2">
-                No tasks yet.
+                No runs yet.
               </div>
             ) : (
-              tasks.map((task) => (
+              runs.map((task) => (
                 <div
                   key={task.id}
                   className={`group flex items-center gap-2 px-2 py-2 rounded-lg border transition-colors cursor-pointer ${
-                    activeTaskId === task.id
+                    activeRunId === task.id
                       ? "border-accent/40 bg-accent-muted"
                       : "border-transparent hover:border-accent/30 hover:bg-surface-hover"
                   }`}
@@ -152,19 +134,12 @@ export function Sidebar({ tasks, collections, documentCounts }: SidebarProps) {
                     className="flex-1 text-left min-w-0"
                     onClick={() =>
                       navigate(
-                        `/projects/${activeProjectId}/tasks/${task.id}`
+                        `/projects/${activeProjectId}/runs/${task.id}`
                       )
                     }
                   >
                     <div className="text-sm truncate">{task.title}</div>
                     <div className="text-xs text-text-muted">{task.status}</div>
-                  </button>
-                  <button
-                    className="w-6 h-6 rounded hover:bg-surface-active text-error opacity-0 group-hover:opacity-100"
-                    onClick={() => handleDeleteTask(task.id)}
-                    aria-label={`Delete task ${task.title}`}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
               ))
@@ -174,22 +149,22 @@ export function Sidebar({ tasks, collections, documentCounts }: SidebarProps) {
 
         {!sidebarCollapsed && !activeProjectId && (
           <div className="text-sm text-text-muted px-1 py-4 text-center">
-            Select a project to see tasks.
+            Select a project to see runs.
           </div>
         )}
 
         {sidebarCollapsed && activeProjectId && !isKnowledgeRoute && (
           <div className="flex flex-col items-center gap-1">
-            {tasks.slice(0, 8).map((task) => (
+            {runs.slice(0, 8).map((task) => (
               <button
                 key={task.id}
                 onClick={() =>
                   navigate(
-                    `/projects/${activeProjectId}/tasks/${task.id}`
+                    `/projects/${activeProjectId}/runs/${task.id}`
                   )
                 }
                 className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-medium ${
-                  activeTaskId === task.id
+                  activeRunId === task.id
                     ? "bg-accent-muted text-accent"
                     : "hover:bg-surface-hover text-text-muted"
                 }`}

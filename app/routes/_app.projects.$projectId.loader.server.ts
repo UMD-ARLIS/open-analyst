@@ -1,7 +1,7 @@
 import { redirect } from "react-router";
 import { getProject } from "~/lib/db/queries/projects.server";
 import { upsertSettings } from "~/lib/db/queries/settings.server";
-import { listTasks } from "~/lib/db/queries/tasks.server";
+import { listRuns } from "~/lib/db/queries/runs.server";
 import { listCollections } from "~/lib/db/queries/documents.server";
 
 export async function loader({ params }: { params: { projectId: string } }) {
@@ -10,9 +10,9 @@ export async function loader({ params }: { params: { projectId: string } }) {
     throw redirect("/");
   }
   await upsertSettings({ activeProjectId: params.projectId });
-  const [tasks, collections] = await Promise.all([
-    listTasks(params.projectId),
+  const [runs, collections] = await Promise.all([
+    listRuns(params.projectId),
     listCollections(params.projectId),
   ]);
-  return { projectId: params.projectId, tasks, collections };
+  return { projectId: params.projectId, runs, collections };
 }

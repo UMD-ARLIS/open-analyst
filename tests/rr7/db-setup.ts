@@ -4,7 +4,6 @@
  */
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import * as schema from "~/lib/db/schema";
 
@@ -109,7 +108,7 @@ CREATE TABLE settings (
   working_dir text,
   working_dir_type varchar(20) DEFAULT 'local',
   s3_uri text,
-  agent_backend varchar(50) DEFAULT 'strands',
+  agent_backend varchar(50) DEFAULT 'langgraph',
   dev_logs_enabled boolean DEFAULT false,
   updated_at timestamptz DEFAULT now()
 );

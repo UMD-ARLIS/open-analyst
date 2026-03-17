@@ -15,10 +15,15 @@ if (!databaseUrl) {
 const client = new pg.Client({ connectionString: databaseUrl });
 
 async function truncateChatTables() {
-  await client.query("TRUNCATE TABLE task_events, messages, tasks RESTART IDENTITY CASCADE");
   await client.query(`
     DO $$
     BEGIN
+      IF to_regclass('public.run_steps') IS NOT NULL THEN
+        EXECUTE 'TRUNCATE TABLE run_steps, approvals, canvas_documents, artifact_versions, evidence_items, artifacts, project_runs, project_threads, project_profiles RESTART IDENTITY CASCADE';
+      END IF;
+      IF to_regclass('public.task_events') IS NOT NULL THEN
+        EXECUTE 'TRUNCATE TABLE task_events, messages, tasks RESTART IDENTITY CASCADE';
+      END IF;
       IF to_regclass('public.strands_sessions') IS NOT NULL THEN
         EXECUTE 'TRUNCATE TABLE strands_session_messages, strands_session_agents, strands_sessions RESTART IDENTITY CASCADE';
       END IF;
@@ -27,9 +32,13 @@ async function truncateChatTables() {
 }
 
 async function clearLocalSessions() {
-  const defaultDir = path.join(os.tmpdir(), "strands", "sessions");
-  await fs.rm(defaultDir, { recursive: true, force: true });
-  console.log(`Removed local Strands sessions under ${defaultDir}`);
+  const runtimeDir = path.join(os.tmpdir(), "open-analyst", "runs");
+  await fs.rm(runtimeDir, { recursive: true, force: true });
+  console.log(`Removed local runtime state under ${runtimeDir}`);
+
+  const legacyDir = path.join(os.tmpdir(), "strands", "sessions");
+  await fs.rm(legacyDir, { recursive: true, force: true });
+  console.log(`Removed legacy Strands sessions under ${legacyDir}`);
 }
 
 async function clearS3Sessions() {
@@ -42,42 +51,49 @@ async function clearS3Sessions() {
   const region = process.env.ARTIFACT_S3_REGION || "us-east-1";
   const endpoint = process.env.ARTIFACT_S3_ENDPOINT || undefined;
   const basePrefix = (process.env.ARTIFACT_S3_PREFIX || "open-analyst-artifacts").replace(/\/+$/, "");
-  const prefix = `${basePrefix}/strands-sessions/`;
+  const prefixes = [
+    `${basePrefix}/runtime-runs/`,
+    `${basePrefix}/strands-sessions/`,
+  ];
 
   const s3 = new S3Client({ region, endpoint });
-  let continuationToken;
   let deletedCount = 0;
 
-  do {
-    const page = await s3.send(
-      new ListObjectsV2Command({
-        Bucket: bucket,
-        Prefix: prefix,
-        ContinuationToken: continuationToken,
-      }),
-    );
-
-    const objects = (page.Contents || []).map((item) => ({ Key: item.Key })).filter((item) => item.Key);
-    if (objects.length > 0) {
-      await s3.send(
-        new DeleteObjectsCommand({
+  for (const prefix of prefixes) {
+    let continuationToken;
+    do {
+      const page = await s3.send(
+        new ListObjectsV2Command({
           Bucket: bucket,
-          Delete: { Objects: objects },
+          Prefix: prefix,
+          ContinuationToken: continuationToken,
         }),
       );
-      deletedCount += objects.length;
-    }
 
-    continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
-  } while (continuationToken);
+      const objects = (page.Contents || [])
+        .map((item) => ({ Key: item.Key }))
+        .filter((item) => item.Key);
+      if (objects.length > 0) {
+        await s3.send(
+          new DeleteObjectsCommand({
+            Bucket: bucket,
+            Delete: { Objects: objects },
+          }),
+        );
+        deletedCount += objects.length;
+      }
 
-  console.log(`Removed ${deletedCount} S3 objects under s3://${bucket}/${prefix}`);
+      continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+    } while (continuationToken);
+  }
+
+  console.log(`Removed ${deletedCount} S3 objects under runtime and legacy session prefixes`);
 }
 
 try {
   await client.connect();
   await truncateChatTables();
-  console.log("Cleared Open Analyst task/message/event rows and Strands session tables");
+  console.log("Cleared Open Analyst run state, legacy task state, and any persisted session tables");
 } finally {
   await client.end();
 }
