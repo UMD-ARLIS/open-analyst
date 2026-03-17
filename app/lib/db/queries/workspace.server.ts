@@ -176,6 +176,18 @@ export async function listCanvasDocuments(projectId: string): Promise<CanvasDocu
     .orderBy(desc(canvasDocuments.updatedAt));
 }
 
+export async function getCanvasDocument(
+  projectId: string,
+  canvasDocumentId: string
+): Promise<CanvasDocument | undefined> {
+  const [document] = await db
+    .select()
+    .from(canvasDocuments)
+    .where(and(eq(canvasDocuments.projectId, projectId), eq(canvasDocuments.id, canvasDocumentId)))
+    .limit(1);
+  return document;
+}
+
 export async function createCanvasDocument(
   projectId: string,
   input: {

@@ -1,10 +1,20 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router";
 import { headlessGetArtifacts, type HeadlessArtifact } from "~/lib/headless-api";
+import { useAppStore } from "~/lib/store";
+
+function buildArtifactUrls(projectId: string, artifactId: string) {
+  const artifactUrl = `/api/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}/content`;
+  return {
+    artifactUrl,
+    downloadUrl: `${artifactUrl}?download=1`,
+  };
+}
 
 export function ArtifactsWorkspaceView() {
   const params = useParams();
   const projectId = params.projectId!;
+  const openFileViewer = useAppStore((state) => state.openFileViewer);
   const [artifacts, setArtifacts] = useState<HeadlessArtifact[]>([]);
   const [versionsByArtifactId, setVersionsByArtifactId] = useState<Record<string, number>>({});
 
@@ -36,9 +46,30 @@ export function ArtifactsWorkspaceView() {
             <div className="card p-5 text-sm text-text-muted">No artifacts yet.</div>
           ) : (
             artifacts.map((artifact) => (
-              <div
+              <button
                 key={artifact.id}
+                type="button"
                 className="card p-5 text-left"
+                onClick={() => {
+                  const links = buildArtifactUrls(projectId, artifact.id);
+                  const metadata =
+                    artifact.metadata && typeof artifact.metadata === "object"
+                      ? (artifact.metadata as Record<string, unknown>)
+                      : {};
+                  openFileViewer({
+                    artifactId: artifact.id,
+                    filename: (metadata.filename as string) || artifact.title || "artifact",
+                    mimeType: artifact.mimeType,
+                    size: typeof metadata.bytes === "number" ? metadata.bytes : 0,
+                    artifactUrl: links.artifactUrl,
+                    downloadUrl: links.downloadUrl,
+                    title: artifact.title,
+                    storageUri: artifact.storageUri || undefined,
+                    metadata,
+                    textPreview:
+                      typeof metadata.textPreview === "string" ? metadata.textPreview : "",
+                  });
+                }}
               >
                 <div className="text-sm font-medium">{artifact.title}</div>
                 <div className="text-xs text-text-muted mt-1">
@@ -50,7 +81,7 @@ export function ArtifactsWorkspaceView() {
                 {artifact.storageUri && (
                   <div className="text-xs text-text-muted mt-2 break-all">{artifact.storageUri}</div>
                 )}
-              </div>
+              </button>
             ))
           )}
         </div>

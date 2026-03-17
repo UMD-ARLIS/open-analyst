@@ -3,6 +3,7 @@ import { useAppStore } from "~/lib/store";
 import { CanvasPanel } from "./CanvasPanel";
 import { FileViewerPanel } from "./FileViewerPanel";
 import { KnowledgePanel } from "./KnowledgePanel";
+import { ProjectRightDock } from "./ProjectRightDock";
 
 export function ProjectContextPanel() {
   const params = useParams();
@@ -25,18 +26,20 @@ export function ProjectContextPanel() {
 
   if (artifact) {
     return (
-      <FileViewerPanel
-        onOpenKnowledge={() =>
-          setSearchParams(
-            (prev) => {
-              const next = new URLSearchParams(prev);
-              next.set("panel", "sources");
-              return next;
-            },
-            { replace: true }
-          )
-        }
-      />
+      <ProjectRightDock mode="artifact">
+        <FileViewerPanel
+          onOpenKnowledge={() =>
+            setSearchParams(
+              (prev) => {
+                const next = new URLSearchParams(prev);
+                next.set("panel", "sources");
+                return next;
+              },
+              { replace: true }
+            )
+          }
+        />
+      </ProjectRightDock>
     );
   }
 
@@ -45,11 +48,19 @@ export function ProjectContextPanel() {
   }
 
   if (panel === "sources") {
-    return <KnowledgePanel projectId={projectId} onClose={clearPanel} />;
+    return (
+      <ProjectRightDock mode="sources">
+        <KnowledgePanel projectId={projectId} onClose={clearPanel} />
+      </ProjectRightDock>
+    );
   }
 
   if (panel === "canvas") {
-    return <CanvasPanel projectId={projectId} onClose={clearPanel} />;
+    return (
+      <ProjectRightDock mode="canvas">
+        <CanvasPanel projectId={projectId} onClose={clearPanel} />
+      </ProjectRightDock>
+    );
   }
 
   return null;

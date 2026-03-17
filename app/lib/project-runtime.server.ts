@@ -1,4 +1,5 @@
 import { getProject } from "~/lib/db/queries/projects.server";
+import { resolveProjectWorkspace } from "~/lib/project-storage.server";
 import type { RuntimeProjectContext } from "~/lib/runtime-client.server";
 import { buildWorkspaceContext } from "~/lib/workspace-context.server";
 
@@ -18,6 +19,8 @@ export async function buildRuntimeProjectContext(
   return {
     project_id: project.id,
     project_name: project.name,
+    workspace_path: resolveProjectWorkspace(project),
+    workspace_slug: project.workspaceSlug || undefined,
     brief: workspaceContext.profile.brief || project.description || "",
     retrieval_policy: workspaceContext.profile.retrievalPolicy,
     memory_profile: workspaceContext.profile.memoryProfile,

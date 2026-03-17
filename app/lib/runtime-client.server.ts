@@ -3,6 +3,8 @@ import { env } from "~/lib/env.server";
 export interface RuntimeProjectContext {
   project_id: string;
   project_name: string;
+  workspace_path?: string;
+  workspace_slug?: string;
   brief: string;
   retrieval_policy: Record<string, unknown>;
   memory_profile: Record<string, unknown>;

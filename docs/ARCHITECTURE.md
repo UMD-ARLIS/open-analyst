@@ -34,6 +34,7 @@ The runtime is the core agent system. The web app persists product state and str
 - `task_events`: structured runtime stream events
 - `project_memories`: approval and UI-facing durable memory records
 - `documents`: indexed project documents
+- `source_ingest_batches` and `source_ingest_items`: staged source collection awaiting approval or import
 - `artifacts` and `artifact_versions`: stored outputs
 - `canvas_documents`: editable markdown-first workspace documents
 
@@ -62,6 +63,14 @@ Artifact routing works like this:
 ### Workspace Files
 
 The UI and app maintain project workspace roots and artifact metadata. The runtime no longer relies on browsing the repo filesystem for research behavior. Research turns now favor explicit retrieval and connector tools instead.
+
+### Source And Artifact Flow
+
+- Research collection requests stage source batches first.
+- Approving a batch imports files or captures web content into the configured artifact backend.
+- Imported sources create `documents` rows for indexing and retrieval.
+- Generated workspace outputs captured through the app create `artifacts` plus `artifact_versions`.
+- Source/document previews and artifact previews are served through same-origin app routes, not direct S3 links.
 
 ## Retrieval
 

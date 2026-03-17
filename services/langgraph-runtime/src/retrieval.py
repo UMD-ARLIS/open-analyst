@@ -64,6 +64,7 @@ class RuntimeRetrievalService:
             if score < effective_min_score:
                 continue
             content = str(row.get("content") or "")
+            metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
             results.append(
                 {
                     "id": str(row.get("id")),
@@ -71,7 +72,19 @@ class RuntimeRetrievalService:
                     "sourceUri": str(row.get("sourceUri") or "").strip() or None,
                     "score": round(score, 3),
                     "snippet": self._snippet(content, query),
-                    "metadata": row.get("metadata") or {},
+                    "citation": {
+                        "provider": str(metadata.get("provider") or "").strip() or None,
+                        "publishedAt": str(metadata.get("publishedAt") or "").strip() or None,
+                        "venue": str(metadata.get("venue") or "").strip() or None,
+                        "doi": str(metadata.get("doi") or "").strip() or None,
+                        "artifactUrl": str(metadata.get("artifactUrl") or "").strip() or None,
+                        "downloadUrl": str(metadata.get("downloadUrl") or "").strip() or None,
+                        "authors": [
+                            str(author).strip()
+                            for author in (metadata.get("authors") if isinstance(metadata.get("authors"), list) else [])[:4]
+                            if str(author).strip()
+                        ],
+                    },
                 }
             )
             if len(results) >= effective_limit:

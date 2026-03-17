@@ -35,5 +35,6 @@
 - `AssistantWorkspaceView`: main chat workspace
 - `ProjectLeftPanel`: left-side workspace control panel
 - `ProjectContextPanel`: right-side preview/canvas/artifact context panel
+- `ProjectRightDock`: shared resizable right-dock container for Sources, Canvas, and artifact preview
 - `ThreadContextPanel`: thread-level skills, connectors, and memory context
 - `WorkspaceSettingsPanel`: left-side settings UI

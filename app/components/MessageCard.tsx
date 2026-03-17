@@ -60,15 +60,14 @@ function ArtifactCard({ artifact }: { artifact: ArtifactMeta }) {
         <p className="text-xs text-text-muted">{formatFileSize(artifact.size)}</p>
       </button>
       <div className="flex items-center gap-1.5">
-        <a
-          href={artifact.artifactUrl}
-          target="_blank"
-          rel="noreferrer"
+        <button
+          type="button"
+          onClick={() => openFileViewer(artifact)}
           className="w-7 h-7 rounded-md flex items-center justify-center hover:bg-surface-muted transition-colors text-text-muted hover:text-accent"
           title="Preview"
         >
           <ExternalLink className="w-3.5 h-3.5" />
-        </a>
+        </button>
         <a
           href={artifact.downloadUrl}
           className="w-7 h-7 rounded-md flex items-center justify-center hover:bg-surface-muted transition-colors text-text-muted hover:text-accent"
@@ -193,7 +192,10 @@ function ToolResultBlock({
             <pre className="code-block text-xs whitespace-pre-wrap">{block.content}</pre>
           ) : null}
           {block.artifacts?.map((artifact) => (
-            <ArtifactCard key={artifact.documentId} artifact={artifact} />
+            <ArtifactCard
+              key={artifact.documentId || artifact.artifactId || `${artifact.filename}-${artifact.artifactUrl}`}
+              artifact={artifact}
+            />
           ))}
         </div>
       ) : null}

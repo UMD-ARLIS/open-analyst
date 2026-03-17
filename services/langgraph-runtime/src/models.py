@@ -16,6 +16,8 @@ class Message(BaseModel):
 class RuntimeProjectContext(BaseModel):
     project_id: str
     project_name: str = ""
+    workspace_path: str = ""
+    workspace_slug: str = ""
     brief: str = ""
     retrieval_policy: dict[str, Any] = Field(default_factory=dict)
     memory_profile: dict[str, Any] = Field(default_factory=dict)

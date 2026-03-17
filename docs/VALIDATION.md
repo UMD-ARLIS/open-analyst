@@ -50,10 +50,18 @@ Use these when validating the full system:
    - literature search tools are used
    - no repo filesystem wandering occurs
    - the response completes cleanly
-5. Open settings from the left panel.
-6. Open a source preview or canvas on the right panel.
-7. Promote a memory and confirm it appears in runtime-backed memory retrieval.
-8. Capture or generate an artifact and confirm it lands in local storage or S3 depending on backend configuration.
+5. Ask the assistant to collect sources and confirm:
+   - a staged batch appears in the Sources panel
+   - approval imports the files into Sources
+   - imported documents receive storage-backed artifact metadata
+   - retrieval can find the imported content
+6. Open a source preview or canvas on the right panel and confirm it opens in-panel instead of jumping to a direct storage URL.
+7. Capture or generate an artifact and confirm:
+   - a real artifact row appears in the Artifacts workspace
+   - a first artifact version is created
+   - the content route serves `inline` preview by default and `attachment` only with `?download=1`
+8. Promote a memory and confirm it appears in runtime-backed memory retrieval.
+9. Open settings from the left panel.
 
 ## Infrastructure Checks
 

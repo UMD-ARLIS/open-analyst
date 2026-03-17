@@ -19,6 +19,11 @@ Open Analyst is a chat-first research workspace built around a Deep Agents runti
 - A task record is the persisted chat thread.
 - The runtime is deepagents-first and uses LangGraph checkpoint/store persistence.
 - Analyst MCP is a connector service, not the main runtime.
+- Source collection is approval-gated:
+  - the runtime stages literature or web-source batches
+  - approval from the Sources panel imports them into project documents
+  - imported files are stored in the configured artifact backend and indexed for retrieval
+- Captured workspace files now create real `artifacts` and `artifact_versions` records.
 
 ## Quick Start
 
@@ -91,6 +96,9 @@ curl -H "x-api-key: $ANALYST_MCP_API_KEY" http://localhost:8000/api/capabilities
 - If `ARTIFACT_STORAGE_BACKEND=s3`, project artifacts persist to S3.
 - Project-level overrides can still choose local or S3 independently.
 - The current AWS convention is a fresh prefix such as `open-analyst-vnext/<project-slug>/...`.
+- Generated files captured from the workspace are stored as versioned artifacts first.
+- Sources can optionally mirror stored files into `documents` for indexing and retrieval.
+- The UI serves source and artifact previews through same-origin content routes rather than direct storage URLs.
 
 ### Memory
 

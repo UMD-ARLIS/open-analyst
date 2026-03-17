@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import json
 import logging
 import re
+import shlex
 import traceback
 import uuid
 from pathlib import Path
@@ -71,12 +73,18 @@ STORE: Any | None = None
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 RESEARCH_BLOCKED_TOOLS = {
     "ls",
+    "list_directory",
     "read_file",
     "write_file",
     "edit_file",
     "glob",
     "grep",
     "execute",
+    "execute_command",
+    "capture_artifact",
+}
+DOCUMENT_GENERATION_BLOCKED_TOOLS = {
+    "task",
 }
 
 
@@ -110,6 +118,21 @@ class ResearchToolRoutingMiddleware(AgentMiddleware if AgentMiddleware is not No
     def _block_tool(self, request: Any) -> Any:
         tool_name = str(getattr(request, "tool_call", {}).get("name") or "tool")
         tool_call_id = str(getattr(request, "tool_call", {}).get("id") or f"blocked-{tool_name}")
+        current_request = CURRENT_REQUEST.get()
+        if (
+            current_request is not None
+            and _is_document_generation_request(current_request)
+            and tool_name in DOCUMENT_GENERATION_BLOCKED_TOOLS
+        ):
+            return ToolMessage(
+                content=(
+                    f"{tool_name} is disabled for document-generation turns. "
+                    "Use the bound workspace tools and the active bulletin/docx skill instructions directly."
+                ),
+                name=tool_name,
+                tool_call_id=tool_call_id,
+                status="error",
+            )
         return ToolMessage(
             content=(
                 f"{tool_name} is disabled for research-mode turns. "
@@ -131,8 +154,16 @@ class ResearchToolRoutingMiddleware(AgentMiddleware if AgentMiddleware is not No
         if (
             ToolMessage is not None
             and current_request is not None
-            and _is_research_prompt(current_request)
-            and tool_name in RESEARCH_BLOCKED_TOOLS
+            and (
+                (
+                    _is_research_prompt(current_request)
+                    and tool_name in RESEARCH_BLOCKED_TOOLS
+                )
+                or (
+                    _is_document_generation_request(current_request)
+                    and tool_name in DOCUMENT_GENERATION_BLOCKED_TOOLS
+                )
+            )
         ):
             return self._block_tool(request)
         return handler(request)
@@ -147,8 +178,16 @@ class ResearchToolRoutingMiddleware(AgentMiddleware if AgentMiddleware is not No
         if (
             ToolMessage is not None
             and current_request is not None
-            and _is_research_prompt(current_request)
-            and tool_name in RESEARCH_BLOCKED_TOOLS
+            and (
+                (
+                    _is_research_prompt(current_request)
+                    and tool_name in RESEARCH_BLOCKED_TOOLS
+                )
+                or (
+                    _is_document_generation_request(current_request)
+                    and tool_name in DOCUMENT_GENERATION_BLOCKED_TOOLS
+                )
+            )
         ):
             return self._block_tool(request)
         return await handler(request)
@@ -282,8 +321,15 @@ def _build_user_prompt(request: RuntimeRunRequest) -> str:
         if _is_research_prompt(request)
         else ""
     )
+    collection_note = (
+        "If the user wants sources collected into the project, use stage_literature_collection or stage_web_source instead of only summarizing search results. "
+        "After staging, tell the user the sources are waiting in the Sources panel for approval.\n\n"
+        if _is_collection_request(request) or _is_web_capture_request(request)
+        else ""
+    )
     return (
         f"Project: {request.project.project_name}\n\n"
+        f"Project workspace:\n{request.project.workspace_path or '(not configured)'}\n\n"
         f"Project brief:\n{request.project.brief or '(none)'}\n\n"
         f"Active connectors:\n{active_connectors}\n\n"
         f"Active skills:\n{active_skills}\n\n"
@@ -291,6 +337,7 @@ def _build_user_prompt(request: RuntimeRunRequest) -> str:
         "Use the bound tools directly when they help. "
         "Do not restate the tool catalog unless the user explicitly asks about tools, skills, or connectors.\n\n"
         f"{research_note}"
+        f"{collection_note}"
         f"Current user request:\n{request.prompt}\n"
     )
 
@@ -336,6 +383,60 @@ def _is_research_prompt(request: RuntimeRunRequest) -> bool:
         for skill in _active_skill_summaries(request)
     }
     return "web research" in active_skill_names
+
+
+def _is_document_generation_request(request: RuntimeRunRequest) -> bool:
+    prompt = str(request.prompt or "").strip().lower()
+    if prompt and any(
+        phrase in prompt
+        for phrase in [
+            ".docx",
+            "docx",
+            "bulletin",
+            "word document",
+            "word doc",
+            "arlis",
+            "template",
+            "memo",
+            "report",
+        ]
+    ):
+        return True
+    active_skill_names = {
+        str(skill.get("name") or "").strip().lower()
+        for skill in _active_skill_summaries(request)
+    }
+    return bool({"arlis-bulletin", "docx"} & active_skill_names)
+
+
+def _is_collection_request(request: RuntimeRunRequest) -> bool:
+    prompt = str(request.prompt or "").strip().lower()
+    return any(
+        phrase in prompt
+        for phrase in [
+            "collect ",
+            "collect articles",
+            "collect papers",
+            "add to sources",
+            "save to sources",
+            "stage sources",
+            "build a source list",
+        ]
+    )
+
+
+def _is_web_capture_request(request: RuntimeRunRequest) -> bool:
+    prompt = str(request.prompt or "").strip().lower()
+    return ("http://" in prompt or "https://" in prompt) and any(
+        phrase in prompt
+        for phrase in [
+            "collect",
+            "capture",
+            "save",
+            "ingest",
+            "add to sources",
+        ]
+    )
 
 
 def _fallback_runtime_text(request: RuntimeRunRequest, reason: str) -> str:
@@ -550,6 +651,36 @@ async def _save_canvas_document_api(
     return document if isinstance(document, dict) else None
 
 
+async def _publish_canvas_document_api(
+    request: RuntimeRunRequest,
+    *,
+    add_to_sources: bool = False,
+    change_summary: str = "Published from runtime",
+) -> dict[str, Any] | None:
+    api_base_url = str(request.project.api_base_url or "").rstrip("/")
+    if not api_base_url:
+        return None
+    existing = await _list_canvas_documents_api(request)
+    if not existing:
+        return None
+    target = existing[0]
+    document_id = str(target.get("id") or "").strip()
+    if not document_id:
+        return None
+    async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+        response = await client.post(
+            f"{api_base_url}/api/projects/{request.project.project_id}/canvas-documents/{document_id}/publish",
+            json={
+                "addToSources": add_to_sources,
+                "changeSummary": change_summary,
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+    document = payload.get("document") if isinstance(payload, dict) else None
+    return document if isinstance(document, dict) else None
+
+
 async def _publish_workspace_file_api(
     request: RuntimeRunRequest,
     relative_path: str,
@@ -572,7 +703,12 @@ async def _publish_workspace_file_api(
         )
         response.raise_for_status()
         body = response.json()
-    document = body.get("document") if isinstance(body, dict) else None
+    if not isinstance(body, dict):
+        return None
+    artifact = body.get("artifact")
+    if isinstance(artifact, dict):
+        return artifact
+    document = body.get("document")
     return document if isinstance(document, dict) else None
 
 
@@ -613,9 +749,208 @@ async def _search_literature_api(
     return payload if isinstance(payload, dict) else {"results": []}
 
 
+async def _stage_source_ingest_api(
+    request: RuntimeRunRequest,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    api_base_url = str(request.project.api_base_url or "").rstrip("/")
+    if not api_base_url:
+        return {}
+    async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+        response = await client.post(
+            f"{api_base_url}/api/projects/{request.project.project_id}/source-ingest",
+            json=payload,
+        )
+        response.raise_for_status()
+        body = response.json()
+    return body if isinstance(body, dict) else {}
+
+
+def _workspace_root(request: RuntimeRunRequest) -> Path:
+    raw_path = str(request.project.workspace_path or "").strip()
+    if not raw_path:
+        raise RuntimeError("Project workspace is not configured for this runtime request.")
+    workspace = Path(raw_path).expanduser().resolve()
+    workspace.mkdir(parents=True, exist_ok=True)
+    return workspace
+
+
+def _resolve_virtual_or_workspace_path(request: RuntimeRunRequest, input_path: str) -> Path:
+    raw = str(input_path or ".").strip()
+    if raw.startswith("/skills/skills/"):
+        return (_repo_root() / "skills" / raw.removeprefix("/skills/skills/")).resolve()
+    if raw.startswith("/skills/"):
+        return (_repo_root() / raw.removeprefix("/skills/")).resolve()
+    if raw.startswith("/memories/"):
+        return (_repo_root() / raw.removeprefix("/")).resolve()
+    return _resolve_workspace_path(request, raw)
+
+
+def _resolve_workspace_path(request: RuntimeRunRequest, relative_path: str) -> Path:
+    workspace = _workspace_root(request)
+    candidate = (workspace / str(relative_path or ".").strip()).resolve()
+    if candidate != workspace and workspace not in candidate.parents:
+        raise RuntimeError("Requested path is outside the project workspace.")
+    return candidate
+
+
+def _workspace_relative_path(request: RuntimeRunRequest, target: Path) -> str:
+    workspace = _workspace_root(request)
+    return str(target.resolve().relative_to(workspace)).replace("\\", "/")
+
+
+def _coerce_text_file(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise RuntimeError(
+            f"{path.name} is not a UTF-8 text file. Use execute_command for binary extraction or conversion."
+        ) from exc
+
+
+def _safe_command_parts(command: str) -> list[str]:
+    parts = shlex.split(command)
+    if not parts:
+        raise RuntimeError("Command is required.")
+    allowed = {
+        "python",
+        "python3",
+        "bash",
+        "sh",
+        "node",
+        "npx",
+        "npm",
+        "uv",
+        "pandoc",
+        "pdftoppm",
+        "find",
+        "ls",
+        "cat",
+        "mkdir",
+        "cp",
+        "mv",
+        "pwd",
+        "head",
+        "tail",
+        "grep",
+        "sed",
+    }
+    if parts[0] not in allowed:
+        raise RuntimeError(f"Command '{parts[0]}' is not allowed in the project workspace runtime.")
+    return parts
+
+
+def _map_command_parts(request: RuntimeRunRequest, parts: list[str]) -> list[str]:
+    mapped: list[str] = []
+    for part in parts:
+        if part.startswith("/skills/skills/"):
+            mapped.append(
+                str((_repo_root() / "skills" / part.removeprefix("/skills/skills/")).resolve())
+            )
+            continue
+        if part.startswith("/skills/"):
+            mapped.append(str((_repo_root() / part.removeprefix("/skills/")).resolve()))
+            continue
+        if part.startswith("/workspace/"):
+            mapped.append(str(_resolve_workspace_path(request, part.removeprefix("/workspace/"))))
+            continue
+        mapped.append(part)
+    return mapped
+
+
 def _build_tools() -> list[Any]:
     if tool is None:
         return []
+
+    @tool
+    async def list_directory(path: str = ".") -> str:
+        """List files and folders inside the current project workspace."""
+        request = CURRENT_REQUEST.get()
+        if request is None:
+            return "[]"
+        target = _resolve_virtual_or_workspace_path(request, path)
+        if not target.exists():
+            raise RuntimeError(f"{path} does not exist in the project workspace.")
+        if target.is_file():
+            stat = target.stat()
+            return json.dumps(
+                [
+                    {
+                        "name": target.name,
+                        "path": _workspace_relative_path(request, target),
+                        "type": "file",
+                        "size": stat.st_size,
+                    }
+                ]
+            )
+        entries: list[dict[str, Any]] = []
+        for child in sorted(target.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower())):
+            stat = child.stat()
+            entries.append(
+                {
+                    "name": child.name,
+                    "path": _workspace_relative_path(request, child),
+                    "type": "directory" if child.is_dir() else "file",
+                    "size": stat.st_size if child.is_file() else None,
+                }
+            )
+        return json.dumps(entries)
+
+    @tool
+    async def execute_command(command: str, cwd: str = ".") -> str:
+        """Execute an allowed shell command inside the project workspace."""
+        request = CURRENT_REQUEST.get()
+        if request is None:
+            return "{}"
+        working_dir = _resolve_workspace_path(request, cwd)
+        if not working_dir.exists() or not working_dir.is_dir():
+            raise RuntimeError(f"{cwd} is not a directory in the project workspace.")
+        parts = _map_command_parts(request, _safe_command_parts(command))
+        process = await asyncio.create_subprocess_exec(
+            *parts,
+            cwd=str(working_dir),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=settings.request_timeout_seconds,
+            )
+        except TimeoutError as exc:
+            process.kill()
+            await process.communicate()
+            raise RuntimeError(f"Command timed out after {settings.request_timeout_seconds} seconds.") from exc
+        return json.dumps(
+            {
+                "command": command,
+                "cwd": _workspace_relative_path(request, working_dir),
+                "exit_code": process.returncode,
+                "stdout": stdout.decode("utf-8", errors="replace")[:24000],
+                "stderr": stderr.decode("utf-8", errors="replace")[:12000],
+            }
+        )
+
+    @tool
+    async def capture_artifact(
+        relativePath: str,
+        title: str = "",
+        collectionName: str = "Artifacts",
+    ) -> str:
+        """Capture a generated workspace file into the project artifact store."""
+        request = CURRENT_REQUEST.get()
+        if request is None:
+            return "{}"
+        target = _resolve_workspace_path(request, relativePath)
+        if not target.exists() or not target.is_file():
+            raise RuntimeError(f"{relativePath} was not found in the project workspace.")
+        document = await _publish_workspace_file_api(
+            request,
+            _workspace_relative_path(request, target),
+            title=title or target.stem,
+            collection_name=collectionName,
+        )
+        return json.dumps(document or {})
 
     @tool
     async def search_project_documents(query: str, limit: int = 6) -> str:
@@ -627,7 +962,7 @@ def _build_tools() -> list[Any]:
             request.project.project_id,
             query,
             collection_id=request.project.collection_id,
-            limit=limit,
+            limit=max(1, min(int(limit or 6), 8)),
         )
         return json.dumps(results)
 
@@ -640,7 +975,7 @@ def _build_tools() -> list[Any]:
         results = await retrieval_service.search_project_memories(
             request.project.project_id,
             query,
-            limit=limit,
+            limit=max(1, min(int(limit or 6), 8)),
         )
         return json.dumps(results)
 
@@ -662,6 +997,58 @@ def _build_tools() -> list[Any]:
             sources=sources,
         )
         return _summarize_literature_payload(payload, limit=effective_limit)
+
+    @tool
+    async def stage_literature_collection(
+        query: str,
+        limit: int = 10,
+        date_from: str = "",
+        date_to: str = "",
+        collection_name: str = "",
+        sources: list[str] | None = None,
+    ) -> str:
+        """Stage literature results as pending project sources for approval and import."""
+        request = CURRENT_REQUEST.get()
+        if request is None:
+            return "{}"
+        payload = await _stage_source_ingest_api(
+            request,
+            {
+                "origin": "literature",
+                "query": query,
+                "limit": max(1, min(int(limit or 10), 20)),
+                "dateFrom": date_from or None,
+                "dateTo": date_to or None,
+                "collectionId": request.project.collection_id,
+                "collectionName": collection_name or None,
+                "sources": sources or [],
+            },
+        )
+        batch = payload.get("batch") if isinstance(payload, dict) else None
+        return json.dumps(batch or {})
+
+    @tool
+    async def stage_web_source(
+        url: str,
+        title: str = "",
+        collection_name: str = "",
+    ) -> str:
+        """Stage a website capture as a pending project source for approval and import."""
+        request = CURRENT_REQUEST.get()
+        if request is None:
+            return "{}"
+        payload = await _stage_source_ingest_api(
+            request,
+            {
+                "origin": "web",
+                "url": url,
+                "title": title or None,
+                "collectionId": request.project.collection_id,
+                "collectionName": collection_name or None,
+            },
+        )
+        batch = payload.get("batch") if isinstance(payload, dict) else None
+        return json.dumps(batch or {})
 
     @tool
     async def list_active_connectors() -> str:
@@ -706,6 +1093,22 @@ def _build_tools() -> list[Any]:
         return json.dumps(document or {})
 
     @tool
+    async def publish_canvas_document(
+        add_to_sources: bool = False,
+        change_summary: str = "Published from runtime",
+    ) -> str:
+        """Publish the primary canvas document into artifact storage and optionally add it to sources."""
+        request = CURRENT_REQUEST.get()
+        if request is None:
+            return "{}"
+        document = await _publish_canvas_document_api(
+            request,
+            add_to_sources=add_to_sources,
+            change_summary=change_summary,
+        )
+        return json.dumps(document or {})
+
+    @tool
     async def publish_workspace_file(
         relative_path: str,
         title: str = "",
@@ -746,14 +1149,20 @@ def _build_tools() -> list[Any]:
         return json.dumps(entry)
 
     return [
+        list_directory,
         search_project_documents,
         search_project_memories,
         search_literature,
+        stage_literature_collection,
+        stage_web_source,
         list_active_connectors,
         list_active_skills,
         describe_runtime_capabilities,
         list_canvas_documents,
         save_canvas_markdown,
+        publish_canvas_document,
+        execute_command,
+        capture_artifact,
         publish_workspace_file,
         propose_project_memory,
     ]
@@ -771,6 +1180,8 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
             "model": model,
             "tools": [
                 tool_map["search_literature"],
+                tool_map["stage_literature_collection"],
+                tool_map["stage_web_source"],
                 tool_map["search_project_documents"],
                 tool_map["search_project_memories"],
                 tool_map["list_active_connectors"],
@@ -788,7 +1199,11 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
             ),
             "model": model,
             "tools": [
+                tool_map["list_directory"],
+                tool_map["execute_command"],
+                tool_map["capture_artifact"],
                 tool_map["save_canvas_markdown"],
+                tool_map["publish_canvas_document"],
                 tool_map["publish_workspace_file"],
                 tool_map["list_canvas_documents"],
             ],
@@ -825,7 +1240,18 @@ def _build_backend() -> Any:
         return ("open-analyst", "projects", project_id, "memories")
 
     return lambda runtime: CompositeBackend(
-        default=StateBackend(runtime) if StateBackend is not None else FilesystemBackend(root_dir=_repo_root(), virtual_mode=True),
+        default=(
+            FilesystemBackend(
+                root_dir=(
+                    _workspace_root(CURRENT_REQUEST.get())
+                    if CURRENT_REQUEST.get() is not None
+                    else _repo_root()
+                ),
+                virtual_mode=True,
+            )
+            if FilesystemBackend is not None
+            else StateBackend(runtime)
+        ),
         routes={
             "/memories/": StoreBackend(runtime, namespace=namespace),
             "/skills/": FilesystemBackend(root_dir=_repo_root(), virtual_mode=True),
@@ -854,9 +1280,6 @@ def _build_agent() -> Any | None:
         backend=_build_backend(),
         checkpointer=CHECKPOINTER,
         store=STORE,
-        interrupt_on={
-            "publish_workspace_file": True,
-        },
         debug=False,
     )
     AGENT_CACHE[cache_key] = agent

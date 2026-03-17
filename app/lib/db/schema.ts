@@ -447,6 +447,77 @@ export const projectMemories = pgTable(
   ]
 );
 
+// --- source_ingest_batches ---
+
+export const sourceIngestBatches = pgTable(
+  "source_ingest_batches",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id").references(() => tasks.id, {
+      onDelete: "set null",
+    }),
+    collectionId: uuid("collection_id").references(() => collections.id, {
+      onDelete: "set null",
+    }),
+    collectionName: varchar("collection_name", { length: 255 }).default("Research Inbox"),
+    origin: varchar("origin", { length: 32 }).notNull().default("literature"),
+    status: varchar("status", { length: 32 }).notNull().default("staged"),
+    query: text("query").default(""),
+    summary: text("summary").default(""),
+    requestedCount: integer("requested_count").notNull().default(0),
+    importedCount: integer("imported_count").notNull().default(0),
+    metadata: jsonb("metadata").default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    rejectedAt: timestamp("rejected_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("source_ingest_batches_project_updated_idx").on(table.projectId, table.updatedAt),
+    index("source_ingest_batches_project_status_idx").on(table.projectId, table.status),
+    index("source_ingest_batches_task_idx").on(table.taskId),
+  ]
+);
+
+// --- source_ingest_items ---
+
+export const sourceIngestItems = pgTable(
+  "source_ingest_items",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    batchId: uuid("batch_id")
+      .notNull()
+      .references(() => sourceIngestBatches.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id").references(() => documents.id, {
+      onDelete: "set null",
+    }),
+    externalId: text("external_id"),
+    sourceUrl: text("source_url"),
+    title: varchar("title", { length: 500 }).notNull().default("Untitled Source"),
+    mimeTypeHint: varchar("mime_type_hint", { length: 255 }),
+    targetFilename: varchar("target_filename", { length: 255 }),
+    normalizedMetadata: jsonb("normalized_metadata").default({}),
+    storageUri: text("storage_uri"),
+    status: varchar("status", { length: 32 }).notNull().default("staged"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+    importedAt: timestamp("imported_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("source_ingest_items_batch_idx").on(table.batchId, table.createdAt),
+    index("source_ingest_items_project_status_idx").on(table.projectId, table.status),
+    index("source_ingest_items_document_idx").on(table.documentId),
+  ]
+);
+
 // --- canvas_documents ---
 
 export const canvasDocuments = pgTable(
@@ -506,5 +577,9 @@ export type EvidenceItem = typeof evidenceItems.$inferSelect;
 export type NewEvidenceItem = typeof evidenceItems.$inferInsert;
 export type ProjectMemory = typeof projectMemories.$inferSelect;
 export type NewProjectMemory = typeof projectMemories.$inferInsert;
+export type SourceIngestBatch = typeof sourceIngestBatches.$inferSelect;
+export type NewSourceIngestBatch = typeof sourceIngestBatches.$inferInsert;
+export type SourceIngestItem = typeof sourceIngestItems.$inferSelect;
+export type NewSourceIngestItem = typeof sourceIngestItems.$inferInsert;
 export type CanvasDocument = typeof canvasDocuments.$inferSelect;
 export type NewCanvasDocument = typeof canvasDocuments.$inferInsert;
