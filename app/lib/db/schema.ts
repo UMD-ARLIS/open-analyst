@@ -116,6 +116,7 @@ export const documents = pgTable(
   (table) => [
     index("documents_project_id_idx").on(table.projectId),
     index("documents_collection_id_idx").on(table.collectionId),
+    index("documents_project_source_uri_idx").on(table.projectId, table.sourceUri),
   ]
 );
 

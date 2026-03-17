@@ -90,6 +90,29 @@ class RuntimeInvocationResult(BaseModel):
     memory_candidates: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class AnalysisPlanStep(BaseModel):
+    """A single step in the analysis plan."""
+    title: str = Field(description="Short description of this step")
+    actor: str = Field(default="supervisor", description="Who performs this step: supervisor, researcher, drafter, or critic")
+    tools_needed: list[str] = Field(default_factory=list, description="Tools this step may use")
+
+
+class AnalysisPlan(BaseModel):
+    """Structured plan for an analysis task."""
+    steps: list[AnalysisPlanStep] = Field(default_factory=list, description="Ordered steps to complete the task")
+    estimated_sources_needed: int = Field(default=0, description="How many sources are likely needed")
+    product_type: str | None = Field(default=None, description="Type of output: bulletin, memo, report, analysis, etc.")
+
+
+class MemoryProposal(BaseModel):
+    """A structured memory proposal from the agent."""
+    title: str = Field(description="Title for this memory")
+    summary: str = Field(description="Brief summary (1-2 sentences)")
+    content: str = Field(description="Full memory content")
+    memory_type: str = Field(default="finding", description="Type: finding, methodology, contact, decision, etc.")
+    confidence: str = Field(default="medium", description="Confidence level: low, medium, high")
+
+
 class RuntimeEvent(BaseModel):
     type: str
     text: str = ""

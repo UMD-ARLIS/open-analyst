@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { getHeadlessApiBase } from "~/lib/headless-api";
 import { applyChatStreamEvent, type ChatStreamEvent } from "~/lib/chat-stream";
 import type { Message } from "~/lib/types";
@@ -19,6 +19,13 @@ export interface UseChatStreamReturn {
   activeTaskId: string | null;
   sendMessage: (opts: SendMessageOpts) => Promise<{ taskId: string }>;
   stop: () => void;
+}
+
+class StreamError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StreamError";
+  }
 }
 
 export function useChatStream(): UseChatStreamReturn {
@@ -104,25 +111,22 @@ export function useChatStream(): UseChatStreamReturn {
                   ...data,
                   type: currentEvent,
                 } as ChatStreamEvent;
-                startTransition(() => {
-                  setStreamingMessage((previous) => ({
-                    id: `partial-${taskId || opts.taskId || "new"}`,
-                    sessionId: taskId || opts.taskId || "",
-                    role: "assistant",
-                    content: applyChatStreamEvent(previous?.content || [], event),
-                    timestamp: Date.now(),
-                  }));
-                });
+                setStreamingMessage((previous) => ({
+                  id: `partial-${taskId || opts.taskId || "new"}`,
+                  sessionId: taskId || opts.taskId || "",
+                  role: "assistant",
+                  content: applyChatStreamEvent(previous?.content || [], event),
+                  timestamp: Date.now(),
+                }));
                 if (currentEvent === "error") {
-                  throw new Error(data.error || "Stream error");
+                  throw new StreamError(data.error || "Stream error");
                 }
               }
             } catch (error) {
-              if (error instanceof Error && error.message !== "Stream error") {
-                // Skip malformed event payloads.
-              } else {
+              if (error instanceof StreamError) {
                 throw error;
               }
+              // Skip malformed JSON payloads
             }
             currentEvent = "";
           }

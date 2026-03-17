@@ -124,17 +124,11 @@ export async function createArtifactVersion(
   const artifact = await getArtifact(projectId, artifactId);
   if (!artifact) throw new Error(`Artifact not found: ${artifactId}`);
 
-  const [row] = await db
-    .select({ version: sql<number>`coalesce(max(${artifactVersions.version}), 0)::int` })
-    .from(artifactVersions)
-    .where(eq(artifactVersions.artifactId, artifactId));
-  const nextVersion = (row?.version || 0) + 1;
-
   const [version] = await db
     .insert(artifactVersions)
     .values({
       artifactId,
-      version: nextVersion,
+      version: sql`(SELECT coalesce(max(${artifactVersions.version}), 0) + 1 FROM ${artifactVersions} WHERE ${artifactVersions.artifactId} = ${artifactId})`,
       title: String(input.title || artifact.title).trim(),
       changeSummary: String(input.changeSummary || ""),
       storageUri: input.storageUri || artifact.storageUri || null,

@@ -79,15 +79,31 @@ export async function ensureCollection(
 
   if (existing) return existing;
 
-  const [collection] = await db
-    .insert(collections)
-    .values({
-      projectId,
-      name: trimmed,
-      description: String(description || "").trim(),
-    })
-    .returning();
-  return collection;
+  try {
+    const [collection] = await db
+      .insert(collections)
+      .values({
+        projectId,
+        name: trimmed,
+        description: String(description || "").trim(),
+      })
+      .returning();
+    return collection;
+  } catch (error: unknown) {
+    // Race condition: another request created it first, fetch it
+    const [raced] = await db
+      .select()
+      .from(collections)
+      .where(
+        and(
+          eq(collections.projectId, projectId),
+          sql`lower(${collections.name}) = lower(${trimmed})`
+        )
+      )
+      .limit(1);
+    if (raced) return raced;
+    throw error;
+  }
 }
 
 export async function getCollectionDocumentCounts(

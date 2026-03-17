@@ -194,6 +194,9 @@ export function CanvasPanel({ projectId, onClose }: CanvasPanelProps) {
       }
       await refreshDocuments(activeDocument.id);
       setStatusText(publishToSources ? "Published to artifact storage and added to sources." : "Published to artifact storage.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatusText(`Publish failed: ${message}`);
     } finally {
       setIsPublishing(false);
     }

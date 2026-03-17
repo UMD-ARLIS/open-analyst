@@ -81,12 +81,21 @@ function ArtifactCard({ artifact }: { artifact: ArtifactMeta }) {
 }
 
 function StatusBlock({ block }: { block: StatusContent }) {
+  if (block.status === "error") {
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-error/30 bg-error/5 px-4 py-3 text-sm text-error">
+        <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm-.75 4a.75.75 0 011.5 0v3a.75.75 0 01-1.5 0V5zm.75 6.25a.75.75 0 100-1.5.75.75 0 000 1.5z"/>
+        </svg>
+        <span>{block.text}</span>
+      </div>
+    );
+  }
+
   const tone =
-    block.status === "error"
-      ? "border-error/30 bg-error/5 text-error"
-      : block.status === "completed"
-        ? "border-success/30 bg-success/5 text-success"
-        : "border-accent/30 bg-accent/5 text-accent";
+    block.status === "completed"
+      ? "border-success/30 bg-success/5 text-success"
+      : "border-accent/30 bg-accent/5 text-accent";
 
   return (
     <div
@@ -98,8 +107,33 @@ function StatusBlock({ block }: { block: StatusContent }) {
   );
 }
 
-function ToolUseBlock({ block }: { block: ToolUseContent }) {
+function ToolUseBlock({ block, isStreaming }: { block: ToolUseContent; isStreaming?: boolean }) {
   const [expanded, setExpanded] = useState(false);
+  const showExpanded = expanded || isStreaming;
+
+  const summary = useMemo(() => {
+    const input = (block.input || {}) as Record<string, unknown>;
+    if (block.name === "search_literature" || block.name === "search_project_documents") {
+      return `Searching for "${input.query || '...'}"`;
+    }
+    if (block.name === "read_project_document") {
+      return `Reading document ${input.document_id || '...'}`;
+    }
+    if (block.name === "execute_command") {
+      return `Running: ${input.command || '...'}`;
+    }
+    if (block.name === "save_canvas_markdown") {
+      return `Saving canvas: ${input.title || 'draft'}`;
+    }
+    if (block.name === "stage_literature_collection") {
+      return `Staging sources for "${input.query || '...'}"`;
+    }
+    if (block.name === "write_file") {
+      return `Writing ${input.path || 'file'}`;
+    }
+    const firstVal = Object.values(input)[0];
+    return firstVal ? String(firstVal).slice(0, 60) : block.name.replace(/_/g, " ");
+  }, [block]);
 
   return (
     <div className="rounded-xl border border-border overflow-hidden bg-surface">
@@ -115,14 +149,15 @@ function ToolUseBlock({ block }: { block: ToolUseContent }) {
           <span className="font-medium text-sm text-text-primary">
             {block.name.replace(/_/g, " ")}
           </span>
+          <span className="ml-2 text-xs text-text-muted">{summary}</span>
         </div>
-        {expanded ? (
+        {showExpanded ? (
           <ChevronDown className="w-4 h-4 text-text-muted" />
         ) : (
           <ChevronRight className="w-4 h-4 text-text-muted" />
         )}
       </button>
-      {expanded ? (
+      {showExpanded ? (
         <div className="p-4">
           <pre className="code-block text-xs whitespace-pre-wrap">
             {JSON.stringify(block.input, null, 2)}
@@ -206,9 +241,11 @@ function ToolResultBlock({
 function ContentBlockView({
   block,
   allBlocks,
+  isStreaming,
 }: {
   block: ContentBlock;
   allBlocks: ContentBlock[];
+  isStreaming?: boolean;
 }) {
   switch (block.type) {
     case "text":
@@ -234,7 +271,7 @@ function ContentBlockView({
     case "status":
       return <StatusBlock block={block} />;
     case "tool_use":
-      return <ToolUseBlock block={block} />;
+      return <ToolUseBlock block={block} isStreaming={isStreaming} />;
     case "tool_result":
       return <ToolResultBlock block={block} allBlocks={allBlocks} />;
     case "file_attachment":
@@ -309,7 +346,7 @@ export function MessageCard({ message, isStreaming }: MessageCardProps) {
         ) : null}
       </div>
       {contentBlocks.map((block, index) => (
-        <ContentBlockView key={index} block={block} allBlocks={contentBlocks} />
+        <ContentBlockView key={index} block={block} allBlocks={contentBlocks} isStreaming={isStreaming} />
       ))}
       {isStreaming ? <span className="inline-block w-2 h-4 bg-accent ml-1 animate-pulse" /> : null}
     </div>

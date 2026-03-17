@@ -50,6 +50,7 @@ export function AssistantWorkspaceView({
   const { revalidate } = useRevalidator();
   const [searchParams, setSearchParams] = useSearchParams();
   const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -104,6 +105,7 @@ export function AssistantWorkspaceView({
 
   const handleSubmit = async (event?: React.FormEvent) => {
     event?.preventDefault();
+    setErrorMessage(null);
     const nextPrompt = prompt.trim();
     if (!nextPrompt || isStreaming) return;
 
@@ -142,6 +144,8 @@ export function AssistantWorkspaceView({
         current.filter((message) => message.id !== optimisticMessage.id)
       );
       setPrompt(nextPrompt);
+      const message = error instanceof Error ? error.message : String(error);
+      setErrorMessage(message);
       console.error("[AssistantWorkspaceView] chat submit failed", error);
     }
   };
@@ -284,6 +288,14 @@ export function AssistantWorkspaceView({
               </button>
             ) : null}
           </div>
+
+          {errorMessage ? (
+            <div className="mb-3 px-4 py-3 rounded-xl bg-error/10 border border-error/30 text-error text-sm flex items-center gap-2">
+              <span className="font-medium">Error:</span>
+              <span className="flex-1">{errorMessage}</span>
+              <button type="button" onClick={() => setErrorMessage(null)} className="text-error/60 hover:text-error">&#x2715;</button>
+            </div>
+          ) : null}
 
           <form onSubmit={handleSubmit} className="relative">
             <textarea

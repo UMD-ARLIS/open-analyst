@@ -124,6 +124,13 @@ export async function action({ request }: Route.ActionArgs) {
       ...pinnedSkillIds,
     ])
   );
+  const matchedSkillNames = matchedSkills
+    .map((skill) => skill.name)
+    .filter(Boolean);
+  const pinnedSkillNames = workspaceContext.skills
+    .filter((skill) => skill.pinned && skill.name)
+    .map((skill) => skill.name);
+  const activeSkillNames = Array.from(new Set([...matchedSkillNames, ...pinnedSkillNames]));
 
   const runtimeResponse = await streamRuntime({
     run_id: task.id,
@@ -148,6 +155,15 @@ export async function action({ request }: Route.ActionArgs) {
       };
 
       send("task_created", { taskId: task.id });
+
+      if (activeSkillNames.length > 0) {
+        send("status", {
+          type: "status",
+          status: "running",
+          text: `Using skills: ${activeSkillNames.join(", ")}`,
+          phase: "analyze",
+        });
+      }
 
       const reader = runtimeResponse.body?.getReader();
       if (!reader) {

@@ -108,9 +108,7 @@ ANALYZE_TOOL_NAMES = {
 REVIEW_TOOL_NAMES = {
     "propose_project_memory",
 }
-DISABLED_TOOL_NAMES = {
-    "task",
-}
+DISABLED_TOOL_NAMES: set[str] = set()
 SKILL_CAPABILITIES: dict[str, dict[str, Any]] = {
     "arlis-bulletin": {
         "phases": ["artifact", "review"],
@@ -238,6 +236,7 @@ def _phase_transition_allowed(
 
 
 def _tool_block_message(request: RuntimeRunRequest, tool_name: str, target_phase: ExecutionPhase) -> str:
+    current_phase = CURRENT_EXECUTION_PHASE.get()
     if tool_name in DISABLED_TOOL_NAMES:
         return (
             f"{tool_name} is disabled in this runtime. "
@@ -245,12 +244,14 @@ def _tool_block_message(request: RuntimeRunRequest, tool_name: str, target_phase
         )
     if target_phase == "artifact":
         return (
-            f"{tool_name} is only available once the turn has explicit drafting or artifact intent. "
-            "First gather evidence or make the deliverable explicit, then transition into artifact work."
+            f"{tool_name} requires artifact phase (current phase: {current_phase}). "
+            "To use artifact tools, first gather evidence or make the deliverable explicit. "
+            "Tip: Use the task tool with subagent_type='drafter' to delegate artifact work."
         )
     return (
-        f"{tool_name} is not available in the current execution phase. "
-        "Use retrieval, research, or review tools first."
+        f"{tool_name} is not available in the '{current_phase}' phase. "
+        f"It belongs to the '{target_phase}' phase. "
+        "Tip: Use the task tool to delegate to the appropriate subagent."
     )
 
 
@@ -494,8 +495,32 @@ def _system_prompt() -> str:
         "Plan before acting, retrieve only relevant context, use skills and tools deliberately, "
         "delegate when specialized work is needed, and iterate when evidence is weak. "
         "Prefer grounded answers with explicit uncertainty. "
-        "When the user asks what you can do, answer from the actual active tools, connectors, and skills."
+        "When the user asks what you can do, answer from the actual active tools, connectors, and skills.\n\n"
+        "## Delegation\n"
+        "Use the `task` tool to delegate specialized work to subagents:\n"
+        "- Use subagent_type='researcher' for evidence gathering, literature search, and source discovery\n"
+        "- Use subagent_type='drafter' for document creation, canvas work, and artifact publishing\n"
+        "- Use subagent_type='critic' to review your output for evidence gaps, unsupported claims, and citation quality\n"
+        "Delegate rather than doing everything yourself. The researcher finds evidence, the drafter creates outputs, the critic improves quality.\n\n"
+        "## Planning\n"
+        "Before beginning complex work, use `write_todos` to create a visible plan. "
+        "Update todos as you progress through each step. "
+        "This helps the user see what you're doing and why.\n\n"
+        "## Rate limits\n"
+        "Be efficient with tool calls. Synthesize after one or two targeted searches rather than exhaustive retrieval."
     )
+
+
+def _load_skill_body(skill_id: str, max_chars: int = 4000) -> str | None:
+    """Load the SKILL.md body for a given skill ID."""
+    skill_path = _skills_root() / skill_id / "SKILL.md"
+    if not skill_path.exists():
+        return None
+    try:
+        content = skill_path.read_text(encoding="utf-8")
+        return content[:max_chars] if len(content) > max_chars else content
+    except Exception:
+        return None
 
 
 def _build_user_prompt(request: RuntimeRunRequest) -> str:
@@ -517,12 +542,30 @@ def _build_user_prompt(request: RuntimeRunRequest) -> str:
         if _is_collection_request(request) or _is_web_capture_request(request)
         else ""
     )
+    # Build skill body section for active skills
+    skill_bodies = []
+    for skill in _active_skill_summaries(request):
+        skill_id = str(skill.get("id") or "").strip()
+        if skill_id:
+            body = _load_skill_body(skill_id)
+            if body:
+                skill_bodies.append(f"### Skill: {skill.get('name', skill_id)}\n{body}")
+
+    skill_instructions = ""
+    if skill_bodies:
+        skill_instructions = (
+            "Active skill instructions:\n"
+            + "\n\n".join(skill_bodies)
+            + "\n\nFollow these skill instructions precisely when they apply to the current request.\n\n"
+        )
+
     return (
         f"Project: {request.project.project_name}\n\n"
         f"Project workspace:\n{request.project.workspace_path or '(not configured)'}\n\n"
         f"Project brief:\n{request.project.brief or '(none)'}\n\n"
         f"Active connectors:\n{active_connectors}\n\n"
         f"Active skills:\n{active_skills}\n\n"
+        f"{skill_instructions}"
         "Runtime note:\n"
         "Use the bound tools directly when they help. "
         "When you need the full text of a project source, use read_project_document(document_id). "
@@ -787,14 +830,18 @@ async def _list_canvas_documents_api(request: RuntimeRunRequest) -> list[dict[st
     api_base_url = str(request.project.api_base_url or "").rstrip("/")
     if not api_base_url:
         return []
-    async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-        response = await client.get(
-            f"{api_base_url}/api/projects/{request.project.project_id}/canvas-documents"
-        )
-        response.raise_for_status()
-        payload = response.json()
-    documents = payload.get("documents") if isinstance(payload, dict) else []
-    return documents if isinstance(documents, list) else []
+    try:
+        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+            response = await client.get(
+                f"{api_base_url}/api/projects/{request.project.project_id}/canvas-documents"
+            )
+            response.raise_for_status()
+            payload = response.json()
+        documents = payload.get("documents") if isinstance(payload, dict) else []
+        return documents if isinstance(documents, list) else []
+    except Exception as exc:
+        logger.warning("Canvas documents API call failed: %s", exc)
+        return []
 
 
 async def _save_canvas_document_api(
@@ -805,36 +852,40 @@ async def _save_canvas_document_api(
     api_base_url = str(request.project.api_base_url or "").rstrip("/")
     if not api_base_url or not markdown.strip():
         return None
-    existing = await _list_canvas_documents_api(request)
-    if existing:
-        target = existing[0]
-        method = "PUT"
-        body: dict[str, Any] = {
-            "id": target.get("id"),
-            "title": title,
-            "documentType": "markdown",
-            "content": {"markdown": markdown},
-            "metadata": target.get("metadata") or {},
-            "artifactId": target.get("artifactId"),
-        }
-    else:
-        method = "POST"
-        body = {
-            "title": title,
-            "documentType": "markdown",
-            "content": {"markdown": markdown},
-            "metadata": {"source": "deepagents-runtime"},
-        }
-    async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-        response = await client.request(
-            method,
-            f"{api_base_url}/api/projects/{request.project.project_id}/canvas-documents",
-            json=body,
-        )
-        response.raise_for_status()
-        payload = response.json()
-    document = payload.get("document") if isinstance(payload, dict) else None
-    return document if isinstance(document, dict) else None
+    try:
+        existing = await _list_canvas_documents_api(request)
+        if existing:
+            target = existing[0]
+            method = "PUT"
+            body: dict[str, Any] = {
+                "id": target.get("id"),
+                "title": title,
+                "documentType": "markdown",
+                "content": {"markdown": markdown},
+                "metadata": target.get("metadata") or {},
+                "artifactId": target.get("artifactId"),
+            }
+        else:
+            method = "POST"
+            body = {
+                "title": title,
+                "documentType": "markdown",
+                "content": {"markdown": markdown},
+                "metadata": {"source": "deepagents-runtime"},
+            }
+        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+            response = await client.request(
+                method,
+                f"{api_base_url}/api/projects/{request.project.project_id}/canvas-documents",
+                json=body,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        document = payload.get("document") if isinstance(payload, dict) else None
+        return document if isinstance(document, dict) else None
+    except Exception as exc:
+        logger.warning("Save canvas document API call failed: %s", exc)
+        return None
 
 
 async def _publish_canvas_document_api(
@@ -846,25 +897,29 @@ async def _publish_canvas_document_api(
     api_base_url = str(request.project.api_base_url or "").rstrip("/")
     if not api_base_url:
         return None
-    existing = await _list_canvas_documents_api(request)
-    if not existing:
+    try:
+        existing = await _list_canvas_documents_api(request)
+        if not existing:
+            return None
+        target = existing[0]
+        document_id = str(target.get("id") or "").strip()
+        if not document_id:
+            return None
+        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+            response = await client.post(
+                f"{api_base_url}/api/projects/{request.project.project_id}/canvas-documents/{document_id}/publish",
+                json={
+                    "addToSources": add_to_sources,
+                    "changeSummary": change_summary,
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+        document = payload.get("document") if isinstance(payload, dict) else None
+        return document if isinstance(document, dict) else None
+    except Exception as exc:
+        logger.warning("Publish canvas document API call failed: %s", exc)
         return None
-    target = existing[0]
-    document_id = str(target.get("id") or "").strip()
-    if not document_id:
-        return None
-    async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-        response = await client.post(
-            f"{api_base_url}/api/projects/{request.project.project_id}/canvas-documents/{document_id}/publish",
-            json={
-                "addToSources": add_to_sources,
-                "changeSummary": change_summary,
-            },
-        )
-        response.raise_for_status()
-        payload = response.json()
-    document = payload.get("document") if isinstance(payload, dict) else None
-    return document if isinstance(document, dict) else None
 
 
 async def _publish_workspace_file_api(
@@ -876,26 +931,30 @@ async def _publish_workspace_file_api(
     api_base_url = str(request.project.api_base_url or "").rstrip("/")
     if not api_base_url or not relative_path.strip():
         return None
-    payload = {
-        "relativePath": relative_path,
-        "title": title or "",
-        "collectionName": collection_name or "Artifacts",
-        "collectionId": request.project.collection_id,
-    }
-    async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-        response = await client.post(
-            f"{api_base_url}/api/projects/{request.project.project_id}/artifacts/capture",
-            json=payload,
-        )
-        response.raise_for_status()
-        body = response.json()
-    if not isinstance(body, dict):
+    try:
+        payload = {
+            "relativePath": relative_path,
+            "title": title or "",
+            "collectionName": collection_name or "Artifacts",
+            "collectionId": request.project.collection_id,
+        }
+        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+            response = await client.post(
+                f"{api_base_url}/api/projects/{request.project.project_id}/artifacts/capture",
+                json=payload,
+            )
+            response.raise_for_status()
+            body = response.json()
+        if not isinstance(body, dict):
+            return None
+        artifact = body.get("artifact")
+        if isinstance(artifact, dict):
+            return artifact
+        document = body.get("document")
+        return document if isinstance(document, dict) else None
+    except Exception as exc:
+        logger.warning("Publish workspace file API call failed: %s", exc)
         return None
-    artifact = body.get("artifact")
-    if isinstance(artifact, dict):
-        return artifact
-    document = body.get("document")
-    return document if isinstance(document, dict) else None
 
 
 async def _search_literature_api(
@@ -909,30 +968,34 @@ async def _search_literature_api(
     base_url = settings.analyst_mcp_base_url.rstrip("/")
     if not base_url:
         return {"results": [], "sources_used": [], "current_date": None}
-    headers = {
-        "x-api-key": settings.analyst_mcp_api_key,
-    }
-    params: list[tuple[str, str]] = [
-        ("query", query),
-        ("limit", str(limit)),
-    ]
-    if date_from:
-        params.append(("date_from", date_from))
-    if date_to:
-        params.append(("date_to", date_to))
-    for source in sources or []:
-        if source:
-            params.append(("sources", source))
+    try:
+        headers = {
+            "x-api-key": settings.analyst_mcp_api_key,
+        }
+        params: list[tuple[str, str]] = [
+            ("query", query),
+            ("limit", str(limit)),
+        ]
+        if date_from:
+            params.append(("date_from", date_from))
+        if date_to:
+            params.append(("date_to", date_to))
+        for source in sources or []:
+            if source:
+                params.append(("sources", source))
 
-    async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-        response = await client.get(
-            f"{base_url}/api/search",
-            headers=headers,
-            params=params,
-        )
-        response.raise_for_status()
-        payload = response.json()
-    return payload if isinstance(payload, dict) else {"results": []}
+        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+            response = await client.get(
+                f"{base_url}/api/search",
+                headers=headers,
+                params=params,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        return payload if isinstance(payload, dict) else {"results": []}
+    except Exception as exc:
+        logger.warning("Search literature API call failed: %s", exc)
+        return {"results": [], "sources_used": [], "current_date": None}
 
 
 async def _stage_source_ingest_api(
@@ -942,14 +1005,18 @@ async def _stage_source_ingest_api(
     api_base_url = str(request.project.api_base_url or "").rstrip("/")
     if not api_base_url:
         return {}
-    async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-        response = await client.post(
-            f"{api_base_url}/api/projects/{request.project.project_id}/source-ingest",
-            json=payload,
-        )
-        response.raise_for_status()
-        body = response.json()
-    return body if isinstance(body, dict) else {}
+    try:
+        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+            response = await client.post(
+                f"{api_base_url}/api/projects/{request.project.project_id}/source-ingest",
+                json=payload,
+            )
+            response.raise_for_status()
+            body = response.json()
+        return body if isinstance(body, dict) else {}
+    except Exception as exc:
+        logger.warning("Stage source ingest API call failed: %s", exc)
+        return {}
 
 
 def _workspace_root(request: RuntimeRunRequest) -> Path:
@@ -1393,8 +1460,15 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
             "name": "researcher",
             "description": "Use for source discovery, evidence gathering, and retrieval strategy.",
             "system_prompt": (
-                "You are the research specialist. Search project sources and memories, "
-                "identify evidence quality, and return grounded findings."
+                "You are the research specialist for Open Analyst. Your job is source discovery and evidence gathering.\n\n"
+                "Workflow:\n"
+                "1. Use search_literature to find relevant papers and articles\n"
+                "2. Use search_project_documents to check what's already in the project\n"
+                "3. Use search_project_memories for relevant prior findings\n"
+                "4. Use read_project_document to get full text of promising sources\n"
+                "5. Use stage_literature_collection or stage_web_source to collect sources for the project\n\n"
+                "Return a structured summary of findings with citations and confidence levels. "
+                "After one or two targeted searches, synthesize rather than continuing to search."
             ),
             "model": model,
             "tools": [
@@ -1407,15 +1481,21 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["list_active_connectors"],
                 tool_map["describe_runtime_capabilities"],
             ],
-            "middleware": [PhaseToolRoutingMiddleware()] if AgentMiddleware is not None else [],
+            "middleware": [],
             "skills": [path for path in _skill_paths() if not path.endswith("arlis-bulletin")],
         },
         {
             "name": "drafter",
             "description": "Use for drafting and revising analyst outputs, canvas content, and structured products.",
             "system_prompt": (
-                "You are the drafting specialist. Turn plans and evidence into polished outputs, "
-                "and update the markdown canvas when a draft should be saved."
+                "You are the drafting specialist for Open Analyst. You turn research and evidence into polished outputs.\n\n"
+                "Workflow:\n"
+                "1. Review the evidence and plan provided by the supervisor\n"
+                "2. Use save_canvas_markdown to create or update drafts\n"
+                "3. Use execute_command for document generation (pandoc, python scripts)\n"
+                "4. Use publish_canvas_document or publish_workspace_file to finalize outputs\n"
+                "5. Use capture_artifact to store generated files\n\n"
+                "Follow active skill instructions (SKILL.md) precisely for structured products like bulletins or reports."
             ),
             "model": model,
             "tools": [
@@ -1427,15 +1507,22 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["publish_workspace_file"],
                 tool_map["list_canvas_documents"],
             ],
-            "middleware": [PhaseToolRoutingMiddleware()] if AgentMiddleware is not None else [],
+            "middleware": [],
             "skills": _skill_paths(),
         },
         {
             "name": "critic",
             "description": "Use for critique, revision requests, citation checks, and evidence-gap analysis.",
             "system_prompt": (
-                "You are the critique specialist. Challenge unsupported claims, request missing evidence, "
-                "and improve confidence calibration."
+                "You are the critique specialist for Open Analyst. You improve output quality through rigorous review.\n\n"
+                "Review checklist:\n"
+                "1. Evidence grounding: Are claims supported by cited sources?\n"
+                "2. Citation quality: Are sources credible, recent, and relevant?\n"
+                "3. Gaps: What important aspects are missing?\n"
+                "4. Confidence calibration: Are uncertainty levels appropriate?\n"
+                "5. Structure: Does the output follow the requested format?\n\n"
+                "Use search_project_documents and read_project_document to verify claims. "
+                "Return specific, actionable feedback with severity levels (critical/major/minor)."
             ),
             "model": model,
             "tools": [
@@ -1445,7 +1532,7 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["read_project_document"],
                 tool_map["describe_runtime_capabilities"],
             ],
-            "middleware": [PhaseToolRoutingMiddleware()] if AgentMiddleware is not None else [],
+            "middleware": [],
             "skills": _skill_paths(),
         },
     ]
@@ -1486,7 +1573,10 @@ def _build_agent() -> Any | None:
     cache_key = settings.default_chat_model
     if cache_key in AGENT_CACHE:
         return AGENT_CACHE[cache_key]
-    model = ChatOpenAI(**settings.chat_model_kwargs)
+    model_kwargs = {**settings.chat_model_kwargs}
+    model_kwargs.setdefault("max_retries", 10)
+    model_kwargs.setdefault("timeout", 120)
+    model = ChatOpenAI(**model_kwargs)
     tools = _build_tools()
     tool_map = {getattr(tool_item, "name", ""): tool_item for tool_item in tools}
     agent = create_deep_agent(
@@ -1509,6 +1599,34 @@ def _build_agent() -> Any | None:
 
 def _has_live_model() -> bool:
     return bool(ChatOpenAI is not None and (settings.litellm_api_key or settings.litellm_base_url))
+
+
+def _build_conversation_messages(request: RuntimeRunRequest) -> list[dict[str, str]]:
+    """Build conversation messages with token budget for history."""
+    user_prompt = _build_user_prompt(request)
+
+    if not request.messages or len(request.messages) <= 1:
+        return [{"role": "user", "content": user_prompt}]
+
+    # Include history with a rough char budget (~8K tokens = 32K chars)
+    char_budget = 32000
+    history: list[dict[str, str]] = []
+    chars_used = 0
+
+    # Skip the last message (it's the current prompt) and iterate recent-first
+    for msg in reversed(request.messages[:-1]):
+        content = msg.content.strip()
+        if not content:
+            continue
+        msg_chars = len(content)
+        if chars_used + msg_chars > char_budget:
+            break
+        history.insert(0, {"role": msg.role, "content": content})
+        chars_used += msg_chars
+
+    # Current prompt is always included as the final user message
+    history.append({"role": "user", "content": user_prompt})
+    return history
 
 
 def build_initial_state(request: RuntimeRunRequest) -> RuntimeState:
@@ -1557,7 +1675,7 @@ async def invoke_run(request: RuntimeRunRequest) -> RuntimeInvocationResult:
         agent = _build_agent()
         try:
             result = await agent.ainvoke(
-                {"messages": [{"role": "user", "content": _build_user_prompt(request)}]},
+                {"messages": _build_conversation_messages(request)},
                 _runtime_config(request),
             )
             final_text = _extract_final_text(result).strip()
@@ -1615,11 +1733,12 @@ async def stream_run(request: RuntimeRunRequest) -> AsyncIterator[RuntimeEvent]:
     memory_token = CURRENT_MEMORY_CANDIDATES.set([])
     tool_run_ids: dict[str, str] = {}
     final_text = ""
+    streamed_any_text = False
     try:
         agent = _build_agent()
         try:
             async for event in agent.astream_events(
-                {"messages": [{"role": "user", "content": _build_user_prompt(request)}]},
+                {"messages": _build_conversation_messages(request)},
                 _runtime_config(request),
                 version="v2",
             ):
@@ -1665,13 +1784,42 @@ async def stream_run(request: RuntimeRunRequest) -> AsyncIterator[RuntimeEvent]:
                         toolOutput=output,
                         toolStatus="completed",
                     )
+                elif event_type == "on_chat_model_stream":
+                    chunk = event.get("data", {}).get("chunk") if isinstance(event.get("data"), dict) else None
+                    if chunk is not None:
+                        chunk_content = getattr(chunk, "content", None)
+                        if isinstance(chunk_content, str) and chunk_content:
+                            yield RuntimeEvent(
+                                type="text_delta",
+                                phase=CURRENT_EXECUTION_PHASE.get(),
+                                status="running",
+                                actor="supervisor",
+                                text=chunk_content,
+                            )
+                            final_text += chunk_content
+                            streamed_any_text = True
+                        elif isinstance(chunk_content, list):
+                            for item in chunk_content:
+                                if isinstance(item, dict) and item.get("type") == "text":
+                                    text_piece = str(item.get("text") or "")
+                                    if text_piece:
+                                        yield RuntimeEvent(
+                                            type="text_delta",
+                                            phase=CURRENT_EXECUTION_PHASE.get(),
+                                            status="running",
+                                            actor="supervisor",
+                                            text=text_piece,
+                                        )
+                                        final_text += text_piece
+                                        streamed_any_text = True
                 elif event_type == "on_chain_end":
-                    candidate = _extract_final_text(event.get("data", {}).get("output"))
-                    if candidate.strip():
-                        final_text = candidate.strip()
+                    if not final_text:
+                        candidate = _extract_final_text(event.get("data", {}).get("output"))
+                        if candidate.strip():
+                            final_text = candidate.strip()
             if not final_text:
                 result = await agent.ainvoke(
-                    {"messages": [{"role": "user", "content": _build_user_prompt(request)}]},
+                    {"messages": _build_conversation_messages(request)},
                     _runtime_config(request),
                 )
                 final_text = _extract_final_text(result).strip()
@@ -1697,15 +1845,17 @@ async def stream_run(request: RuntimeRunRequest) -> AsyncIterator[RuntimeEvent]:
                 text="Proposed project memories",
                 memoryCandidates=memory_candidates,
             )
-        for line in final_text.splitlines(keepends=True):
-            if line:
-                yield RuntimeEvent(
-                    type="text_delta",
-                    phase="final",
-                    status="running",
-                    actor="supervisor",
-                    text=line,
-                )
+        # Fallback: emit text line-by-line if no on_chat_model_stream events were received
+        if final_text and not streamed_any_text:
+            for line in final_text.splitlines(keepends=True):
+                if line:
+                    yield RuntimeEvent(
+                        type="text_delta",
+                        phase="final",
+                        status="running",
+                        actor="supervisor",
+                        text=line,
+                    )
         yield RuntimeEvent(
             type="status",
             phase="completed",

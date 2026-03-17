@@ -465,32 +465,46 @@ export async function approveSourceIngestBatch(
   });
   let importedCount = 0;
   let failureCount = 0;
-  for (const item of batch.items) {
-    if (item.status === "completed") {
-      importedCount += 1;
-      continue;
+  try {
+    const results = await Promise.allSettled(
+      batch.items
+        .filter((item) => item.status !== "completed")
+        .map(async (item) => {
+          const result =
+            batch.origin === "web"
+              ? await importWebItem(batch, item)
+              : await importLiteratureItem(batch, item, requestOrigin);
+          await updateSourceIngestItem(projectId, item.id, {
+            documentId: result.document.id,
+            storageUri: result.storageUri,
+            status: "completed",
+            error: null,
+            importedAt: new Date(),
+          });
+          return result;
+        })
+    );
+    const alreadyCompleted = batch.items.filter((item) => item.status === "completed").length;
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
+      if (result.status === "fulfilled") {
+        importedCount += 1;
+      } else {
+        failureCount += 1;
+        const item = batch.items.filter((item) => item.status !== "completed")[i];
+        if (item) {
+          await updateSourceIngestItem(projectId, item.id, {
+            status: "failed",
+            error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+            importedAt: null,
+          });
+        }
+      }
     }
-    try {
-      const result =
-        batch.origin === "web"
-          ? await importWebItem(batch, item)
-          : await importLiteratureItem(batch, item, requestOrigin);
-      importedCount += 1;
-      await updateSourceIngestItem(projectId, item.id, {
-        documentId: result.document.id,
-        storageUri: result.storageUri,
-        status: "completed",
-        error: null,
-        importedAt: new Date(),
-      });
-    } catch (error) {
-      failureCount += 1;
-      await updateSourceIngestItem(projectId, item.id, {
-        status: "failed",
-        error: error instanceof Error ? error.message : String(error),
-        importedAt: null,
-      });
-    }
+    importedCount += alreadyCompleted;
+  } catch (error) {
+    // Unexpected crash during import loop
+    failureCount = batch.items.length - importedCount;
   }
   const finalStatus = failureCount > 0 && importedCount === 0 ? "failed" : "completed";
   await updateSourceIngestBatch(projectId, batchId, {

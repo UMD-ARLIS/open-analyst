@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import httpx
@@ -7,6 +8,8 @@ import psycopg
 from psycopg.rows import dict_row
 
 from config import settings
+
+logger = logging.getLogger(__name__)
 
 STORE: Any | None = None
 
@@ -236,14 +239,18 @@ class RuntimeRetrievalService:
     async def _fetch(self, query: str, params: Any) -> list[dict[str, Any]]:
         if not settings.database_url_psycopg:
             return []
-        async with await psycopg.AsyncConnection.connect(
-            settings.database_url_psycopg,
-            row_factory=dict_row,
-        ) as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute(query, params)
-                rows = await cursor.fetchall()
-        return list(rows)
+        try:
+            async with await psycopg.AsyncConnection.connect(
+                settings.database_url_psycopg,
+                row_factory=dict_row,
+            ) as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute(query, params)
+                    rows = await cursor.fetchall()
+            return list(rows)
+        except Exception:
+            logger.exception("Database fetch failed")
+            return []
 
     def _vector_literal(self, embedding: list[float]) -> str:
         normalized = [float(value) for value in embedding if isinstance(value, (int, float))]
