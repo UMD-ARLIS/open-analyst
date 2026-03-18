@@ -1444,28 +1444,44 @@ def _build_tools() -> list[Any]:
             candidates.append(entry)
         return json.dumps(entry)
 
-    return [
-        list_directory,
-        search_project_documents,
-        read_project_document,
-        search_project_memories,
-        search_literature,
-        stage_literature_collection,
-        stage_web_source,
-        list_active_connectors,
-        list_active_skills,
-        describe_runtime_capabilities,
-        list_canvas_documents,
-        save_canvas_markdown,
-        publish_canvas_document,
-        execute_command,
-        capture_artifact,
-        publish_workspace_file,
-        propose_project_memory,
+    # All tools are built here but the supervisor only gets a minimal
+    # coordination set.  Heavy-lifting tools live on subagents exclusively
+    # so the supervisor is forced to delegate via the task() tool.
+    # (task and write_todos are auto-included by DeepAgents.)
+    all_tools = {
+        "list_directory": list_directory,
+        "search_project_documents": search_project_documents,
+        "read_project_document": read_project_document,
+        "search_project_memories": search_project_memories,
+        "search_literature": search_literature,
+        "stage_literature_collection": stage_literature_collection,
+        "stage_web_source": stage_web_source,
+        "list_active_connectors": list_active_connectors,
+        "list_active_skills": list_active_skills,
+        "describe_runtime_capabilities": describe_runtime_capabilities,
+        "list_canvas_documents": list_canvas_documents,
+        "save_canvas_markdown": save_canvas_markdown,
+        "publish_canvas_document": publish_canvas_document,
+        "execute_command": execute_command,
+        "capture_artifact": capture_artifact,
+        "publish_workspace_file": publish_workspace_file,
+        "propose_project_memory": propose_project_memory,
+    }
+
+    # Supervisor tools: only what it needs to understand context and coordinate
+    supervisor_tools = [
+        search_project_documents,   # Quick context check before delegating
+        search_project_memories,    # Recall prior findings
+        list_active_skills,         # Answer "what can you do?"
+        describe_runtime_capabilities,  # Answer tool/connector questions
+        list_canvas_documents,      # Check current canvas state
+        propose_project_memory,     # Persist findings across threads
     ]
 
+    return supervisor_tools, all_tools
 
-def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any]]:
+
+def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any]]:  # noqa: C901
     # Each subagent gets ONLY the tools it needs (no inheritance from parent).
     # Skills are only assigned where relevant (each gets its own isolated SkillsMiddleware).
     # System prompts instruct concise returns to prevent context bloat.
@@ -1604,17 +1620,16 @@ def _build_agent() -> Any | None:
     model_kwargs.setdefault("max_retries", 10)
     model_kwargs.setdefault("timeout", 120)
     model = ChatOpenAI(**model_kwargs)
-    tools = _build_tools()
-    tool_map = {getattr(tool_item, "name", ""): tool_item for tool_item in tools}
+    supervisor_tools, all_tools = _build_tools()
     agent = create_deep_agent(
         model=model,
         name="open-analyst",
         system_prompt=_system_prompt(),
-        tools=tools,
+        tools=supervisor_tools,
         middleware=[PhaseToolRoutingMiddleware()] if AgentMiddleware is not None else [],
         skills=_skill_paths(),
         memory=["/memories/AGENTS.md"],
-        subagents=_build_subagents(model, tool_map),
+        subagents=_build_subagents(model, all_tools),
         backend=_build_backend(),
         checkpointer=CHECKPOINTER,
         store=STORE,
