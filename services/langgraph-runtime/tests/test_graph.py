@@ -2,7 +2,6 @@ import pytest
 
 from graph import (
     _phase_for_tool_name,
-    _phase_transition_allowed,
     build_initial_state,
     invoke_run,
 )
@@ -37,27 +36,16 @@ def test_build_initial_state_uses_prompt():
     assert state.phase == "analyze"
 
 
-def test_research_request_starts_in_acquire_phase():
-    state = build_initial_state(build_request("Research embodied AI papers from 2025 and collect sources"))
-    assert state.phase == "acquire"
-
-
-def test_research_request_with_bulletin_skill_can_enter_artifact_phase():
-    request = build_request(
-        "Research embodied AI papers from 2025 and draft an ARLIS bulletin in docx format",
-        available_skills=[
-            {"id": "arlis-bulletin", "name": "arlis-bulletin"},
-            {"id": "docx", "name": "docx"},
-        ],
-        pinned_skill_ids=["arlis-bulletin", "docx"],
-    )
-    assert _phase_for_tool_name("execute_command", request) == "artifact"
-    assert _phase_transition_allowed(request, tool_name="execute_command", target_phase="artifact")
+def test_phase_for_tool_name_classifies_correctly():
+    assert _phase_for_tool_name("search_literature") == "acquire"
+    assert _phase_for_tool_name("execute_command") == "artifact"
+    assert _phase_for_tool_name("search_project_documents") == "analyze"
+    assert _phase_for_tool_name("propose_project_memory") == "review"
+    assert _phase_for_tool_name("unknown_tool") == "analyze"
 
 
 @pytest.mark.asyncio
-async def test_invoke_run_returns_plan_and_text():
+async def test_invoke_run_returns_text():
     result = await invoke_run(build_request())
     assert result.status == "completed"
-    assert result.active_plan
     assert result.final_text

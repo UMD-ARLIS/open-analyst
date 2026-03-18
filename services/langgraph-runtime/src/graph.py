@@ -20,7 +20,6 @@ from models import (
     RuntimeEvent,
     RuntimeEvidenceItem,
     RuntimeInvocationResult,
-    RuntimePlanItem,
     RuntimeRunRequest,
     RuntimeState,
 )
@@ -38,15 +37,6 @@ except Exception:  # pragma: no cover
     StateBackend = None
     StoreBackend = None
 
-try:
-    from langchain.agents.middleware import AgentMiddleware
-except Exception:  # pragma: no cover
-    AgentMiddleware = None
-
-try:
-    from langchain_core.messages import ToolMessage
-except Exception:  # pragma: no cover
-    ToolMessage = None
 
 try:
     from langchain_core.tools import tool
@@ -108,40 +98,6 @@ ANALYZE_TOOL_NAMES = {
 REVIEW_TOOL_NAMES = {
     "propose_project_memory",
 }
-DISABLED_TOOL_NAMES: set[str] = set()
-SKILL_CAPABILITIES: dict[str, dict[str, Any]] = {
-    "arlis-bulletin": {
-        "phases": ["artifact", "review"],
-        "workspace_write": True,
-        "command_execution": True,
-        "artifact_publish": True,
-    },
-    "docx": {
-        "phases": ["artifact", "review"],
-        "workspace_write": True,
-        "command_execution": True,
-        "artifact_publish": True,
-    },
-    "pdf": {
-        "phases": ["artifact", "review"],
-        "workspace_write": True,
-        "command_execution": True,
-    },
-    "pptx": {
-        "phases": ["artifact", "review"],
-        "workspace_write": True,
-        "command_execution": True,
-    },
-    "xlsx": {
-        "phases": ["artifact", "review"],
-        "workspace_write": True,
-        "command_execution": True,
-    },
-    "content-extraction": {
-        "phases": ["analyze", "artifact"],
-        "workspace_write": True,
-    },
-}
 
 
 def configure_runtime_persistence(*, checkpointer: Any | None, store: Any | None) -> None:
@@ -152,56 +108,8 @@ def configure_runtime_persistence(*, checkpointer: Any | None, store: Any | None
     AGENT_CACHE.clear()
 
 
-def _fallback_plan(prompt: str, skills: list[str]) -> list[RuntimePlanItem]:
-    base = prompt.strip() or "analyst task"
-    titles = [
-        f"Clarify the request and constraints for {base[:80]}",
-        "Collect the most relevant project sources and long-term memories",
-        "Draft a grounded analyst response or artifact update",
-        "Review for evidence gaps, missing citations, and next steps",
-    ]
-    if skills:
-        titles.insert(2, f"Apply active skills: {', '.join(skills[:3])}")
-    return [
-        RuntimePlanItem(id=str(uuid.uuid4()), title=title, actor="supervisor")
-        for title in titles[:5]
-    ]
-
-
-def _has_artifact_intent(request: RuntimeRunRequest) -> bool:
-    prompt = str(request.prompt or "").strip().lower()
-    if _is_document_generation_request(request):
-        return True
-    return any(
-        phrase in prompt
-        for phrase in [
-            "save to canvas",
-            "save the canvas",
-            "write a file",
-            "create a file",
-            "save to file",
-            "publish",
-            "export",
-            "generate a document",
-            "draft a memo",
-            "draft a bulletin",
-            "create a report",
-            "produce a report",
-        ]
-    )
-
-
-def _initial_execution_phase(request: RuntimeRunRequest) -> ExecutionPhase:
-    if _is_collection_request(request) or _is_web_capture_request(request):
-        return "acquire"
-    if _is_document_generation_request(request) or _has_artifact_intent(request):
-        return "artifact"
-    if _is_research_prompt(request):
-        return "acquire"
-    return "analyze"
-
-
-def _phase_for_tool_name(tool_name: str, request: RuntimeRunRequest | None) -> ExecutionPhase:
+def _phase_for_tool_name(tool_name: str) -> str:
+    """Classify a tool into a phase for stream event labeling."""
     name = str(tool_name or "").strip()
     if name in ACQUIRE_TOOL_NAMES:
         return "acquire"
@@ -211,110 +119,7 @@ def _phase_for_tool_name(tool_name: str, request: RuntimeRunRequest | None) -> E
         return "review"
     if name in ANALYZE_TOOL_NAMES:
         return "analyze"
-    if request is not None and _is_document_generation_request(request):
-        return "artifact"
-    return CURRENT_EXECUTION_PHASE.get()
-
-
-def _phase_transition_allowed(
-    request: RuntimeRunRequest,
-    *,
-    tool_name: str,
-    target_phase: ExecutionPhase,
-) -> bool:
-    if tool_name in DISABLED_TOOL_NAMES:
-        return False
-    if target_phase != "artifact":
-        return True
-
-    capabilities = _active_skill_capabilities(request)
-    if _has_artifact_intent(request):
-        return True
-    if capabilities["workspace_write"] or capabilities["command_execution"] or capabilities["artifact_publish"]:
-        return True
-    return False
-
-
-def _tool_block_message(request: RuntimeRunRequest, tool_name: str, target_phase: ExecutionPhase) -> str:
-    current_phase = CURRENT_EXECUTION_PHASE.get()
-    if tool_name in DISABLED_TOOL_NAMES:
-        return (
-            f"{tool_name} is disabled in this runtime. "
-            "Use the bound skills and workspace tools directly instead of recursive task spawning."
-        )
-    if target_phase == "artifact":
-        return (
-            f"{tool_name} requires artifact phase (current phase: {current_phase}). "
-            "To use artifact tools, first gather evidence or make the deliverable explicit. "
-            "Tip: Use the task tool with subagent_type='drafter' to delegate artifact work."
-        )
-    return (
-        f"{tool_name} is not available in the '{current_phase}' phase. "
-        f"It belongs to the '{target_phase}' phase. "
-        "Tip: Use the task tool to delegate to the appropriate subagent."
-    )
-
-
-class PhaseToolRoutingMiddleware(AgentMiddleware if AgentMiddleware is not None else object):
-    """Route tools by live execution phase instead of a prompt-wide research lock."""
-
-    def _block_tool(self, request: Any) -> Any:
-        tool_name = str(getattr(request, "tool_call", {}).get("name") or "tool")
-        tool_call_id = str(getattr(request, "tool_call", {}).get("id") or f"blocked-{tool_name}")
-        current_request = CURRENT_REQUEST.get()
-        target_phase = _phase_for_tool_name(tool_name, current_request)
-        if current_request is None:
-            message = f"{tool_name} is unavailable because no runtime request context is active."
-        else:
-            message = _tool_block_message(current_request, tool_name, target_phase)
-        return ToolMessage(
-            content=message,
-            name=tool_name,
-            tool_call_id=tool_call_id,
-            status="error",
-        )
-
-    def wrap_tool_call(
-        self,
-        request: Any,
-        handler: Any,
-    ) -> Any:
-        current_request = CURRENT_REQUEST.get()
-        tool_name = str(getattr(request, "tool_call", {}).get("name") or "")
-        if (
-            ToolMessage is not None
-            and current_request is not None
-            and not _phase_transition_allowed(
-                current_request,
-                tool_name=tool_name,
-                target_phase=_phase_for_tool_name(tool_name, current_request),
-            )
-        ):
-            return self._block_tool(request)
-        if current_request is not None:
-            CURRENT_EXECUTION_PHASE.set(_phase_for_tool_name(tool_name, current_request))
-        return handler(request)
-
-    async def awrap_tool_call(
-        self,
-        request: Any,
-        handler: Any,
-    ) -> Any:
-        current_request = CURRENT_REQUEST.get()
-        tool_name = str(getattr(request, "tool_call", {}).get("name") or "")
-        if (
-            ToolMessage is not None
-            and current_request is not None
-            and not _phase_transition_allowed(
-                current_request,
-                tool_name=tool_name,
-                target_phase=_phase_for_tool_name(tool_name, current_request),
-            )
-        ):
-            return self._block_tool(request)
-        if current_request is not None:
-            CURRENT_EXECUTION_PHASE.set(_phase_for_tool_name(tool_name, current_request))
-        return await handler(request)
+    return "analyze"
 
 
 def _repo_root() -> Path:
@@ -365,28 +170,6 @@ def _active_skill_names(request: RuntimeRunRequest) -> set[str]:
     }
 
 
-def _active_skill_capabilities(request: RuntimeRunRequest) -> dict[str, Any]:
-    capabilities = {
-        "phases": set(),
-        "workspace_write": False,
-        "command_execution": False,
-        "artifact_publish": False,
-    }
-    for skill_name in _active_skill_names(request):
-        skill_caps = SKILL_CAPABILITIES.get(skill_name)
-        if not skill_caps:
-            continue
-        capabilities["phases"].update(skill_caps.get("phases") or [])
-        capabilities["workspace_write"] = capabilities["workspace_write"] or bool(
-            skill_caps.get("workspace_write")
-        )
-        capabilities["command_execution"] = capabilities["command_execution"] or bool(
-            skill_caps.get("command_execution")
-        )
-        capabilities["artifact_publish"] = capabilities["artifact_publish"] or bool(
-            skill_caps.get("artifact_publish")
-        )
-    return capabilities
 
 
 def _tool_catalog_text(request: RuntimeRunRequest) -> str:
@@ -808,13 +591,6 @@ def _extract_final_text(result: Any) -> str:
         if "output" in result:
             return _extract_final_text(result.get("output"))
     return _extract_text_from_message_content(result)
-
-
-def _extract_plan(result_text: str, request: RuntimeRunRequest) -> list[RuntimePlanItem]:
-    return _fallback_plan(
-        request.prompt,
-        [str(skill.get("name") or "") for skill in _active_skill_summaries(request)],
-    )
 
 
 def _build_memory_candidates(final_text: str, request: RuntimeRunRequest) -> list[dict[str, Any]]:
@@ -1626,7 +1402,7 @@ def _build_agent() -> Any | None:
         name="open-analyst",
         system_prompt=_system_prompt(),
         tools=supervisor_tools,
-        middleware=[PhaseToolRoutingMiddleware()] if AgentMiddleware is not None else [],
+        middleware=[],
         skills=_skill_paths(),
         memory=["/memories/AGENTS.md"],
         subagents=_build_subagents(model, all_tools),
@@ -1668,22 +1444,20 @@ def _build_conversation_messages(request: RuntimeRunRequest) -> list[dict[str, s
 
 
 def build_initial_state(request: RuntimeRunRequest) -> RuntimeState:
-    initial_phase = _initial_execution_phase(request)
     return RuntimeState(
         run_id=request.run_id,
         prompt=request.prompt,
         mode=request.mode,
         project=request.project,
         messages=request.messages or [Message(role="user", content=request.prompt)],
-        phase=initial_phase,
-        phase_history=[initial_phase],
+        phase="analyze",
+        phase_history=["analyze"],
         active_skill_ids=_active_skill_ids(request),
     )
 
 
 async def invoke_run(request: RuntimeRunRequest) -> RuntimeInvocationResult:
     state = build_initial_state(request)
-    plan = _extract_plan(state.prompt, request)
     evidence = _project_brief_evidence(request)
     fallback_text = _fallback_runtime_text(
         request,
@@ -1700,7 +1474,7 @@ async def invoke_run(request: RuntimeRunRequest) -> RuntimeInvocationResult:
         return RuntimeInvocationResult(
             status="completed",
             final_text=final_text,
-            active_plan=plan,
+            active_plan=[],
             evidence_bundle=evidence,
             memory_candidates=[],
             approvals=[],
@@ -1723,7 +1497,7 @@ async def invoke_run(request: RuntimeRunRequest) -> RuntimeInvocationResult:
         return RuntimeInvocationResult(
             status="completed",
             final_text=final_text,
-            active_plan=plan,
+            active_plan=[],
             evidence_bundle=evidence,
             approvals=[],
             memory_candidates=_build_memory_candidates(final_text, request),
@@ -1735,15 +1509,12 @@ async def invoke_run(request: RuntimeRunRequest) -> RuntimeInvocationResult:
 
 
 async def stream_run(request: RuntimeRunRequest) -> AsyncIterator[RuntimeEvent]:
-    plan = _extract_plan(request.prompt, request)
-    initial_phase = _initial_execution_phase(request)
     yield RuntimeEvent(
         type="status",
-        phase=initial_phase,
+        phase="analyze",
         status="running",
         actor="supervisor",
-        text="Planning analysis with the deep agent runtime",
-        plan=[item.model_dump(mode="json") for item in plan],
+        text="Starting analysis",
     )
 
     if not _has_live_model() or _build_agent() is None:
@@ -1766,7 +1537,7 @@ async def stream_run(request: RuntimeRunRequest) -> AsyncIterator[RuntimeEvent]:
         )
         return
 
-    phase_token = CURRENT_EXECUTION_PHASE.set(initial_phase)
+    phase_token = CURRENT_EXECUTION_PHASE.set("analyze")
     token = CURRENT_REQUEST.set(request)
     memory_token = CURRENT_MEMORY_CANDIDATES.set([])
     tool_run_ids: dict[str, str] = {}
@@ -1791,7 +1562,7 @@ async def stream_run(request: RuntimeRunRequest) -> AsyncIterator[RuntimeEvent]:
                     tool_name = str(event.get("name") or "tool")
                     tool_use_id = str(uuid.uuid4())
                     tool_run_ids[run_id] = tool_use_id
-                    tool_phase = _phase_for_tool_name(tool_name, request)
+                    tool_phase = _phase_for_tool_name(tool_name)
 
                     # Extract tool input before yielding
                     tool_input = (
@@ -1844,7 +1615,7 @@ async def stream_run(request: RuntimeRunRequest) -> AsyncIterator[RuntimeEvent]:
                     run_id = str(event.get("run_id") or "")
                     tool_use_id = tool_run_ids.get(run_id, str(uuid.uuid4()))
                     tool_name = str(event.get("name") or "tool")
-                    tool_phase = _phase_for_tool_name(tool_name, request)
+                    tool_phase = _phase_for_tool_name(tool_name)
                     output = ""
                     if isinstance(event.get("data"), dict):
                         output = json.dumps(
