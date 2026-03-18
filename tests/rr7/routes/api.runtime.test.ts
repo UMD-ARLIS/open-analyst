@@ -4,9 +4,23 @@ import { action } from "~/routes/api.runtime.$";
 
 describe("POST /api/runtime/*", () => {
   it("injects server-built project runtime context into JSON run requests", async () => {
-    vi.spyOn(runtimeContext, "buildRuntimeConfigurable").mockResolvedValue({
+    vi.spyOn(runtimeContext, "buildRuntimeContext").mockResolvedValue({
       project_id: "project-123",
+      project_name: "Project 123",
       workspace_path: "/tmp/workspace",
+      workspace_slug: "project-123",
+      current_date: "2026-03-18",
+      current_datetime_utc: "2026-03-18T23:00:00.000Z",
+      brief: "",
+      retrieval_policy: {},
+      memory_profile: {},
+      agent_policies: {},
+      active_connector_ids: [],
+      connector_ids: [],
+      available_tools: [],
+      available_skills: [],
+      pinned_skill_ids: [],
+      matched_skill_ids: [],
       api_base_url: "http://localhost",
       collection_id: "collection-456",
       analysis_mode: "deep_research",
@@ -27,12 +41,13 @@ describe("POST /api/runtime/*", () => {
           input: {
             messages: [{ role: "human", content: "Research this topic." }],
           },
+          context: {
+            project_id: "project-123",
+            collection_id: "collection-456",
+            analysis_mode: "deep_research",
+          },
           config: {
-            configurable: {
-              project_id: "project-123",
-              collection_id: "collection-456",
-              analysis_mode: "deep_research",
-            },
+            tags: ["ui"],
           },
           metadata: {
             project_id: "project-123",
@@ -48,15 +63,19 @@ describe("POST /api/runtime/*", () => {
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
     const forwarded = JSON.parse(String(init.body)) as {
       input: { messages: Array<{ role: string; content: string }> };
-      config: { configurable: Record<string, unknown> };
+      context: Record<string, unknown>;
+      config: Record<string, unknown>;
       metadata: Record<string, unknown>;
     };
 
-    expect(forwarded.config.configurable).toMatchObject({
+    expect(forwarded.context).toMatchObject({
       project_id: "project-123",
       workspace_path: "/tmp/workspace",
       collection_id: "collection-456",
       analysis_mode: "deep_research",
+    });
+    expect(forwarded.config).toMatchObject({
+      tags: ["ui"],
     });
     expect(forwarded.metadata).toMatchObject({
       project_id: "project-123",
@@ -64,6 +83,7 @@ describe("POST /api/runtime/*", () => {
     });
     expect(forwarded.input.messages[0]).toMatchObject({
       role: "system",
+      content: expect.stringContaining("Current UTC date: 2026-03-18."),
     });
     expect(forwarded.input.messages[1]).toMatchObject({
       role: "human",

@@ -10,7 +10,7 @@
  * - The runtime URL is not exposed to the browser
  */
 
-import { buildRuntimeConfigurable } from "~/lib/runtime-context.server";
+import { buildRuntimeContext } from "~/lib/runtime-context.server";
 
 const RUNTIME_URL = process.env.RUNTIME_URL || "http://localhost:8081";
 
@@ -21,22 +21,31 @@ type RuntimeProxyBody = {
       content?: unknown;
     }>;
   };
-  config?: {
-    configurable?: Record<string, unknown>;
-  };
+  context?: Record<string, unknown>;
+  config?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
 };
 
-const DEEP_RESEARCH_SYSTEM_PROMPT = [
-  "Deep research mode is active.",
-  "Plan before acting, delegate evidence collection to the researcher first,",
-  "use grounded sources, and synthesize only after retrieval has produced enough support.",
-].join(" ");
+function buildRuntimeSystemPrompt(runtimeContext: Record<string, unknown>, analysisMode: string): string {
+  const lines = [
+    `Current UTC date: ${String(runtimeContext.current_date || "").trim() || "unknown"}.`,
+    `Current UTC timestamp: ${String(runtimeContext.current_datetime_utc || "").trim() || "unknown"}.`,
+    "Interpret relative time references like recent, latest, today, this week, this month, and this year using this date.",
+  ];
+  if (analysisMode === "deep_research") {
+    lines.push(
+      "Deep research mode is active.",
+      "Plan before acting, delegate evidence collection to the researcher first,",
+      "use grounded sources, and synthesize only after retrieval has produced enough support.",
+    );
+  }
+  return lines.join(" ");
+}
 
 function getBodyProjectId(body: RuntimeProxyBody): string {
-  const configProjectId = body.config?.configurable?.project_id;
-  if (typeof configProjectId === "string" && configProjectId.trim()) {
-    return configProjectId.trim();
+  const contextProjectId = body.context?.project_id;
+  if (typeof contextProjectId === "string" && contextProjectId.trim()) {
+    return contextProjectId.trim();
   }
   const metadataProjectId = body.metadata?.project_id;
   if (typeof metadataProjectId === "string" && metadataProjectId.trim()) {
@@ -46,17 +55,17 @@ function getBodyProjectId(body: RuntimeProxyBody): string {
 }
 
 function getBodyCollectionId(body: RuntimeProxyBody): string | null {
-  const collectionId = body.config?.configurable?.collection_id;
-  if (typeof collectionId === "string" && collectionId.trim()) {
-    return collectionId.trim();
+  const contextCollectionId = body.context?.collection_id;
+  if (typeof contextCollectionId === "string" && contextCollectionId.trim()) {
+    return contextCollectionId.trim();
   }
   return null;
 }
 
 function getBodyAnalysisMode(body: RuntimeProxyBody): string {
-  const configMode = body.config?.configurable?.analysis_mode;
-  if (typeof configMode === "string" && configMode.trim()) {
-    return configMode.trim();
+  const contextMode = body.context?.analysis_mode;
+  if (typeof contextMode === "string" && contextMode.trim()) {
+    return contextMode.trim();
   }
   const metadataMode = body.metadata?.analysis_mode;
   if (typeof metadataMode === "string" && metadataMode.trim()) {
@@ -65,15 +74,16 @@ function getBodyAnalysisMode(body: RuntimeProxyBody): string {
   return "chat";
 }
 
-function applyAnalysisMode(body: RuntimeProxyBody, analysisMode: string): RuntimeProxyBody {
-  if (analysisMode !== "deep_research") {
-    return body;
-  }
+function applyRuntimeSystemPrompt(
+  body: RuntimeProxyBody,
+  runtimeContext: Record<string, unknown>,
+  analysisMode: string,
+): RuntimeProxyBody {
   const messages = Array.isArray(body.input?.messages) ? body.input.messages : [];
   const firstMessage = messages[0];
   const alreadyPrepended = firstMessage?.role === "system"
     && typeof firstMessage.content === "string"
-    && firstMessage.content.includes("Deep research mode is active.");
+    && firstMessage.content.includes("Current UTC date:");
   if (alreadyPrepended) {
     return body;
   }
@@ -82,7 +92,7 @@ function applyAnalysisMode(body: RuntimeProxyBody, analysisMode: string): Runtim
     input: {
       ...(body.input || {}),
       messages: [
-        { role: "system", content: DEEP_RESEARCH_SYSTEM_PROMPT },
+        { role: "system", content: buildRuntimeSystemPrompt(runtimeContext, analysisMode) },
         ...messages,
       ],
     },
@@ -145,29 +155,24 @@ async function buildForwardedInit(request: Request): Promise<RequestInit> {
   }
 
   const analysisMode = getBodyAnalysisMode(body);
-  const runtimeConfigurable = await buildRuntimeConfigurable(projectId, {
+  const runtimeContext = await buildRuntimeContext(projectId, {
     request,
     collectionId: getBodyCollectionId(body),
     analysisMode,
   });
 
   init.body = JSON.stringify(
-    applyAnalysisMode(
+    applyRuntimeSystemPrompt(
       {
         ...body,
-        config: {
-          ...(body.config || {}),
-          configurable: {
-            ...(body.config?.configurable || {}),
-            ...runtimeConfigurable,
-          },
-        },
+        context: runtimeContext,
         metadata: {
           ...(body.metadata || {}),
           project_id: projectId,
           analysis_mode: analysisMode,
         },
       },
+      runtimeContext,
       analysisMode,
     ),
   );

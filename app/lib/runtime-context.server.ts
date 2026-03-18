@@ -5,16 +5,38 @@ import { resolveProjectWorkspace } from "~/lib/project-storage.server";
 import { listActiveSkills } from "~/lib/skills.server";
 import { listAvailableTools } from "~/lib/tools.server";
 
+export interface RuntimeProjectContextPayload {
+  project_id: string;
+  project_name: string;
+  workspace_path: string;
+  workspace_slug: string;
+  current_date: string;
+  current_datetime_utc: string;
+  brief: string;
+  retrieval_policy: Record<string, unknown>;
+  memory_profile: Record<string, unknown>;
+  agent_policies: Record<string, unknown>;
+  active_connector_ids: string[];
+  connector_ids: string[];
+  available_tools: Array<Record<string, unknown>>;
+  available_skills: Array<Record<string, unknown>>;
+  pinned_skill_ids: string[];
+  matched_skill_ids: string[];
+  api_base_url: string;
+  collection_id: string | null;
+  analysis_mode: string;
+}
+
 export interface RuntimeContextOptions {
   request: Request;
   collectionId?: string | null;
   analysisMode?: string | null;
 }
 
-export async function buildRuntimeConfigurable(
+export async function buildRuntimeContext(
   projectId: string,
   options: RuntimeContextOptions,
-): Promise<Record<string, unknown>> {
+): Promise<RuntimeProjectContextPayload> {
   const project = await getProject(projectId);
   if (!project) {
     throw new Error(`Project not found: ${projectId}`);
@@ -37,12 +59,15 @@ export async function buildRuntimeConfigurable(
   const activeConnectorSet = new Set(activeConnectorIds);
   const filteredSkills = activeSkills.filter((skill) => skill.id !== "repo-skill-skill-creator");
   const pinnedSkillIds = filteredSkills.map((skill) => String(skill.id));
+  const currentDateTime = new Date();
 
   return {
     project_id: project.id,
     project_name: project.name,
     workspace_path: resolveProjectWorkspace(project),
     workspace_slug: project.workspaceSlug || "",
+    current_date: currentDateTime.toISOString().slice(0, 10),
+    current_datetime_utc: currentDateTime.toISOString(),
     brief: String(profile?.brief || ""),
     retrieval_policy:
       profile?.retrievalPolicy && typeof profile.retrievalPolicy === "object"

@@ -127,6 +127,7 @@ export function AssistantWorkspaceView({
     (skill) => skill.pinned || skill.enabled
   ).length;
   const isProjectHome = !initialAgentThreadId;
+  const analysisMode = deepResearch ? "deep_research" : "chat";
   const pendingPromptFromNavigation = useMemo(() => {
     const state = location.state as { pendingPrompt?: unknown } | null;
     return typeof state?.pendingPrompt === "string" && state.pendingPrompt.trim()
@@ -239,7 +240,7 @@ export function AssistantWorkspaceView({
           body: JSON.stringify({
             metadata: {
               project_id: projectId,
-              analysis_mode: deepResearch ? "deep_research" : "chat",
+              analysis_mode: analysisMode,
             },
           }),
         });
@@ -295,16 +296,14 @@ export function AssistantWorkspaceView({
               },
             ],
           }),
-          config: {
-            configurable: {
-              project_id: projectId,
-              collection_id: activeCollectionId,
-              analysis_mode: deepResearch ? "deep_research" : "chat",
-            },
+          context: {
+            project_id: projectId,
+            collection_id: activeCollectionId,
+            analysis_mode: analysisMode,
           },
           metadata: {
             project_id: projectId,
-            analysis_mode: deepResearch ? "deep_research" : "chat",
+            analysis_mode: analysisMode,
           },
           streamSubgraphs: true,
           onDisconnect: "continue",
@@ -344,16 +343,14 @@ export function AssistantWorkspaceView({
             },
           ],
         }),
-        config: {
-          configurable: {
-            project_id: projectId,
-            collection_id: activeCollectionId,
-            analysis_mode: deepResearch ? "deep_research" : "chat",
-          },
+        context: {
+          project_id: projectId,
+          collection_id: activeCollectionId,
+          analysis_mode: analysisMode,
         },
         metadata: {
           project_id: projectId,
-          analysis_mode: deepResearch ? "deep_research" : "chat",
+          analysis_mode: analysisMode,
         },
         streamSubgraphs: true,
         onDisconnect: "continue",
@@ -363,7 +360,7 @@ export function AssistantWorkspaceView({
     navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
   }, [
     activeCollectionId,
-    deepResearch,
+    analysisMode,
     initialAgentThreadId,
     location.pathname,
     location.search,

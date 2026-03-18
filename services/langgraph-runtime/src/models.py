@@ -19,6 +19,9 @@ class RuntimeProjectContext(BaseModel):
     project_name: str = ""
     workspace_path: str = ""
     workspace_slug: str = ""
+    current_date: str = ""
+    current_datetime_utc: str = ""
+    analysis_mode: Literal["chat", "deep_research"] = "chat"
     brief: str = ""
     retrieval_policy: dict[str, Any] = Field(default_factory=dict)
     memory_profile: dict[str, Any] = Field(default_factory=dict)

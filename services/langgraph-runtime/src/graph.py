@@ -12,6 +12,7 @@ from typing import Any
 import httpx
 
 from config import settings
+from models import RuntimeProjectContext
 from retrieval import retrieval_service
 from telemetry import get_tracer
 
@@ -111,34 +112,47 @@ class SupervisorToolGuard(AgentMiddleware if AgentMiddleware is not None else ob
         return await handler(request)
 
 
-def _get_project_config(runtime: Any) -> dict[str, Any]:
-    """Extract project config from ToolRuntime's configurable dict."""
-    if runtime is None:
+def _coerce_context_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if value is None:
         return {}
-    config = getattr(runtime, "config", {}) or {}
-    return config.get("configurable", {})
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump()
+        return dumped if isinstance(dumped, dict) else {}
+    legacy_dict = getattr(value, "dict", None)
+    if callable(legacy_dict):
+        dumped = legacy_dict()
+        return dumped if isinstance(dumped, dict) else {}
+    raw_dict = getattr(value, "__dict__", None)
+    if isinstance(raw_dict, dict):
+        return {key: raw_dict[key] for key in raw_dict if not str(key).startswith("_")}
+    return {}
 
 
-def _get_runtime_configurable(runtime: Any | None = None) -> dict[str, Any]:
-    """Read the active configurable payload for both tools and middleware.
+def _get_project_config(runtime: Any | None = None) -> dict[str, Any]:
+    """Extract invocation-scoped project context from runtime state.
 
-    Deep Agents middleware receives ``langgraph.runtime.Runtime`` which does not
-    expose ``.config``. In that path, LangGraph's ``get_config()`` is the
-    supported way to access the current RunnableConfig.
+    Prefer typed runtime ``context`` per current LangChain/Deep Agents guidance.
     """
-    runtime_config = getattr(runtime, "config", None) if runtime is not None else None
-    if isinstance(runtime_config, dict):
-        configurable = runtime_config.get("configurable", {})
-        if isinstance(configurable, dict):
-            return configurable
+    if runtime is not None:
+        context = _coerce_context_mapping(getattr(runtime, "context", None))
+        if context:
+            return context
+        runtime_config = getattr(runtime, "config", None) or {}
+        if isinstance(runtime_config, dict):
+            config_context = _coerce_context_mapping(runtime_config.get("context"))
+            if config_context:
+                return config_context
     if get_config is None:
         return {}
     try:
         current = get_config() or {}
     except RuntimeError:
         return {}
-    configurable = current.get("configurable", {})
-    return configurable if isinstance(configurable, dict) else {}
+    context = _coerce_context_mapping(current.get("context"))
+    return context if context else {}
 
 
 def _repo_root() -> Path:
@@ -184,24 +198,83 @@ def _active_skill_summaries(cfg: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 
-def _tool_catalog_payload(cfg: dict[str, Any]) -> dict[str, Any]:
-    active_tools: list[dict[str, Any]] = []
-    for tool_def in (cfg.get("available_tools") or []):
-        if tool_def.get("source") == "mcp" and not tool_def.get("active"):
-            continue
-        active_tools.append(
-            {
-                "name": str(tool_def.get("name") or "tool").strip(),
-                "description": str(tool_def.get("description") or "").strip(),
-                "source": str(tool_def.get("source") or "local").strip(),
-                "server_id": str(tool_def.get("server_id") or "").strip() or None,
-                "server_name": str(tool_def.get("server_name") or "").strip() or None,
-            }
-        )
-
+def _runtime_capabilities_payload(cfg: dict[str, Any]) -> dict[str, Any]:
     return {
         "project": cfg.get("project_name", ""),
+        "current_date": cfg.get("current_date", ""),
         "connectors": cfg.get("active_connector_ids", []),
+        "direct_tools": [
+            {
+                "name": "task",
+                "description": "Delegate specialized work to a subagent. Use this for research, drafting, review, and source collection.",
+            },
+            {
+                "name": "write_todos",
+                "description": "Create and update a visible plan for the current task.",
+            },
+            {
+                "name": "search_project_documents",
+                "description": "Search indexed project documents already in the store.",
+            },
+            {
+                "name": "search_project_memories",
+                "description": "Search promoted long-term project memories.",
+            },
+            {
+                "name": "list_active_skills",
+                "description": "List the currently active skill packs.",
+            },
+            {
+                "name": "describe_runtime_capabilities",
+                "description": "Describe direct tools, subagents, connectors, and skills for this thread.",
+            },
+            {
+                "name": "list_canvas_documents",
+                "description": "Inspect existing canvas documents in the project.",
+            },
+            {
+                "name": "propose_project_memory",
+                "description": "Propose a durable project memory for later approval.",
+            },
+        ],
+        "subagents": [
+            {
+                "name": "researcher",
+                "description": "Evidence gathering, literature search, web source discovery, and source collection into the project.",
+                "tools": [
+                    "search_literature",
+                    "stage_literature_collection",
+                    "stage_web_source",
+                    "search_project_documents",
+                    "read_project_document",
+                    "search_project_memories",
+                ],
+            },
+            {
+                "name": "drafter",
+                "description": "Canvas drafting, artifact generation, command execution, and publication.",
+                "tools": [
+                    "list_directory",
+                    "search_project_documents",
+                    "read_project_document",
+                    "execute_command",
+                    "capture_artifact",
+                    "save_canvas_markdown",
+                    "publish_canvas_document",
+                    "publish_workspace_file",
+                    "list_canvas_documents",
+                ],
+            },
+            {
+                "name": "critic",
+                "description": "Review for evidence gaps, unsupported claims, citation quality, and structural issues.",
+                "tools": [
+                    "search_project_documents",
+                    "search_project_memories",
+                    "read_project_document",
+                ],
+            },
+        ],
         "skills": [
             {
                 "id": str(skill.get("id") or ""),
@@ -210,7 +283,6 @@ def _tool_catalog_payload(cfg: dict[str, Any]) -> dict[str, Any]:
             }
             for skill in _active_skill_summaries(cfg)
         ],
-        "tools": active_tools,
     }
 
 
@@ -261,6 +333,10 @@ def _system_prompt() -> str:
         "- subagent_type='researcher': evidence gathering, literature search, source discovery\n"
         "- subagent_type='drafter': document creation, canvas work, artifact publishing\n"
         "- subagent_type='critic': review output for evidence gaps, unsupported claims, citation quality\n\n"
+        "If the user wants to collect or add sources to the project, delegate immediately to "
+        "the researcher subagent. Source-staging tools are intentionally not direct supervisor tools.\n\n"
+        "Never call a tool that appears only under a subagent's capabilities as if it were a direct supervisor tool. "
+        "Use task(subagent_type=...) for those capabilities.\n\n"
         "Delegate rather than doing everything yourself. The researcher finds evidence, "
         "the drafter creates outputs, the critic improves quality.\n\n"
         "IMPORTANT: Each task() call is stateless — the subagent has no memory of prior calls. "
@@ -1198,7 +1274,7 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         cfg = _get_project_config(runtime)
         if not cfg.get("project_id"):
             return "{}"
-        return json.dumps(_tool_catalog_payload(cfg))
+        return json.dumps(_runtime_capabilities_payload(cfg))
 
     @tool
     async def list_canvas_documents(runtime: ToolRuntime = None) -> str:
@@ -1339,7 +1415,8 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 "2. Use search_project_documents to check what's already in the project\n"
                 "3. Use search_project_memories for relevant prior findings\n"
                 "4. Use read_project_document to get full text of promising sources\n"
-                "5. Use stage_literature_collection or stage_web_source to collect sources for the project\n\n"
+                "5. For academic papers, prefer stage_literature_collection so imports use canonical paper identifiers\n"
+                "6. Use stage_web_source only for non-paper web pages or when literature search cannot identify the source\n\n"
                 "If the assigned research contains multiple independent questions, actors, or hypotheses, "
                 "focus on your assigned slice and leave cross-slice synthesis to the supervisor.\n"
                 "When staging sources and no collection is already active, suggest a concise collection name derived from the topic.\n"
@@ -1474,12 +1551,12 @@ def _build_backend() -> Any:
         return None
 
     def namespace(runtime: Any) -> tuple[str, ...]:
-        config = _get_runtime_configurable(runtime)
+        config = _get_project_config(runtime)
         project_id = str(config.get("project_id", "default") or "default")
         return ("open-analyst", "projects", project_id, "memories")
 
     def _backend_factory(runtime: Any) -> Any:
-        config = _get_runtime_configurable(runtime)
+        config = _get_project_config(runtime)
         workspace_path = str(config.get("workspace_path", "") or "")
         default_root = _workspace_root(workspace_path)
         return CompositeBackend(
@@ -1531,6 +1608,7 @@ def make_graph() -> Any:
         memory=["/memories/AGENTS.md"],
         subagents=_build_subagents(model, all_tools),
         backend=_build_backend(),
+        context_schema=RuntimeProjectContext,
         interrupt_on={
             "publish_canvas_document": True,
             "publish_workspace_file": True,

@@ -86,7 +86,7 @@ class TestNormalizePsycopgDsn:
 # ── _get_project_config -----------------------------------------------------
 
 class TestGetProjectConfig:
-    """Test _get_project_config which extracts config from a ToolRuntime-like object."""
+    """Test _get_project_config which extracts invocation context."""
 
     @pytest.fixture(autouse=True)
     def _import_fn(self):
@@ -104,27 +104,48 @@ class TestGetProjectConfig:
         runtime = SimpleNamespace(config={})
         assert self._get_project_config(runtime) == {}
 
-    def test_runtime_with_configurable(self):
+    def test_runtime_with_context(self):
         expected = {"project_id": "p1", "workspace_path": "/tmp/ws"}
-        runtime = SimpleNamespace(config={"configurable": expected})
-        assert self._get_project_config(runtime) == expected
+        runtime = SimpleNamespace(context=RuntimeProjectContext(**expected))
+        result = self._get_project_config(runtime)
+        assert result["project_id"] == expected["project_id"]
+        assert result["workspace_path"] == expected["workspace_path"]
 
     def test_runtime_config_none(self):
         runtime = SimpleNamespace(config=None)
         assert self._get_project_config(runtime) == {}
 
-    def test_runtime_with_store_still_extracts_config(self):
-        """A runtime with a store attribute extracts config normally.
+    def test_runtime_with_store_still_extracts_context(self):
+        """A runtime with a store attribute extracts context normally.
 
         The store is now passed per-call to retrieval methods, not via a global.
         """
         fake_store = object()
         runtime = SimpleNamespace(
             store=fake_store,
-            config={"configurable": {"project_id": "p2"}},
+            context=RuntimeProjectContext(project_id="p2"),
         )
         result = self._get_project_config(runtime)
         assert result["project_id"] == "p2"
+
+    def test_falls_back_to_runtime_config_context(self):
+        expected = {"project_id": "p1", "workspace_path": "/tmp/ws"}
+        runtime = SimpleNamespace(config={"context": expected})
+        assert self._get_project_config(runtime) == expected
+
+    def test_falls_back_to_langgraph_get_config_context(self, monkeypatch):
+        import graph
+
+        monkeypatch.setattr(
+            graph,
+            "get_config",
+            lambda: {"context": {"project_id": "p2", "workspace_path": "/tmp/runtime"}},
+        )
+        runtime = SimpleNamespace()
+        assert self._get_project_config(runtime) == {
+            "project_id": "p2",
+            "workspace_path": "/tmp/runtime",
+        }
 
 
 class TestWorkspaceRoot:
@@ -140,34 +161,6 @@ class TestWorkspaceRoot:
         assert not target.exists()
 
 
-class TestGetRuntimeConfigurable:
-    @pytest.fixture(autouse=True)
-    def _import_fn(self):
-        from graph import _get_runtime_configurable
-        self._get_runtime_configurable = _get_runtime_configurable
-
-    def test_prefers_runtime_config_when_available(self):
-        runtime = SimpleNamespace(config={"configurable": {"project_id": "p1", "workspace_path": "/tmp/ws"}})
-        assert self._get_runtime_configurable(runtime) == {
-            "project_id": "p1",
-            "workspace_path": "/tmp/ws",
-        }
-
-    def test_falls_back_to_langgraph_get_config(self, monkeypatch):
-        import graph
-
-        monkeypatch.setattr(
-            graph,
-            "get_config",
-            lambda: {"configurable": {"project_id": "p2", "workspace_path": "/tmp/runtime"}},
-        )
-        runtime = SimpleNamespace()
-        assert self._get_runtime_configurable(runtime) == {
-            "project_id": "p2",
-            "workspace_path": "/tmp/runtime",
-        }
-
-
 # ── RuntimeProjectContext model validation -----------------------------------
 
 class TestRuntimeProjectContext:
@@ -175,6 +168,7 @@ class TestRuntimeProjectContext:
         ctx = RuntimeProjectContext(project_id="abc")
         assert ctx.project_id == "abc"
         assert ctx.project_name == ""
+        assert ctx.analysis_mode == "chat"
         assert ctx.available_skills == []
         assert ctx.connector_ids == []
 
