@@ -15,16 +15,18 @@ The runtime is the core agent system. The web app persists product state and str
 1. The browser sends a prompt to the web app.
 2. The web app persists the user message on a task/thread.
 3. The web app builds project, connector, skill, and memory context.
-4. The web app calls the runtime `/invoke` endpoint in streaming mode.
-5. The runtime executes a Deep Agents thread with LangGraph checkpoint/store persistence.
-6. Runtime events stream back as:
-   - `status`
-   - `tool_call_start`
-   - `tool_call_end`
-   - `memory_proposal`
-   - `text_delta`
-   - `error`
-7. The web app stores those events, persists the assistant message, and updates the task summary.
+4. The web app matches skills and emits a skill activation status event.
+5. The web app calls the runtime `/invoke` endpoint in streaming mode.
+6. The runtime supervisor plans via `write_todos` and delegates to subagents via `task()`.
+7. Runtime events stream back with agent attribution (`lc_agent_name` metadata):
+   - `status` — progress updates, delegation events ("Delegating to researcher: ..."), plan updates
+   - `tool_call_start` / `tool_call_end` — with actor field (supervisor, researcher, drafter, critic)
+   - `text_delta` — token-level streaming from the supervisor (subagent text is filtered)
+   - `memory_proposal` — proposed project memories
+   - `interrupt` — human-in-the-loop approval required for publish/execute tools
+   - `error` — runtime failures
+8. The web app stores events, persists the assistant message, and updates task status.
+9. If interrupted, task enters `waiting_for_approval`. User approves/rejects via UI. Web app calls runtime `/resume`.
 
 ## User-Facing Model
 
@@ -62,7 +64,7 @@ Artifact routing works like this:
 
 ### Workspace Files
 
-The UI and app maintain project workspace roots and artifact metadata. The runtime no longer relies on browsing the repo filesystem for research behavior. Research turns now favor explicit retrieval and connector tools instead.
+The UI and app maintain project workspace roots and artifact metadata. The supervisor delegates all file operations to subagents via `task()`. The `SupervisorToolGuard` middleware blocks built-in filesystem tools on the supervisor to enforce this delegation pattern.
 
 ### Source And Artifact Flow
 
