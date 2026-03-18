@@ -105,6 +105,7 @@ export function useChatStream(): UseChatStreamReturn {
                 currentEvent === "text_delta" ||
                 currentEvent === "tool_call_start" ||
                 currentEvent === "tool_call_end" ||
+                currentEvent === "interrupt" ||
                 currentEvent === "error"
               ) {
                 const event = {

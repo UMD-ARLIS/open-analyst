@@ -14,6 +14,7 @@ export interface ChatStreamEvent {
     | "tool_call_start"
     | "tool_call_end"
     | "agent_end"
+    | "interrupt"
     | "error";
   text?: string;
   phase?: string;
@@ -165,6 +166,13 @@ export function applyChatStreamEvent(
       return appendToolStart(blocks, event);
     case "tool_call_end":
       return appendToolResult(blocks, event);
+    case "interrupt":
+      return appendStatus(blocks, {
+        ...event,
+        type: "status",
+        status: "running",
+        text: event.text || "Waiting for approval...",
+      });
     case "error":
       return appendStatus(blocks, {
         ...event,

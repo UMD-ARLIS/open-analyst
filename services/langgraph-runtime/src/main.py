@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 from contextlib import AsyncExitStack, asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from config import settings
+import graph as graph_module
 from graph import configure_runtime_persistence, invoke_run, stream_run
 from models import RuntimeRunRequest
 from retrieval import retrieval_service
@@ -63,6 +64,44 @@ async def invoke(payload: RuntimeRunRequest):
 
     result = await invoke_run(payload)
     return JSONResponse(result.model_dump(mode="json"))
+
+
+@app.post("/resume")
+async def resume_run(request: Request):
+    body = await request.json()
+    run_id = body.get("run_id", "")
+    thread_id = body.get("thread_id", run_id)
+    decision = body.get("decision", "approve")
+
+    if not graph_module.CHECKPOINTER:
+        return JSONResponse({"error": "No checkpointer configured"}, status_code=500)
+
+    from graph import _build_agent, _runtime_config
+    from models import RuntimeRunRequest, RuntimeProjectContext
+
+    agent = _build_agent()
+    if agent is None:
+        return JSONResponse({"error": "Agent not available"}, status_code=500)
+
+    config = {"configurable": {"thread_id": thread_id}}
+
+    if decision == "reject":
+        # Cancel the interrupted tool call
+        return JSONResponse({"status": "rejected"})
+
+    # Resume with approval - pass None to continue from checkpoint
+    result = await agent.ainvoke(None, config)
+    final_text = ""
+    if isinstance(result, dict):
+        messages = result.get("messages", [])
+        for msg in reversed(messages):
+            if getattr(msg, "type", "") == "ai":
+                content = getattr(msg, "content", "")
+                if isinstance(content, str):
+                    final_text = content
+                    break
+
+    return JSONResponse({"status": "completed", "text": final_text})
 
 
 @app.get("/projects/{project_id}/memories")

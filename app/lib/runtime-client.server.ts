@@ -73,6 +73,26 @@ export async function invokeRuntime(payload: RuntimeInvokePayload): Promise<Runt
   return (await res.json()) as RuntimeInvokeResult;
 }
 
+export async function resumeRun(input: {
+  run_id: string;
+  thread_id: string;
+  decision: "approve" | "reject";
+  project: Record<string, unknown>;
+}): Promise<Response> {
+  const res = await fetch(`${env.LANGGRAPH_RUNTIME_URL}/resume`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Runtime resume failed: ${res.status} ${body}`);
+  }
+
+  return res;
+}
+
 export async function streamRuntime(payload: RuntimeInvokePayload): Promise<Response> {
   const res = await fetch(`${env.LANGGRAPH_RUNTIME_URL}/invoke`, {
     method: "POST",

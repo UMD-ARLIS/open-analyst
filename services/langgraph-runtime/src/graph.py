@@ -927,6 +927,7 @@ async def _publish_workspace_file_api(
     relative_path: str,
     title: str | None = None,
     collection_name: str | None = None,
+    add_to_sources: bool = True,
 ) -> dict[str, Any] | None:
     api_base_url = str(request.project.api_base_url or "").rstrip("/")
     if not api_base_url or not relative_path.strip():
@@ -937,6 +938,7 @@ async def _publish_workspace_file_api(
             "title": title or "",
             "collectionName": collection_name or "Artifacts",
             "collectionId": request.project.collection_id,
+            "addToSources": add_to_sources,
         }
         async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
             response = await client.post(
@@ -1373,7 +1375,7 @@ def _build_tools() -> list[Any]:
 
     @tool
     async def publish_canvas_document(
-        add_to_sources: bool = False,
+        add_to_sources: bool = True,
         change_summary: str = "Published from runtime",
     ) -> str:
         """Publish the primary canvas document into artifact storage and optionally add it to sources."""
@@ -1591,6 +1593,11 @@ def _build_agent() -> Any | None:
         backend=_build_backend(),
         checkpointer=CHECKPOINTER,
         store=STORE,
+        interrupt_on={
+            "publish_canvas_document": True,
+            "publish_workspace_file": True,
+            "execute_command": True,
+        },
         debug=False,
     )
     AGENT_CACHE[cache_key] = agent
@@ -1602,29 +1609,20 @@ def _has_live_model() -> bool:
 
 
 def _build_conversation_messages(request: RuntimeRunRequest) -> list[dict[str, str]]:
-    """Build conversation messages with token budget for history."""
+    """Build conversation messages. SummarizationMiddleware handles compaction."""
     user_prompt = _build_user_prompt(request)
 
     if not request.messages or len(request.messages) <= 1:
         return [{"role": "user", "content": user_prompt}]
 
-    # Include history with a rough char budget (~8K tokens = 32K chars)
-    char_budget = 32000
+    # Pass through history — SummarizationMiddleware will compact if needed
     history: list[dict[str, str]] = []
-    chars_used = 0
-
-    # Skip the last message (it's the current prompt) and iterate recent-first
-    for msg in reversed(request.messages[:-1]):
+    for msg in request.messages[:-1]:
         content = msg.content.strip()
-        if not content:
-            continue
-        msg_chars = len(content)
-        if chars_used + msg_chars > char_budget:
-            break
-        history.insert(0, {"role": msg.role, "content": content})
-        chars_used += msg_chars
+        if content:
+            history.append({"role": msg.role, "content": content})
 
-    # Current prompt is always included as the final user message
+    # Current prompt is always the final user message
     history.append({"role": "user", "content": user_prompt})
     return history
 
@@ -1743,23 +1741,64 @@ async def stream_run(request: RuntimeRunRequest) -> AsyncIterator[RuntimeEvent]:
                 version="v2",
             ):
                 event_type = str(event.get("event") or "")
+                # Extract agent name from metadata for subagent attribution
+                event_metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+                agent_name = str(event_metadata.get("lc_agent_name") or "supervisor").strip() or "supervisor"
+                is_supervisor = agent_name in ("supervisor", "open-analyst")
+
                 if event_type == "on_tool_start":
                     run_id = str(event.get("run_id") or uuid.uuid4())
                     tool_name = str(event.get("name") or "tool")
                     tool_use_id = str(uuid.uuid4())
                     tool_run_ids[run_id] = tool_use_id
                     tool_phase = _phase_for_tool_name(tool_name, request)
+
+                    # Extract tool input before yielding
+                    tool_input = (
+                        event.get("data", {}).get("input")
+                        if isinstance(event.get("data"), dict)
+                        else None
+                    )
+
+                    # Build display text with agent attribution
+                    if not is_supervisor:
+                        display_text = f"{agent_name}: {tool_name}"
+                    else:
+                        display_text = f"Running {tool_name}"
+
+                    # Emit descriptive status for subagent delegation
+                    if tool_name == "task" and isinstance(tool_input, dict):
+                        subagent_type = str(tool_input.get("subagent_type") or "").strip()
+                        description = str(tool_input.get("description") or "").strip()
+                        if subagent_type:
+                            short_desc = description[:100] if description else "working"
+                            display_text = f"Delegating to {subagent_type}: {short_desc}"
+                            yield RuntimeEvent(
+                                type="status",
+                                phase=tool_phase,
+                                status="running",
+                                actor=subagent_type,
+                                text=display_text,
+                            )
+                    elif tool_name == "write_todos":
+                        display_text = f"{agent_name}: Updating plan" if not is_supervisor else "Updating plan"
+                        yield RuntimeEvent(
+                            type="status",
+                            phase=tool_phase,
+                            status="running",
+                            actor=agent_name,
+                            text=display_text,
+                        )
+
                     yield RuntimeEvent(
                         type="tool_call_start",
                         phase=tool_phase,
                         status="running",
-                        actor="supervisor",
-                        text=f"Running {tool_name}",
+                        actor=agent_name,
+                        text=display_text,
                         toolUseId=tool_use_id,
                         toolName=tool_name,
-                        toolInput=event.get("data", {}).get("input")
-                        if isinstance(event.get("data"), dict)
-                        else None,
+                        toolInput=tool_input,
                     )
                 elif event_type == "on_tool_end":
                     run_id = str(event.get("run_id") or "")
@@ -1773,18 +1812,38 @@ async def stream_run(request: RuntimeRunRequest) -> AsyncIterator[RuntimeEvent]:
                             ensure_ascii=False,
                             default=str,
                         )
+                    completed_text = (
+                        f"{agent_name}: Completed {tool_name}" if not is_supervisor
+                        else f"Completed {tool_name}"
+                    )
                     yield RuntimeEvent(
                         type="tool_call_end",
                         phase=tool_phase,
                         status="completed",
-                        actor="supervisor",
-                        text=f"Completed {tool_name}",
+                        actor=agent_name,
+                        text=completed_text,
                         toolUseId=tool_use_id,
                         toolName=tool_name,
                         toolOutput=output,
                         toolStatus="completed",
                     )
+                    # Emit plan update for write_todos
+                    if tool_name == "write_todos" and isinstance(event.get("data"), dict):
+                        raw_output = event["data"].get("output")
+                        todos_text = str(raw_output) if raw_output else ""
+                        if todos_text:
+                            yield RuntimeEvent(
+                                type="status",
+                                phase=tool_phase,
+                                status="running",
+                                actor=agent_name,
+                                text=f"Plan updated: {todos_text[:200]}",
+                            )
                 elif event_type == "on_chat_model_stream":
+                    # Only stream supervisor text to the user as text_delta;
+                    # subagent text is internal working and returns via task tool result
+                    if not is_supervisor:
+                        continue
                     chunk = event.get("data", {}).get("chunk") if isinstance(event.get("data"), dict) else None
                     if chunk is not None:
                         chunk_content = getattr(chunk, "content", None)

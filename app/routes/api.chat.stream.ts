@@ -215,6 +215,7 @@ export async function action({ request }: Route.ActionArgs) {
               currentEvent === "text_delta" ||
               currentEvent === "tool_call_start" ||
               currentEvent === "tool_call_end" ||
+              currentEvent === "interrupt" ||
               currentEvent === "error"
             ) {
               contentBlocks = applyChatStreamEvent(contentBlocks, {
@@ -263,8 +264,15 @@ export async function action({ request }: Route.ActionArgs) {
               : [{ type: "text", text: fullText }],
         });
 
+        // Check if the run was interrupted (requires approval)
+        const wasInterrupted = contentBlocks.some(
+          (block) =>
+            block.type === "status" &&
+            (block as import("~/lib/types").StatusContent).text.includes("requires approval")
+        );
+
         await updateTask(task.id, {
-          status: "completed",
+          status: wasInterrupted ? "waiting_for_approval" : "completed",
           planSnapshot: {
             summary: fullText.slice(0, 1200),
             collectionId: collectionId || null,
