@@ -498,16 +498,25 @@ def _system_prompt() -> str:
         "When the user asks what you can do, answer from the actual active tools, connectors, and skills.\n\n"
         "## Delegation\n"
         "Use the `task` tool to delegate specialized work to subagents:\n"
-        "- Use subagent_type='researcher' for evidence gathering, literature search, and source discovery\n"
-        "- Use subagent_type='drafter' for document creation, canvas work, and artifact publishing\n"
-        "- Use subagent_type='critic' to review your output for evidence gaps, unsupported claims, and citation quality\n"
-        "Delegate rather than doing everything yourself. The researcher finds evidence, the drafter creates outputs, the critic improves quality.\n\n"
+        "- subagent_type='researcher': evidence gathering, literature search, source discovery\n"
+        "- subagent_type='drafter': document creation, canvas work, artifact publishing\n"
+        "- subagent_type='critic': review output for evidence gaps, unsupported claims, citation quality\n\n"
+        "Delegate rather than doing everything yourself. The researcher finds evidence, "
+        "the drafter creates outputs, the critic improves quality.\n\n"
+        "IMPORTANT: Each task() call is stateless — the subagent has no memory of prior calls. "
+        "The `description` parameter must be fully self-contained with all context the subagent needs: "
+        "the objective, relevant evidence/findings so far, constraints, and expected output format. "
+        "Do not say 'use the results from earlier' — paste the actual results into the description.\n\n"
+        "You can invoke multiple task() calls in parallel for independent work "
+        "(e.g., researcher gathering sources while drafter prepares a template).\n\n"
         "## Planning\n"
         "Before beginning complex work, use `write_todos` to create a visible plan. "
         "Update todos as you progress through each step. "
         "This helps the user see what you're doing and why.\n\n"
         "## Rate limits\n"
-        "Be efficient with tool calls. Synthesize after one or two targeted searches rather than exhaustive retrieval."
+        "Be efficient with tool calls. Synthesize after one or two targeted searches "
+        "rather than exhaustive retrieval. When gathering large amounts of data, "
+        "save raw results to workspace files and return only the analysis summary."
     )
 
 
@@ -1457,10 +1466,13 @@ def _build_tools() -> list[Any]:
 
 
 def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any]]:
+    # Each subagent gets ONLY the tools it needs (no inheritance from parent).
+    # Skills are only assigned where relevant (each gets its own isolated SkillsMiddleware).
+    # System prompts instruct concise returns to prevent context bloat.
     return [
         {
             "name": "researcher",
-            "description": "Use for source discovery, evidence gathering, and retrieval strategy.",
+            "description": "Searches literature, retrieves project sources and memories, stages sources for collection. Use for evidence gathering and source discovery.",
             "system_prompt": (
                 "You are the research specialist for Open Analyst. Your job is source discovery and evidence gathering.\n\n"
                 "Workflow:\n"
@@ -1469,8 +1481,13 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 "3. Use search_project_memories for relevant prior findings\n"
                 "4. Use read_project_document to get full text of promising sources\n"
                 "5. Use stage_literature_collection or stage_web_source to collect sources for the project\n\n"
-                "Return a structured summary of findings with citations and confidence levels. "
-                "After one or two targeted searches, synthesize rather than continuing to search."
+                "After one or two targeted searches, synthesize rather than continuing to search.\n\n"
+                "IMPORTANT — Context management:\n"
+                "- Return ONLY a structured summary of findings (under 500 words)\n"
+                "- Include: key findings, source citations, confidence levels, and gaps\n"
+                "- Do NOT return raw search results, full abstracts, or tool output dumps\n"
+                "- If you gather large amounts of data, save raw results to a workspace file "
+                "and return only the analysis summary"
             ),
             "model": model,
             "tools": [
@@ -1480,28 +1497,34 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["search_project_documents"],
                 tool_map["read_project_document"],
                 tool_map["search_project_memories"],
-                tool_map["list_active_connectors"],
-                tool_map["describe_runtime_capabilities"],
             ],
             "middleware": [],
-            "skills": [path for path in _skill_paths() if not path.endswith("arlis-bulletin")],
+            # Researcher doesn't need artifact/drafting skills
         },
         {
             "name": "drafter",
-            "description": "Use for drafting and revising analyst outputs, canvas content, and structured products.",
+            "description": "Creates documents, writes to canvas, runs commands (pandoc, python), publishes artifacts. Use for document creation and structured product generation.",
             "system_prompt": (
                 "You are the drafting specialist for Open Analyst. You turn research and evidence into polished outputs.\n\n"
                 "Workflow:\n"
-                "1. Review the evidence and plan provided by the supervisor\n"
-                "2. Use save_canvas_markdown to create or update drafts\n"
-                "3. Use execute_command for document generation (pandoc, python scripts)\n"
-                "4. Use publish_canvas_document or publish_workspace_file to finalize outputs\n"
-                "5. Use capture_artifact to store generated files\n\n"
-                "Follow active skill instructions (SKILL.md) precisely for structured products like bulletins or reports."
+                "1. Review the evidence and plan provided in the task description\n"
+                "2. Use search_project_documents or read_project_document to retrieve source material if needed\n"
+                "3. Use save_canvas_markdown to create or update drafts\n"
+                "4. Use execute_command for document generation (pandoc, python scripts)\n"
+                "5. Use publish_canvas_document or publish_workspace_file to finalize outputs\n"
+                "6. Use capture_artifact to store generated files\n\n"
+                "Follow active skill instructions (SKILL.md) precisely for structured products.\n\n"
+                "IMPORTANT — Context management:\n"
+                "- Return ONLY a brief summary of what you produced (under 200 words)\n"
+                "- Include: artifact title, format, location, and any issues encountered\n"
+                "- Do NOT return the full document content in your response\n"
+                "- The artifact is already saved; the supervisor only needs to know it succeeded"
             ),
             "model": model,
             "tools": [
                 tool_map["list_directory"],
+                tool_map["search_project_documents"],
+                tool_map["read_project_document"],
                 tool_map["execute_command"],
                 tool_map["capture_artifact"],
                 tool_map["save_canvas_markdown"],
@@ -1514,7 +1537,7 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
         },
         {
             "name": "critic",
-            "description": "Use for critique, revision requests, citation checks, and evidence-gap analysis.",
+            "description": "Reviews analyst outputs for evidence gaps, unsupported claims, citation quality, and structural issues. Use for quality review before finalizing.",
             "system_prompt": (
                 "You are the critique specialist for Open Analyst. You improve output quality through rigorous review.\n\n"
                 "Review checklist:\n"
@@ -1523,19 +1546,21 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 "3. Gaps: What important aspects are missing?\n"
                 "4. Confidence calibration: Are uncertainty levels appropriate?\n"
                 "5. Structure: Does the output follow the requested format?\n\n"
-                "Use search_project_documents and read_project_document to verify claims. "
-                "Return specific, actionable feedback with severity levels (critical/major/minor)."
+                "Use search_project_documents and read_project_document to verify claims against sources.\n\n"
+                "IMPORTANT — Context management:\n"
+                "- Return ONLY a structured critique (under 400 words)\n"
+                "- Format: list of issues with severity (critical/major/minor) and specific fix suggestions\n"
+                "- Do NOT restate the entire document being reviewed\n"
+                "- Focus on actionable feedback the supervisor can act on"
             ),
             "model": model,
             "tools": [
                 tool_map["search_project_documents"],
                 tool_map["search_project_memories"],
-                tool_map["list_active_skills"],
                 tool_map["read_project_document"],
-                tool_map["describe_runtime_capabilities"],
             ],
             "middleware": [],
-            "skills": _skill_paths(),
+            # Critic doesn't need skills — it reviews, not creates
         },
     ]
 
