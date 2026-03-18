@@ -36,6 +36,29 @@ export async function action({
   const origin = String(body.origin || "").trim();
   const requestOrigin = new URL(request.url).origin;
 
+  if (Array.isArray(body.items) && body.items.length) {
+    const batch = await stageSourceIngestBatch(params.projectId, {
+      collectionId: typeof body.collectionId === "string" ? body.collectionId : null,
+      collectionName: typeof body.collectionName === "string" ? body.collectionName : null,
+      origin: origin === "web" ? "web" : "literature",
+      query: typeof body.query === "string" ? body.query : "",
+      summary: typeof body.summary === "string" ? body.summary : "",
+      metadata: body.metadata && typeof body.metadata === "object" ? body.metadata : {},
+      items: body.items.map((item: Record<string, unknown>) => ({
+        externalId: typeof item.externalId === "string" ? item.externalId : null,
+        sourceUrl: typeof item.sourceUrl === "string" ? item.sourceUrl : null,
+        title: typeof item.title === "string" ? item.title : "",
+        mimeTypeHint: typeof item.mimeTypeHint === "string" ? item.mimeTypeHint : null,
+        targetFilename: typeof item.targetFilename === "string" ? item.targetFilename : null,
+        normalizedMetadata:
+          item.normalizedMetadata && typeof item.normalizedMetadata === "object"
+            ? (item.normalizedMetadata as Record<string, unknown>)
+            : {},
+      })),
+    });
+    return Response.json({ batch }, { status: 201 });
+  }
+
   if (origin === "literature" && typeof body.query === "string" && body.query.trim()) {
     const batch = await stageLiteratureCollectionBatch(params.projectId, requestOrigin, {
       query: body.query.trim(),
@@ -62,25 +85,5 @@ export async function action({
   if (!Array.isArray(body.items) || !body.items.length) {
     return Response.json({ error: "items are required" }, { status: 400 });
   }
-
-  const batch = await stageSourceIngestBatch(params.projectId, {
-    collectionId: typeof body.collectionId === "string" ? body.collectionId : null,
-    collectionName: typeof body.collectionName === "string" ? body.collectionName : null,
-    origin: origin === "web" ? "web" : "literature",
-    query: typeof body.query === "string" ? body.query : "",
-    summary: typeof body.summary === "string" ? body.summary : "",
-    metadata: body.metadata && typeof body.metadata === "object" ? body.metadata : {},
-    items: body.items.map((item: Record<string, unknown>) => ({
-      externalId: typeof item.externalId === "string" ? item.externalId : null,
-      sourceUrl: typeof item.sourceUrl === "string" ? item.sourceUrl : null,
-      title: typeof item.title === "string" ? item.title : "",
-      mimeTypeHint: typeof item.mimeTypeHint === "string" ? item.mimeTypeHint : null,
-      targetFilename: typeof item.targetFilename === "string" ? item.targetFilename : null,
-      normalizedMetadata:
-        item.normalizedMetadata && typeof item.normalizedMetadata === "object"
-          ? (item.normalizedMetadata as Record<string, unknown>)
-          : {},
-    })),
-  });
-  return Response.json({ batch }, { status: 201 });
+  return Response.json({ error: "Unsupported source ingest payload" }, { status: 400 });
 }

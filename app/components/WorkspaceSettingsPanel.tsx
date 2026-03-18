@@ -35,7 +35,7 @@ const SECTIONS: Array<{
   {
     id: "connectors",
     label: "Connectors",
-    description: "Project defaults and thread overrides",
+    description: "Project defaults and active services",
     icon: Plug,
   },
   {
@@ -72,7 +72,6 @@ const SECTIONS: Array<{
 
 interface WorkspaceSettingsPanelProps {
   projectId: string;
-  taskId?: string;
   workspaceContext: WorkspaceContextData;
   initialData?: SettingsInitialData;
   activeSection?: SettingsSection;
@@ -82,7 +81,6 @@ interface WorkspaceSettingsPanelProps {
 
 export function WorkspaceSettingsPanel({
   projectId,
-  taskId,
   workspaceContext,
   initialData,
   activeSection = "runtime",
@@ -103,9 +101,6 @@ export function WorkspaceSettingsPanel({
   const [defaultConnectorIds, setDefaultConnectorIds] = useState<string[]>(
     workspaceContext.profile.defaultConnectorIds
   );
-  const [threadConnectorIds, setThreadConnectorIds] = useState<string[]>(
-    workspaceContext.activeConnectorIds
-  );
   const [storageDraft, setStorageDraft] = useState({
     workspaceLocalRoot: activeProject?.workspaceLocalRoot || "",
     artifactBackend: activeProject?.artifactBackend || "env",
@@ -117,7 +112,6 @@ export function WorkspaceSettingsPanel({
   });
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const activeSet = useMemo(() => new Set(threadConnectorIds), [threadConnectorIds]);
   const defaultSet = useMemo(() => new Set(defaultConnectorIds), [defaultConnectorIds]);
 
   useEffect(() => {
@@ -125,7 +119,6 @@ export function WorkspaceSettingsPanel({
     setRetrievalPolicy(workspaceContext.profile.retrievalPolicy);
     setProjectBrief(workspaceContext.profile.brief);
     setDefaultConnectorIds(workspaceContext.profile.defaultConnectorIds);
-    setThreadConnectorIds(workspaceContext.activeConnectorIds);
   }, [workspaceContext]);
 
   useEffect(() => {
@@ -152,22 +145,6 @@ export function WorkspaceSettingsPanel({
     }
     if (body.project && typeof body.project === "object") {
       upsertProject(body.project as Parameters<typeof upsertProject>[0]);
-    }
-  };
-
-  const saveTaskContext = async (payload: Record<string, unknown>) => {
-    if (!taskId) return;
-    const response = await fetch(
-      `/api/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(taskId)}`,
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }
-    );
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({}));
-      throw new Error(body.error || "Failed to save thread context");
     }
   };
 
@@ -293,54 +270,6 @@ export function WorkspaceSettingsPanel({
               >
                 Save project defaults
               </button>
-            </div>
-
-            <div className="rounded-xl border border-border bg-background-secondary p-4">
-              <h3 className="text-sm font-semibold mb-3">Thread override</h3>
-              {!taskId ? (
-                <p className="text-sm text-text-secondary">
-                  Start a thread to pin connector overrides for a specific conversation. Until then, the project defaults will be used.
-                </p>
-              ) : (
-                <>
-                  <div className="space-y-2">
-                    {workspaceContext.connectors.map((connector) => (
-                      <label key={`thread-${connector.id}`} className="flex items-start gap-3">
-                        <input
-                          type="checkbox"
-                          className="mt-1"
-                          checked={activeSet.has(connector.id)}
-                          onChange={() => {
-                            setThreadConnectorIds((current) =>
-                              activeSet.has(connector.id)
-                                ? current.filter((value) => value !== connector.id)
-                                : [...current, connector.id]
-                            );
-                          }}
-                        />
-                        <div className="min-w-0">
-                          <div className="text-sm font-medium">{connector.name}</div>
-                          <div className="text-xs text-text-muted">
-                            {connector.connected ? "Connected" : connector.enabled ? "Unavailable" : "Disabled"} · {connector.toolCount} tools
-                          </div>
-                        </div>
-                      </label>
-                    ))}
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn-primary text-sm mt-4"
-                    onClick={() =>
-                      void withStatus(
-                        () => saveTaskContext({ activeConnectorIds: threadConnectorIds }),
-                        "Thread connector override saved."
-                      )
-                    }
-                  >
-                    Save thread override
-                  </button>
-                </>
-              )}
             </div>
 
             <ConnectorsTab

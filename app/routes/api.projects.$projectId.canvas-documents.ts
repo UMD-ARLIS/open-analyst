@@ -6,6 +6,19 @@ import {
 import { parseJsonBody } from "~/lib/request-utils";
 import type { Route } from "./+types/api.projects.$projectId.canvas-documents";
 
+function normalizeCanvasContent(
+  value: unknown,
+  documentType: string | undefined,
+): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value === "string" && (documentType || "markdown") === "markdown") {
+    return { markdown: value };
+  }
+  return {};
+}
+
 export async function loader({ params }: Route.LoaderArgs) {
   const documents = await listCanvasDocuments(params.projectId);
   return Response.json({ documents });
@@ -19,7 +32,7 @@ export async function action({ params, request }: Route.ActionArgs) {
       artifactId: typeof body.artifactId === "string" ? body.artifactId : null,
       title: body.title,
       documentType: body.documentType,
-      content: body.content,
+      content: normalizeCanvasContent(body.content, typeof body.documentType === "string" ? body.documentType : undefined),
       metadata: body.metadata,
     });
     return Response.json({ document });
@@ -35,7 +48,7 @@ export async function action({ params, request }: Route.ActionArgs) {
     const document = await updateCanvasDocument(params.projectId, documentId, {
       title: body.title,
       documentType: body.documentType,
-      content: body.content,
+      content: normalizeCanvasContent(body.content, typeof body.documentType === "string" ? body.documentType : undefined),
       metadata: body.metadata,
       artifactId: body.artifactId,
     });

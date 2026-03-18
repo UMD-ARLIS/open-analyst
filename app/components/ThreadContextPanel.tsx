@@ -4,51 +4,26 @@ import type { WorkspaceContextData } from "~/lib/workspace-context.server";
 
 interface ThreadContextPanelProps {
   projectId: string;
-  taskId?: string;
   workspaceContext: WorkspaceContextData;
 }
 
 export function ThreadContextPanel({
-  projectId: _projectId,
-  taskId,
+  projectId,
   workspaceContext,
 }: ThreadContextPanelProps) {
-  const [activeConnectorIds, setActiveConnectorIds] = useState<string[]>(
-    workspaceContext.activeConnectorIds
-  );
-  const [pinnedSkillIds, setPinnedSkillIds] = useState<string[]>(
-    workspaceContext.pinnedSkillIds
-  );
   const [proposedMemories, setProposedMemories] = useState(workspaceContext.memories.proposed);
   const [activeMemories, setActiveMemories] = useState(workspaceContext.memories.active);
-  const [saving, setSaving] = useState(false);
-  const activeSet = useMemo(() => new Set(activeConnectorIds), [activeConnectorIds]);
-  const pinnedSkillSet = useMemo(() => new Set(pinnedSkillIds), [pinnedSkillIds]);
+  const activeSet = useMemo(() => new Set(workspaceContext.activeConnectorIds), [workspaceContext.activeConnectorIds]);
+  const pinnedSkillSet = useMemo(() => new Set(workspaceContext.pinnedSkillIds), [workspaceContext.pinnedSkillIds]);
 
   useEffect(() => {
-    setActiveConnectorIds(workspaceContext.activeConnectorIds);
-    setPinnedSkillIds(workspaceContext.pinnedSkillIds);
     setProposedMemories(workspaceContext.memories.proposed);
     setActiveMemories(workspaceContext.memories.active);
   }, [workspaceContext]);
 
-  const saveThreadContext = async () => {
-    if (!taskId) return;
-    setSaving(true);
-    try {
-      await fetch(`/api/projects/${encodeURIComponent(_projectId)}/tasks/${encodeURIComponent(taskId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ activeConnectorIds, pinnedSkillIds }),
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const resolveMemory = async (memoryId: string, status: "active" | "dismissed") => {
     const response = await fetch(
-      `/api/projects/${encodeURIComponent(_projectId)}/memory/${encodeURIComponent(memoryId)}`,
+      `/api/projects/${encodeURIComponent(projectId)}/memory/${encodeURIComponent(memoryId)}`,
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -85,43 +60,24 @@ export function ThreadContextPanel({
         </div>
         <div className="space-y-2">
           {workspaceContext.connectors.map((connector) => (
-            <label key={connector.id} className="flex items-start gap-3">
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={activeSet.has(connector.id)}
-                disabled={!taskId}
-                onChange={() =>
-                  setActiveConnectorIds((current) =>
-                    activeSet.has(connector.id)
-                      ? current.filter((value) => value !== connector.id)
-                      : [...current, connector.id]
-                  )
-                }
-              />
-              <div className="min-w-0">
-                <div className="text-sm font-medium">{connector.name}</div>
-                <div className="text-xs text-text-muted">
-                  {connector.connected ? "Connected" : connector.enabled ? "Unavailable" : "Disabled"} · {connector.toolCount} tools
+            <div key={connector.id} className="rounded-lg border border-border px-3 py-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium">{connector.name}</div>
+                  <div className="text-xs text-text-muted">
+                    {connector.connected ? "Connected" : connector.enabled ? "Unavailable" : "Disabled"} · {connector.toolCount} tools
+                  </div>
                 </div>
+                {activeSet.has(connector.id) ? (
+                  <span className="tag text-[11px]">Active</span>
+                ) : null}
               </div>
-            </label>
+            </div>
           ))}
         </div>
-        {taskId ? (
-          <button
-            type="button"
-            className="btn btn-primary text-sm mt-4"
-            onClick={() => void saveThreadContext()}
-            disabled={saving}
-          >
-            Save thread context
-          </button>
-        ) : (
-          <p className="text-xs text-text-muted mt-4">
-            Connector and skill overrides are saved per thread once you start a conversation.
-          </p>
-        )}
+        <p className="text-xs text-text-muted mt-4">
+          Connector defaults are managed from Settings and injected server-side for every thread run.
+        </p>
       </section>
 
       <section className="rounded-xl border border-border bg-background-secondary p-4">
@@ -131,32 +87,24 @@ export function ThreadContextPanel({
         </div>
         <div className="space-y-2">
           {workspaceContext.skills.map((skill) => (
-            <label key={skill.id} className="flex items-start gap-3">
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={pinnedSkillSet.has(skill.id)}
-                disabled={!taskId}
-                onChange={() =>
-                  setPinnedSkillIds((current) =>
-                    pinnedSkillSet.has(skill.id)
-                      ? current.filter((value) => value !== skill.id)
-                      : [...current, skill.id]
-                  )
-                }
-              />
-              <div className="min-w-0">
-                <div className="text-sm font-medium">{skill.name}</div>
-                <div className="text-xs text-text-muted">
-                  {skill.description || "Deep agent skill"}
-                </div>
-                {skill.tools.length > 0 ? (
-                  <div className="text-[11px] text-text-muted mt-1">
-                    Tools: {skill.tools.join(", ")}
+            <div key={skill.id} className="rounded-lg border border-border px-3 py-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium">{skill.name}</div>
+                  <div className="text-xs text-text-muted">
+                    {skill.description || "Deep agent skill"}
                   </div>
+                  {skill.tools.length > 0 ? (
+                    <div className="text-[11px] text-text-muted mt-1">
+                      Tools: {skill.tools.join(", ")}
+                    </div>
+                  ) : null}
+                </div>
+                {pinnedSkillSet.has(skill.id) ? (
+                  <span className="tag text-[11px]">Pinned</span>
                 ) : null}
               </div>
-            </label>
+            </div>
           ))}
         </div>
       </section>

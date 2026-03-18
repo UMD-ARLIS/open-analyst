@@ -17,6 +17,7 @@ from pgvector.psycopg import register_vector_async
 from psycopg.errors import DuplicateTable, UniqueViolation
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
+from psycopg_pool import AsyncConnectionPool
 
 from .config import Settings
 from .db import qualified_table, quoted_identifier
@@ -183,6 +184,7 @@ class PostgresVectorIndex:
         self.schema_name = settings.postgres_schema
         self.table_name = "article_chunks"
         self.table_ref = qualified_table(self.schema_name, self.table_name)
+        self._pool: AsyncConnectionPool | None = None
 
     async def initialize(self) -> None:
         async with await self._connect(register_vector=False) as conn:
@@ -283,15 +285,32 @@ class PostgresVectorIndex:
             for row in rows
         ]
 
-    async def _connect(self, register_vector: bool = True) -> psycopg.AsyncConnection:
-        conn = await psycopg.AsyncConnection.connect(
-            self.settings.psycopg_postgres_dsn,
-            autocommit=True,
-            row_factory=dict_row,
-        )
-        if register_vector:
-            await register_vector_async(conn)
-        return conn
+    def _get_pool(self) -> AsyncConnectionPool:
+        if self._pool is None:
+            self._pool = AsyncConnectionPool(
+                conninfo=self.settings.psycopg_postgres_dsn,
+                kwargs={"autocommit": True, "row_factory": dict_row},
+                min_size=1,
+                max_size=10,
+                open=True,
+            )
+        return self._pool
+
+    async def _connect(self, register_vector: bool = True):
+        connection = self._get_pool().connection()
+        if not register_vector:
+            return connection
+
+        class _RegisteredConnection:
+            async def __aenter__(self_inner):
+                conn = await connection.__aenter__()
+                await register_vector_async(conn)
+                return conn
+
+            async def __aexit__(self_inner, exc_type, exc, tb):
+                return await connection.__aexit__(exc_type, exc, tb)
+
+        return _RegisteredConnection()
 
     async def _create_index(self, conn: psycopg.AsyncConnection, statement: str) -> None:
         try:

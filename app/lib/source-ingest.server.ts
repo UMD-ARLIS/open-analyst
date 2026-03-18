@@ -105,21 +105,50 @@ async function fetchAnalystJson<T>(
   return payload as T;
 }
 
+function deriveCollectionName(input: {
+  origin: "literature" | "web";
+  query?: string | null;
+  collectionName?: string | null;
+  sourceUrl?: string | null;
+}) {
+  const explicit = String(input.collectionName || "").trim();
+  if (explicit) return explicit;
+
+  if (input.origin === "literature") {
+    const normalizedQuery = normalizeWhitespace(String(input.query || "Research Inbox"));
+    const shortened =
+      normalizedQuery.length > 56 ? `${normalizedQuery.slice(0, 53).trim()}...` : normalizedQuery;
+    return shortened || "Research Inbox";
+  }
+
+  if (input.sourceUrl) {
+    try {
+      const hostname = new URL(input.sourceUrl).hostname.replace(/^www\./, "").trim();
+      if (hostname) return `Web - ${hostname}`;
+    } catch {
+      // Fall through to generic web collection name.
+    }
+  }
+
+  return "Research Inbox";
+}
+
 async function resolveTargetCollection(
   projectId: string,
   input: { collectionId?: string | null; collectionName?: string | null }
 ) {
+  const targetName = String(input.collectionName || "Research Inbox").trim() || "Research Inbox";
   if (input.collectionId) {
     const batches = await listSourceIngestBatches(projectId);
     const existing = batches.find((batch) => batch.collectionId === input.collectionId);
     if (existing?.collectionName) {
       return { id: input.collectionId, name: existing.collectionName };
     }
-    return { id: input.collectionId, name: String(input.collectionName || "Research Inbox").trim() || "Research Inbox" };
+    return { id: input.collectionId, name: targetName };
   }
   const collection = await ensureCollection(
     projectId,
-    String(input.collectionName || "Research Inbox").trim() || "Research Inbox",
+    targetName,
     "Collected research sources staged for review"
   );
   return { id: collection.id, name: collection.name };
@@ -183,9 +212,15 @@ export async function stageSourceIngestBatch(
     }>;
   }
 ) {
+  const derivedCollectionName = deriveCollectionName({
+    origin: input.origin,
+    query: input.query,
+    collectionName: input.collectionName,
+    sourceUrl: input.items[0]?.sourceUrl || null,
+  });
   const targetCollection = await resolveTargetCollection(projectId, {
     collectionId: input.collectionId,
-    collectionName: input.collectionName,
+    collectionName: derivedCollectionName,
   });
   return createSourceIngestBatch(projectId, {
     collectionId: targetCollection.id,
@@ -284,7 +319,7 @@ async function upsertSourceDocument(
     metadata: Record<string, unknown>;
   }
 ) {
-  const existing = await getDocumentBySourceUri(projectId, input.sourceUri);
+  const existing = await getDocumentBySourceUri(projectId, input.sourceUri, input.sourceType);
   const document = existing
     ? await updateDocument(projectId, existing.id, input)
     : await createDocument(projectId, input);

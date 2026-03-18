@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { BookOpen, BrainCircuit, FlaskConical, PanelRightOpen, Plug, Settings2, Sparkles, Square, Wrench } from "lucide-react";
 import { useAnalystStream } from "~/hooks/useAnalystStream";
+import { useAppStore } from "~/lib/store";
 import type { Message } from "~/lib/types";
 import type { WorkspaceContextData } from "~/lib/workspace-context.server";
 import { MessageCard } from "./MessageCard";
@@ -79,24 +80,41 @@ export function AssistantWorkspaceView({
   agentThreadId: initialAgentThreadId,
   workspaceContext,
 }: AssistantWorkspaceViewProps) {
+  const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const lastSubmittedPromptRef = useRef<string | null>(null);
+  const hasNavigatedToThreadRef = useRef(false);
+  const hasAutoSubmittedPendingPromptRef = useRef(false);
   const [isResuming, setIsResuming] = useState(false);
+  const activeCollectionId = useAppStore((state) => state.activeCollectionByProject[projectId] || null);
+
+  const navigateToThread = useCallback((threadId: string) => {
+    if (initialAgentThreadId || hasNavigatedToThreadRef.current) return;
+    hasNavigatedToThreadRef.current = true;
+    const next = new URLSearchParams(searchParams);
+    const pendingPrompt = lastSubmittedPromptRef.current;
+    navigate(
+      `/projects/${projectId}/threads/${threadId}${next.toString() ? `?${next.toString()}` : ""}`,
+      {
+        replace: true,
+        state: pendingPrompt ? { pendingPrompt } : null,
+      },
+    );
+  }, [initialAgentThreadId, navigate, projectId, searchParams]);
 
   const stream = useAnalystStream({
     threadId: initialAgentThreadId,
-    onThreadId: useCallback((id: string) => {
-      // Navigate to the thread route when a new thread is created
-      const next = new URLSearchParams(searchParams);
-      navigate(
-        `/projects/${projectId}/threads/${id}${next.toString() ? `?${next.toString()}` : ""}`,
-        { replace: true },
-      );
-    }, [projectId, searchParams, navigate]),
+    onThreadId: useCallback((threadId: string) => {
+      navigateToThread(threadId);
+    }, [navigateToThread]),
+    onCreated: useCallback((meta: { thread_id: string; run_id: string }) => {
+      navigateToThread(meta.thread_id);
+    }, [navigateToThread]),
   });
 
   const deepResearch = searchParams.get("deepResearch") === "true";
@@ -109,6 +127,16 @@ export function AssistantWorkspaceView({
     (skill) => skill.pinned || skill.enabled
   ).length;
   const isProjectHome = !initialAgentThreadId;
+  const pendingPromptFromNavigation = useMemo(() => {
+    const state = location.state as { pendingPrompt?: unknown } | null;
+    return typeof state?.pendingPrompt === "string" && state.pendingPrompt.trim()
+      ? state.pendingPrompt.trim()
+      : null;
+  }, [location.state]);
+  const shouldAutoSubmitPendingPrompt = useMemo(() => {
+    const state = location.state as { autoSubmit?: unknown } | null;
+    return state?.autoSubmit === true;
+  }, [location.state]);
 
   // Stream messages from Agent Server (converted to our format)
   const displayedMessages = useMemo(() => {
@@ -119,6 +147,21 @@ export function AssistantWorkspaceView({
       ))
       .filter((m): m is Message => m !== null);
   }, [stream.messages, initialAgentThreadId]);
+
+  const renderedMessages = useMemo(() => {
+    if (displayedMessages.length > 0 || !initialAgentThreadId || !pendingPromptFromNavigation) {
+      return displayedMessages;
+    }
+    return [
+      {
+        id: `pending-${initialAgentThreadId}`,
+        sessionId: initialAgentThreadId,
+        role: "user" as const,
+        content: [{ type: "text", text: pendingPromptFromNavigation }],
+        timestamp: Date.now(),
+      },
+    ];
+  }, [displayedMessages, initialAgentThreadId, pendingPromptFromNavigation]);
 
   // Interrupt from Agent Server
   const interruptValue = useMemo(() => {
@@ -144,9 +187,7 @@ export function AssistantWorkspaceView({
 
   // Extract subagents for a given message from the stream
   const getSubagentsForMessage = useCallback((messageId: string) => {
-    const getter = (stream as unknown as {
-      getSubagentsByMessage?: (id: string) => unknown[];
-    }).getSubagentsByMessage;
+    const getter = stream.getSubagentsByMessage;
     if (!getter) return [];
     try {
       return (getter(messageId) || []) as Array<Record<string, unknown>>;
@@ -160,7 +201,7 @@ export function AssistantWorkspaceView({
     const node = scrollRef.current;
     if (!node) return;
     node.scrollTop = node.scrollHeight;
-  }, [displayedMessages.length, stream.isLoading]);
+  }, [renderedMessages.length, stream.isLoading, stream.isThreadLoading]);
 
   const setPanel = (panel: string | null) => {
     setSearchParams(
@@ -184,25 +225,154 @@ export function AssistantWorkspaceView({
     if (!nextPrompt || stream.isLoading) return;
 
     setPrompt("");
+    lastSubmittedPromptRef.current = nextPrompt;
+    hasNavigatedToThreadRef.current = false;
+
+    if (!initialAgentThreadId) {
+      try {
+        const response = await fetch("/api/runtime/threads", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+          },
+          body: JSON.stringify({
+            metadata: {
+              project_id: projectId,
+              analysis_mode: deepResearch ? "deep_research" : "chat",
+            },
+          }),
+        });
+        if (!response.ok) {
+          throw new Error(`Thread creation failed with status ${response.status}`);
+        }
+        const payload = await response.json() as { thread_id?: unknown };
+        const threadId =
+          typeof payload.thread_id === "string" && payload.thread_id.trim()
+            ? payload.thread_id.trim()
+            : "";
+        if (!threadId) {
+          throw new Error("Thread creation response did not include a thread id.");
+        }
+        const next = new URLSearchParams(searchParams);
+        navigate(
+          `/projects/${projectId}/threads/${threadId}${next.toString() ? `?${next.toString()}` : ""}`,
+          {
+            replace: true,
+            state: {
+              pendingPrompt: nextPrompt,
+              autoSubmit: true,
+            },
+          },
+        );
+        return;
+      } catch (error) {
+        lastSubmittedPromptRef.current = null;
+        setPrompt(nextPrompt);
+        const message = error instanceof Error ? error.message : String(error);
+        setErrorMessage(message);
+        console.error("[AssistantWorkspaceView] thread creation failed", error);
+        return;
+      }
+    }
 
     try {
       stream.submit(
         { messages: [{ role: "human", content: nextPrompt }] },
         {
-          config: { configurable: { project_id: projectId } },
-          metadata: { project_id: projectId },
+          optimisticValues: (prev: Record<string, unknown>) => ({
+            ...prev,
+            messages: [
+              ...(
+                Array.isArray(prev.messages)
+                  ? prev.messages
+                  : []
+              ),
+              {
+                id: `optimistic-${Date.now()}`,
+                type: "human",
+                content: nextPrompt,
+              },
+            ],
+          }),
+          config: {
+            configurable: {
+              project_id: projectId,
+              collection_id: activeCollectionId,
+              analysis_mode: deepResearch ? "deep_research" : "chat",
+            },
+          },
+          metadata: {
+            project_id: projectId,
+            analysis_mode: deepResearch ? "deep_research" : "chat",
+          },
           streamSubgraphs: true,
           onDisconnect: "continue",
           streamResumable: true,
         } as any,
       );
     } catch (error) {
+      lastSubmittedPromptRef.current = null;
       setPrompt(nextPrompt);
       const message = error instanceof Error ? error.message : String(error);
       setErrorMessage(message);
       console.error("[AssistantWorkspaceView] submit failed", error);
     }
   };
+
+  useEffect(() => {
+    if (!initialAgentThreadId) return;
+    if (!shouldAutoSubmitPendingPrompt || !pendingPromptFromNavigation) return;
+    if (hasAutoSubmittedPendingPromptRef.current) return;
+    if (stream.isLoading || stream.isThreadLoading) return;
+    hasAutoSubmittedPendingPromptRef.current = true;
+    stream.submit(
+      { messages: [{ role: "human", content: pendingPromptFromNavigation }] },
+      {
+        optimisticValues: (prev: Record<string, unknown>) => ({
+          ...prev,
+          messages: [
+            ...(
+              Array.isArray(prev.messages)
+                ? prev.messages
+                : []
+            ),
+            {
+              id: `optimistic-${Date.now()}`,
+              type: "human",
+              content: pendingPromptFromNavigation,
+            },
+          ],
+        }),
+        config: {
+          configurable: {
+            project_id: projectId,
+            collection_id: activeCollectionId,
+            analysis_mode: deepResearch ? "deep_research" : "chat",
+          },
+        },
+        metadata: {
+          project_id: projectId,
+          analysis_mode: deepResearch ? "deep_research" : "chat",
+        },
+        streamSubgraphs: true,
+        onDisconnect: "continue",
+        streamResumable: true,
+      } as any,
+    );
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+  }, [
+    activeCollectionId,
+    deepResearch,
+    initialAgentThreadId,
+    location.pathname,
+    location.search,
+    navigate,
+    pendingPromptFromNavigation,
+    projectId,
+    shouldAutoSubmitPendingPrompt,
+    stream,
+  ]);
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -273,7 +443,7 @@ export function AssistantWorkspaceView({
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
-          {displayedMessages.length === 0 && !stream.isLoading ? (
+          {renderedMessages.length === 0 && !stream.isLoading && !stream.isThreadLoading ? (
             <div className="card p-8 text-center">
               <h2 className="text-lg font-semibold mb-2">
                 {isProjectHome ? "Start a new analyst thread" : "Start an analyst conversation"}
@@ -304,11 +474,11 @@ export function AssistantWorkspaceView({
             </div>
           ) : null}
 
-          {displayedMessages.map((message) => (
+          {renderedMessages.map((message) => (
             <React.Fragment key={message.id}>
               <MessageCard
                 message={message}
-                isStreaming={stream.isLoading && message === displayedMessages[displayedMessages.length - 1]}
+                isStreaming={stream.isLoading && message === renderedMessages[renderedMessages.length - 1]}
               />
               {/* Inline subagent cards after assistant messages that delegated */}
               {message.role === "assistant" && (

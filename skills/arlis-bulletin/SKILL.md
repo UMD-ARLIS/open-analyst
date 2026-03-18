@@ -49,6 +49,29 @@ Use this skill when the user wants to:
 9. **SAT evaluation** — Evaluate the draft against SAT standards (see "SAT Evaluation" below)
 10. **Visual QA** — Convert to PDF/images and visually inspect
 
+## Host Path Rules
+
+Deep Agents exposes skills under the virtual `/skills/...` filesystem for agent file tools, but shell commands and Python scripts run on the host filesystem. That means:
+
+- Use `/skills/...` only with agent file tools such as `read_file`, `write_file`, `glob`, or `grep`
+- Never hardcode `/skills/...` inside Python scripts or shell commands executed with `execute_command`
+- For shell/Python execution, use the host env vars injected by Open Analyst:
+  - `$OPEN_ANALYST_SKILLS_ROOT` → real repo `skills/` directory
+  - `$OPEN_ANALYST_REPO_ROOT` → repo root
+  - `$OPEN_ANALYST_PROJECT_WORKSPACE` → current project workspace root
+
+When generating helper scripts, resolve skill asset paths through those env vars. Example:
+
+```python
+import os
+
+skills_root = os.environ["OPEN_ANALYST_SKILLS_ROOT"]
+template_path = os.path.join(skills_root, "arlis-bulletin", "assets", "template.docx")
+script_path = os.path.join(skills_root, "arlis-bulletin", "scripts", "generate_bulletin.py")
+```
+
+Use the actual template filename `template.docx`. Do not invent alternative names such as `arlis-bulletin-template.docx`.
+
 ## Structured Analysis
 
 Before drafting, apply at least one structured analytic technique to strengthen the analysis:
@@ -173,8 +196,8 @@ The "About ARLIS Insights" section and contact info are already in the template 
 ## Step 3: Generate the Document
 
 ```bash
-python <skill-path>/scripts/generate_bulletin.py \
-  --template <skill-path>/assets/template.docx \
+python "$OPEN_ANALYST_SKILLS_ROOT/arlis-bulletin/scripts/generate_bulletin.py" \
+  --template "$OPEN_ANALYST_SKILLS_ROOT/arlis-bulletin/assets/template.docx" \
   --output <output-path>/bulletin.docx \
   --title "Your Analytic Title Here" \
   --date "DD Month YYYY" \
@@ -207,7 +230,7 @@ After generating, apply the four-sweeps checklist. Read `references/analytic-wri
 Convert the output to images and inspect:
 
 ```bash
-python <docx-skill-path>/scripts/office/soffice.py --headless --convert-to pdf <output>.docx
+python "$OPEN_ANALYST_REPO_ROOT/skills/docx/scripts/office/soffice.py" --headless --convert-to pdf <output>.docx
 pdftoppm -jpeg -r 150 <output>.pdf page
 ```
 

@@ -105,7 +105,7 @@ export async function action({
       "Published canvas drafts and deliverables"
     );
     const sourceUri = `artifact:${artifact.id}`;
-    const existing = await getDocumentBySourceUri(params.projectId, sourceUri);
+    const existing = await getDocumentBySourceUri(params.projectId, sourceUri, "canvas");
     const doc = existing
       ? await updateDocument(params.projectId, existing.id, {
           collectionId: collection.id,

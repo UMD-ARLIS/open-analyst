@@ -69,70 +69,6 @@ export interface HeadlessDocument {
   updatedAt: number;
 }
 
-export interface HeadlessRun {
-  id: string;
-  threadId?: string | null;
-  title: string;
-  mode: string;
-  status: string;
-  intent: string;
-  latestOutput: string;
-  plan?: Array<Record<string, unknown>>;
-  runtimeState?: Record<string, unknown>;
-  startedAt?: number | string | null;
-  completedAt?: number | string | null;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface HeadlessRunStep {
-  id: string;
-  runId: string;
-  stepType: string;
-  actor: string;
-  title: string;
-  status: string;
-  payload?: Record<string, unknown>;
-  startedAt?: number | string | null;
-  completedAt?: number | string | null;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface HeadlessApproval {
-  id: string;
-  runId: string;
-  stepId?: string | null;
-  kind: string;
-  status: string;
-  title: string;
-  description: string;
-  requestPayload?: Record<string, unknown>;
-  responsePayload?: Record<string, unknown>;
-  createdAt: number;
-  updatedAt: number;
-  resolvedAt?: number | string | null;
-}
-
-export interface HeadlessEvidenceItem {
-  id: string;
-  projectId: string;
-  runId?: string | null;
-  collectionId?: string | null;
-  documentId?: string | null;
-  artifactId?: string | null;
-  title: string;
-  evidenceType: string;
-  sourceUri?: string | null;
-  citationText: string;
-  extractedText: string;
-  confidence: string;
-  provenance?: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
-  createdAt: number;
-  updatedAt: number;
-}
-
 export interface HeadlessArtifact {
   id: string;
   projectId: string;
@@ -261,145 +197,21 @@ export async function headlessRagQuery(
   const response = await requestJson<{
     query: string;
     totalCandidates: number;
+    status?: string;
+    error?: string | null;
     results?: HeadlessRagResult[];
   }>(`/projects/${encodeURIComponent(projectId)}/rag/query`, {
     method: 'POST',
     body: JSON.stringify({ query, collectionId, limit }),
   });
+  if (response.status === "error") {
+    throw new Error(response.error || "Project retrieval failed.");
+  }
   return {
     query: response.query || query,
     totalCandidates: Number(response.totalCandidates || 0),
     results: Array.isArray(response.results) ? response.results : [],
   };
-}
-
-export async function headlessGetRun(
-  projectId: string,
-  runId: string
-): Promise<{ run: HeadlessRun | null; approvals: HeadlessApproval[] }> {
-  try {
-    const response = await requestJson<{ run?: HeadlessRun; approvals?: HeadlessApproval[] }>(
-      `/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}`
-    );
-    return {
-      run: response.run || null,
-      approvals: Array.isArray(response.approvals) ? response.approvals : [],
-    };
-  } catch {
-    return { run: null, approvals: [] };
-  }
-}
-
-export async function headlessCreateRun(
-  projectId: string,
-  payload: { prompt: string; threadId?: string; mode?: string }
-): Promise<{ run: HeadlessRun; thread: { id: string; title: string } }> {
-  return requestJson(`/projects/${encodeURIComponent(projectId)}/runs`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-export async function headlessGetRunSteps(
-  projectId: string,
-  runId: string
-): Promise<HeadlessRunStep[]> {
-  const response = await requestJson<{ steps?: HeadlessRunStep[] }>(
-    `/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/steps`
-  );
-  return Array.isArray(response.steps) ? response.steps : [];
-}
-
-export interface HeadlessRunStreamEvent {
-  type: string;
-  text?: string;
-  phase?: string;
-  status?: string;
-  actor?: string;
-  plan?: Array<Record<string, unknown>>;
-  evidence?: Array<Record<string, unknown>>;
-  error?: string;
-}
-
-export async function headlessStreamRun(
-  projectId: string,
-  runId: string,
-  onEvent?: (event: HeadlessRunStreamEvent) => void
-): Promise<void> {
-  const res = await fetch(
-    `${getHeadlessApiBase()}/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/stream`
-  );
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `HTTP ${res.status}`);
-  }
-
-  const reader = res.body?.getReader();
-  if (!reader) throw new Error("No response body");
-
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let currentEvent = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
-
-    for (const line of lines) {
-      if (line.startsWith("event: ")) {
-        currentEvent = line.slice(7).trim();
-      } else if (line.startsWith("data: ") && currentEvent) {
-        try {
-          const data = JSON.parse(line.slice(6)) as HeadlessRunStreamEvent;
-          data.type = currentEvent;
-          onEvent?.(data);
-        } catch {
-          // skip malformed event
-        }
-        currentEvent = "";
-      }
-    }
-  }
-}
-
-export async function headlessInterruptRun(
-  projectId: string,
-  runId: string,
-  reason?: string
-): Promise<{ run: HeadlessRun }> {
-  return requestJson(`/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/interrupt`, {
-    method: "POST",
-    body: JSON.stringify({ reason }),
-  });
-}
-
-export async function headlessApproveRun(
-  projectId: string,
-  runId: string,
-  approvalId: string,
-  approved: boolean,
-  response: Record<string, unknown> = {}
-): Promise<{ approval: HeadlessApproval }> {
-  return requestJson(`/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/approve`, {
-    method: "POST",
-    body: JSON.stringify({ approvalId, approved, response }),
-  });
-}
-
-export async function headlessGetEvidence(
-  projectId: string,
-  options?: { runId?: string; collectionId?: string }
-): Promise<HeadlessEvidenceItem[]> {
-  const params = new URLSearchParams();
-  if (options?.runId) params.set("runId", options.runId);
-  if (options?.collectionId) params.set("collectionId", options.collectionId);
-  const response = await requestJson<{ evidence?: HeadlessEvidenceItem[] }>(
-    `/projects/${encodeURIComponent(projectId)}/evidence${params.toString() ? `?${params.toString()}` : ""}`
-  );
-  return Array.isArray(response.evidence) ? response.evidence : [];
 }
 
 export async function headlessGetArtifacts(projectId: string): Promise<{

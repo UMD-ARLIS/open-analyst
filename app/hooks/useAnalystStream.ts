@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useStream } from "@langchain/langgraph-sdk/react";
+import { useStream, type UseDeepAgentStream } from "@langchain/langgraph-sdk/react";
 
 /**
  * Wraps the LangGraph `useStream` hook for the Open Analyst deep agent.
@@ -10,6 +10,7 @@ import { useStream } from "@langchain/langgraph-sdk/react";
 export function useAnalystStream(opts: {
   threadId?: string;
   onThreadId?: (threadId: string) => void;
+  onCreated?: (meta: { thread_id: string; run_id: string }) => void;
 }) {
   const apiUrl = useMemo(() => {
     if (typeof window !== "undefined") {
@@ -26,11 +27,13 @@ export function useAnalystStream(opts: {
     apiUrl,
     threadId: opts.threadId,
     onThreadId: opts.onThreadId,
+    onCreated: opts.onCreated,
+    fetchStateHistory: { limit: false },
     filterSubagentMessages: true,
     subagentToolNames: ["task"],
     // Rejoin in-progress runs when navigating back to a thread
-    reconnectOnMount: typeof window !== "undefined" ? window.sessionStorage : undefined,
-  } as unknown as Parameters<typeof useStream>[0]);
+    reconnectOnMount: true,
+  } as unknown as Parameters<typeof useStream>[0]) as UseDeepAgentStream;
 
   return stream;
 }

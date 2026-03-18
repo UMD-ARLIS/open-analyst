@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { createProject, deleteProject, deleteAllProjects, waitForHydration } from "./helpers";
 
-test.describe("QuickStartDashboard", () => {
+test.describe("AssistantWorkspaceView", () => {
   let projectId: string;
 
   test.beforeEach(async ({ request }) => {
@@ -13,21 +13,21 @@ test.describe("QuickStartDashboard", () => {
     await deleteProject(request, projectId);
   });
 
-  test('shows "What do you want to work on?" heading', async ({ page }) => {
+  test('shows "Start a new analyst thread" heading', async ({ page }) => {
     await page.goto(`/projects/${projectId}`);
     await waitForHydration(page);
     await expect(
-      page.getByText("What do you want to work on?")
+      page.getByText("Start a new analyst thread")
     ).toBeVisible();
   });
 
-  test("task input textarea present and editable", async ({ page }) => {
+  test("thread input textarea is present and editable", async ({ page }) => {
     await page.goto(`/projects/${projectId}`);
     await waitForHydration(page);
-    const textarea = page.getByPlaceholder("Describe your task…");
+    const textarea = page.getByPlaceholder("Ask the analyst to research, reason, critique, or draft...");
     await expect(textarea).toBeVisible();
-    await textarea.fill("Test task input");
-    await expect(textarea).toHaveValue("Test task input");
+    await textarea.fill("Test thread input");
+    await expect(textarea).toHaveValue("Test thread input");
   });
 
   test("Deep Research toggle toggles tag-active class", async ({ page }) => {
@@ -48,24 +48,13 @@ test.describe("QuickStartDashboard", () => {
     await expect(toggle).not.toHaveClass(/tag-active/);
   });
 
-  test('"Set working directory" and "Manage knowledge" links visible', async ({
+  test('"New Thread" and "Browse Sources" actions visible', async ({
     page,
   }) => {
     await page.goto(`/projects/${projectId}`);
     await waitForHydration(page);
-    await expect(
-      page.getByText("Set working directory")
-    ).toBeVisible();
-    await expect(page.getByText("Manage knowledge")).toBeVisible();
-  });
-
-  test('"Manage knowledge" navigates to /knowledge', async ({ page }) => {
-    await page.goto(`/projects/${projectId}`);
-    await waitForHydration(page);
-    await page.getByText("Manage knowledge").click();
-    await expect(page).toHaveURL(
-      new RegExp(`/projects/${projectId}/knowledge`)
-    );
+    await expect(page.getByRole("button", { name: "New Thread" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Browse Sources" })).toBeVisible();
   });
 
   test("empty index route shows onboarding message when no projects", async ({

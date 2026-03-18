@@ -8,20 +8,25 @@ import { sanitizeFilename, inferExtension } from "~/lib/file-utils";
 import { parseJsonBody } from "~/lib/request-utils";
 import type { Route } from "./+types/api.projects.$projectId.import.file";
 
-function inferTextFromBuffer(
+async function extractTextFromBuffer(
   buffer: Buffer,
   mimeType: string,
   filename: string
-): string {
+): Promise<string> {
   const type = String(mimeType || "").toLowerCase();
   const lowerName = String(filename || "").toLowerCase();
-  const isOfficeArchive =
-    type.includes("openxmlformats") ||
-    lowerName.endsWith(".docx") ||
-    lowerName.endsWith(".pptx") ||
-    lowerName.endsWith(".xlsx");
-  if (isOfficeArchive) {
-    return "";
+  if (
+    type.includes("wordprocessingml.document") ||
+    lowerName.endsWith(".docx")
+  ) {
+    try {
+      const mammothModule = await import("mammoth");
+      const mammoth = (mammothModule as any).default ?? mammothModule;
+      const extracted = await mammoth.extractRawText({ buffer });
+      return String(extracted?.value || "").replace(/\s+/g, " ").trim();
+    } catch {
+      return "";
+    }
   }
   if (
     type.includes("text/") ||
@@ -75,7 +80,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     buffer,
   });
 
-  let content = inferTextFromBuffer(buffer, mimeType, filename);
+  let content = await extractTextFromBuffer(buffer, mimeType, filename);
   if (
     !content &&
     (mimeType.includes("pdf") || filename.toLowerCase().endsWith(".pdf"))

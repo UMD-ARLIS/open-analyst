@@ -6,13 +6,21 @@ from typing import Any
 import httpx
 import psycopg
 from psycopg.rows import dict_row
+from psycopg_pool import AsyncConnectionPool
 
 from config import settings
 
 logger = logging.getLogger(__name__)
 
 
+class RuntimeRetrievalError(RuntimeError):
+    pass
+
+
 class RuntimeRetrievalService:
+    def __init__(self) -> None:
+        self._pool: AsyncConnectionPool | None = None
+
     async def search_project_documents(
         self,
         project_id: str,
@@ -242,19 +250,17 @@ class RuntimeRetrievalService:
 
     async def _fetch(self, query: str, params: Any) -> list[dict[str, Any]]:
         if not settings.database_url_psycopg:
-            return []
+            raise RuntimeRetrievalError("Runtime retrieval database is not configured.")
         try:
-            async with await psycopg.AsyncConnection.connect(
-                settings.database_url_psycopg,
-                row_factory=dict_row,
-            ) as conn:
+            pool = self._get_pool()
+            async with pool.connection() as conn:
                 async with conn.cursor() as cursor:
                     await cursor.execute(query, params)
                     rows = await cursor.fetchall()
             return list(rows)
-        except Exception:
+        except Exception as exc:
             logger.exception("Database fetch failed")
-            return []
+            raise RuntimeRetrievalError(f"Runtime retrieval query failed: {exc}") from exc
 
     def _vector_literal(self, embedding: list[float]) -> str:
         normalized = [float(value) for value in embedding if isinstance(value, (int, float))]
@@ -290,6 +296,7 @@ class RuntimeRetrievalService:
                 limit=limit,
             )
         except Exception:
+            logger.exception("Store-backed memory search failed")
             return []
 
         memories: list[dict[str, Any]] = []
@@ -313,6 +320,17 @@ class RuntimeRetrievalService:
 
     def _memory_namespace(self, project_id: str) -> tuple[str, ...]:
         return ("open-analyst", "projects", project_id, "memories")
+
+    def _get_pool(self) -> AsyncConnectionPool:
+        if self._pool is None:
+            self._pool = AsyncConnectionPool(
+                conninfo=settings.database_url_psycopg,
+                kwargs={"row_factory": dict_row},
+                min_size=1,
+                max_size=10,
+                open=True,
+            )
+        return self._pool
 
 
 retrieval_service = RuntimeRetrievalService()

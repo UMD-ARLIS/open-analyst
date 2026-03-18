@@ -239,7 +239,8 @@ const TOOL_DEFS: Array<{
     type: "function",
     function: {
       name: "execute_command",
-      description: "Run a shell command in the working directory",
+      description:
+        "Run a shell command in the working directory. Use the cwd argument instead of prefixing commands with cd.",
       parameters: {
         type: "object",
         properties: {

@@ -127,6 +127,47 @@ class TestGetProjectConfig:
         assert result["project_id"] == "p2"
 
 
+class TestWorkspaceRoot:
+    @pytest.fixture(autouse=True)
+    def _import_fn(self):
+        from graph import _workspace_root
+        self._workspace_root = _workspace_root
+
+    def test_does_not_create_missing_directory(self, tmp_path):
+        target = tmp_path / "missing-workspace"
+        resolved = self._workspace_root(str(target))
+        assert resolved == target.resolve()
+        assert not target.exists()
+
+
+class TestGetRuntimeConfigurable:
+    @pytest.fixture(autouse=True)
+    def _import_fn(self):
+        from graph import _get_runtime_configurable
+        self._get_runtime_configurable = _get_runtime_configurable
+
+    def test_prefers_runtime_config_when_available(self):
+        runtime = SimpleNamespace(config={"configurable": {"project_id": "p1", "workspace_path": "/tmp/ws"}})
+        assert self._get_runtime_configurable(runtime) == {
+            "project_id": "p1",
+            "workspace_path": "/tmp/ws",
+        }
+
+    def test_falls_back_to_langgraph_get_config(self, monkeypatch):
+        import graph
+
+        monkeypatch.setattr(
+            graph,
+            "get_config",
+            lambda: {"configurable": {"project_id": "p2", "workspace_path": "/tmp/runtime"}},
+        )
+        runtime = SimpleNamespace()
+        assert self._get_runtime_configurable(runtime) == {
+            "project_id": "p2",
+            "workspace_path": "/tmp/runtime",
+        }
+
+
 # ── RuntimeProjectContext model validation -----------------------------------
 
 class TestRuntimeProjectContext:

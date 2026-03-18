@@ -1,14 +1,32 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router";
-import { headlessGetEvidence, type HeadlessEvidenceItem } from "~/lib/headless-api";
+
+interface EvidenceItem {
+  id: string;
+  title: string;
+  evidenceType: string;
+  sourceUri?: string | null;
+  citationText: string;
+  extractedText: string;
+  confidence: string;
+}
 
 export function EvidenceWorkspaceView() {
   const params = useParams();
   const projectId = params.projectId!;
-  const [items, setItems] = useState<HeadlessEvidenceItem[]>([]);
+  const [items, setItems] = useState<EvidenceItem[]>([]);
 
   useEffect(() => {
-    headlessGetEvidence(projectId).then(setItems).catch(() => setItems([]));
+    void fetch(`/api/projects/${encodeURIComponent(projectId)}/evidence`)
+      .then(async (response) => {
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(body.error || `HTTP ${response.status}`);
+        }
+        return Array.isArray(body.evidence) ? body.evidence as EvidenceItem[] : [];
+      })
+      .then(setItems)
+      .catch(() => setItems([]));
   }, [projectId]);
 
   return (

@@ -1,6 +1,6 @@
 import type { APIRequestContext, Page } from "@playwright/test";
 
-export const BASE_URL = "http://localhost:5173";
+export const BASE_URL = process.env.BASE_URL || "http://localhost:5173";
 export const E2E_PREFIX =
   process.env.E2E_PREFIX || `e2e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -89,17 +89,6 @@ export async function createDocument(
 /** Wait for the app layout to finish hydrating (Zustand store synced from loader). */
 export async function waitForHydration(page: Page) {
   await page.locator("[data-hydrated]").waitFor({ state: "attached" });
-}
-
-/** Delete a task via the API. */
-export async function deleteTask(
-  request: APIRequestContext,
-  projectId: string,
-  taskId: string
-): Promise<void> {
-  await request.delete(
-    `${BASE_URL}/api/projects/${projectId}/tasks/${taskId}`
-  );
 }
 
 export async function listCredentials(

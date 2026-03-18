@@ -16,7 +16,6 @@ export function ProjectLeftPanel() {
   const [searchParams, setSearchParams] = useSearchParams();
   const panel = searchParams.get("panel");
   const projectId = params.projectId;
-  const taskId = params.taskId;
   const [width, setWidth] = useState<number>(() => {
     if (typeof window === "undefined") return DEFAULT_WIDTH;
     const stored = Number(window.localStorage.getItem(STORAGE_KEY) || DEFAULT_WIDTH);
@@ -119,7 +118,6 @@ export function ProjectLeftPanel() {
         {panel === "settings" ? (
           <WorkspaceSettingsPanel
             projectId={projectId}
-            taskId={taskId}
             workspaceContext={workspaceContext}
             initialData={{ currentModel }}
             activeSection={settingsTab}
@@ -139,7 +137,6 @@ export function ProjectLeftPanel() {
         ) : (
           <ThreadContextPanel
             projectId={projectId}
-            taskId={taskId}
             workspaceContext={workspaceContext}
           />
         )}

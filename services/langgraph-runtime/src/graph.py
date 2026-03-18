@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import shlex
 from pathlib import Path
@@ -13,6 +14,8 @@ import httpx
 from config import settings
 from retrieval import retrieval_service
 from telemetry import get_tracer
+
+logger = logging.getLogger(__name__)
 
 try:
     from deepagents import create_deep_agent
@@ -58,8 +61,12 @@ try:
 except ImportError:  # pragma: no cover
     ToolRuntime = None
 
+try:
+    from langgraph.config import get_config
+except ImportError:  # pragma: no cover
+    get_config = None
+
 tracer = get_tracer()
-logger = logging.getLogger(__name__)
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
@@ -110,6 +117,28 @@ def _get_project_config(runtime: Any) -> dict[str, Any]:
         return {}
     config = getattr(runtime, "config", {}) or {}
     return config.get("configurable", {})
+
+
+def _get_runtime_configurable(runtime: Any | None = None) -> dict[str, Any]:
+    """Read the active configurable payload for both tools and middleware.
+
+    Deep Agents middleware receives ``langgraph.runtime.Runtime`` which does not
+    expose ``.config``. In that path, LangGraph's ``get_config()`` is the
+    supported way to access the current RunnableConfig.
+    """
+    runtime_config = getattr(runtime, "config", None) if runtime is not None else None
+    if isinstance(runtime_config, dict):
+        configurable = runtime_config.get("configurable", {})
+        if isinstance(configurable, dict):
+            return configurable
+    if get_config is None:
+        return {}
+    try:
+        current = get_config() or {}
+    except RuntimeError:
+        return {}
+    configurable = current.get("configurable", {})
+    return configurable if isinstance(configurable, dict) else {}
 
 
 def _repo_root() -> Path:
@@ -224,7 +253,9 @@ def _system_prompt() -> str:
         "Plan before acting, retrieve only relevant context, use skills and tools deliberately, "
         "delegate when specialized work is needed, and iterate when evidence is weak. "
         "Prefer grounded answers with explicit uncertainty. "
-        "When the user asks what you can do, answer from the actual active tools, connectors, and skills.\n\n"
+        "When the user asks what you can do, answer from the actual active tools, connectors, and skills. "
+        "Your direct tools are limited to project retrieval, capability inspection, canvas inspection, "
+        "and memory proposals; specialized work should be delegated.\n\n"
         "## Delegation\n"
         "Use the `task` tool to delegate specialized work to subagents:\n"
         "- subagent_type='researcher': evidence gathering, literature search, source discovery\n"
@@ -237,7 +268,8 @@ def _system_prompt() -> str:
         "the objective, relevant evidence/findings so far, constraints, and expected output format. "
         "Do not say 'use the results from earlier' — paste the actual results into the description.\n\n"
         "You can invoke multiple task() calls in parallel for independent work "
-        "(e.g., researcher gathering sources while drafter prepares a template).\n\n"
+        "(e.g., multiple researcher tasks for separate questions, or researcher gathering sources while drafter prepares a template).\n"
+        "When a research request naturally decomposes into independent lines of effort, launch multiple researcher tasks in parallel before synthesizing.\n\n"
         "## Planning\n"
         "Before beginning complex work, use `write_todos` to create a visible plan. "
         "Update todos as you progress through each step. "
@@ -257,12 +289,14 @@ def _system_prompt() -> str:
         "- Assess confidence using IC probabilistic language (remote, unlikely, roughly even, likely, highly likely, almost certain)\n\n"
         "### End-to-End Analytic Workflow\n"
         "For a complete analytic product (bulletin, assessment, brief):\n"
-        "1. task(researcher): gather sources and evidence\n"
-        "2. Synthesize findings, apply ACH or argument mapping as appropriate\n"
-        "3. task(drafter): create the structured product\n"
-        "4. task(critic): evaluate against SAT standards and Four Sweeps\n"
-        "5. If critic finds critical issues: task(drafter) again with feedback\n"
-        "6. task(drafter): finalize and publish\n\n"
+        "1. write_todos: create a visible plan\n"
+        "2. Decompose the research question into 2-4 independent subquestions when possible\n"
+        "3. task(researcher) in parallel for each subquestion or hypothesis branch\n"
+        "4. Synthesize findings, apply ACH or argument mapping as appropriate, and identify confidence/gaps\n"
+        "5. task(drafter): create the structured product and update canvas/workspace artifacts\n"
+        "6. task(critic): evaluate against SAT standards and Four Sweeps\n"
+        "7. If critic finds critical issues: task(drafter) again with feedback\n"
+        "8. task(drafter): finalize and publish\n\n"
         "## Rate limits\n"
         "Be efficient with tool calls. Synthesize after one or two targeted searches "
         "rather than exhaustive retrieval. When gathering large amounts of data, "
@@ -341,6 +375,55 @@ def _summarize_literature_payload(payload: dict[str, Any], *, limit: int) -> str
         ),
     }
     return json.dumps(summary, ensure_ascii=False)
+
+
+def _normalize_literature_item_for_ingest(item: dict[str, Any]) -> dict[str, Any] | None:
+    canonical_id = str(
+        item.get("canonical_id") or item.get("canonicalId") or item.get("paper_id") or ""
+    ).strip()
+    if not canonical_id:
+        return None
+    title = _clean_text(item.get("title"), limit=220) or "Untitled Article"
+    pdf_url = _clean_text(item.get("pdf_url"), limit=200) or None
+    url = _clean_text(item.get("url"), limit=200) or pdf_url
+    return {
+        "externalId": canonical_id,
+        "sourceUrl": url,
+        "title": title,
+        "mimeTypeHint": "application/pdf" if pdf_url else None,
+        "targetFilename": f"{re.sub(r'[^A-Za-z0-9._-]+', '-', title).strip('-') or canonical_id}.pdf",
+        "normalizedMetadata": {
+            "canonicalId": canonical_id,
+            "provider": _clean_text(item.get("provider"), limit=80) or None,
+            "doi": _clean_text(item.get("doi"), limit=120) or None,
+            "url": url,
+            "pdfUrl": pdf_url,
+            "venue": _clean_text(item.get("venue"), limit=120) or None,
+            "abstract": _clean_text(item.get("abstract"), limit=1200) or None,
+            "publishedAt": _clean_text(item.get("published_at"), limit=32)
+            or _clean_text(item.get("publishedAt"), limit=32)
+            or None,
+            "citationCount": int(item.get("citation_count") or item.get("citationCount") or 0),
+            "authors": _clean_authors(item.get("authors"), limit=12),
+            "topics": [
+                _clean_text(topic, limit=80)
+                for topic in (item.get("topics") if isinstance(item.get("topics"), list) else [])
+                if _clean_text(topic, limit=80)
+            ][:12],
+        },
+    }
+
+
+def _approval_unavailable(tool_name: str) -> str:
+    return json.dumps(
+        {
+            "status": "error",
+            "error": (
+                f"{tool_name} requires human approval, but interrupt handling is unavailable "
+                "for this runtime."
+            ),
+        }
+    )
 
 
 
@@ -596,9 +679,7 @@ def _workspace_root(workspace_path: str) -> Path:
     raw_path = str(workspace_path or "").strip()
     if not raw_path:
         raise RuntimeError("Project workspace is not configured for this runtime request.")
-    workspace = Path(raw_path).expanduser().resolve()
-    workspace.mkdir(parents=True, exist_ok=True)
-    return workspace
+    return Path(raw_path).expanduser().resolve()
 
 
 def _resolve_virtual_or_workspace_path(workspace_path: str, input_path: str) -> Path:
@@ -644,8 +725,6 @@ def _safe_command_parts(command: str) -> list[str]:
     allowed = {
         "python",
         "python3",
-        "bash",
-        "sh",
         "node",
         "npx",
         "npm",
@@ -729,7 +808,11 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
 
     @tool
     async def execute_command(command: str, cwd: str = ".", runtime: ToolRuntime = None) -> str:
-        """Execute an allowed shell command inside the project workspace."""
+        """Execute an allowed shell command inside the project workspace.
+
+        Use the ``cwd`` argument to change directories. Do not prefix commands
+        with ``cd`` or use shell chaining for directory changes.
+        """
         cfg = _get_project_config(runtime)
         workspace_path = cfg.get("workspace_path", "")
         if not cfg.get("project_id"):
@@ -741,6 +824,12 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         process = await asyncio.create_subprocess_exec(
             *parts,
             cwd=str(working_dir),
+            env={
+                **os.environ,
+                "OPEN_ANALYST_REPO_ROOT": str(_repo_root()),
+                "OPEN_ANALYST_SKILLS_ROOT": str(_skills_root()),
+                "OPEN_ANALYST_PROJECT_WORKSPACE": str(_workspace_root(workspace_path)),
+            },
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -911,8 +1000,7 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
                 "message": f"Found {len(compact)} sources for '{query}'. Select which to add to project.",
             })
         else:
-            # Fallback: auto-approve all if interrupt not available
-            approval = {"approved": True, "approved_indices": list(range(len(compact)))}
+            return _approval_unavailable("stage_literature_collection")
 
         if not isinstance(approval, dict) or not approval.get("approved"):
             return json.dumps({"status": "rejected", "message": "Source collection was declined by the user."})
@@ -928,38 +1016,84 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         if not approved_results:
             return json.dumps({"status": "rejected", "message": "No sources selected."})
 
-        # Step 5: Stage and auto-approve (user already approved in chat)
+        approved_items: list[dict[str, Any]] = []
+        for item in approved_results:
+            if not isinstance(item, dict):
+                continue
+            normalized = _normalize_literature_item_for_ingest(item)
+            if normalized is None:
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "error": "One or more approved literature items are missing canonical identifiers.",
+                    }
+                )
+            approved_items.append(normalized)
+
+        if not approved_items:
+            return json.dumps({"status": "error", "error": "No approved literature items could be normalized."})
+
+        # Step 5: Stage and approve the exact user-selected items
         stage_payload = await _stage_source_ingest_api(
             api_base_url,
             project_id,
             {
                 "origin": "literature",
                 "query": query,
-                "limit": len(approved_results),
-                "dateFrom": date_from or None,
-                "dateTo": date_to or None,
+                "summary": f"Approved {len(approved_items)} literature source(s) from analyst search.",
+                "metadata": {
+                    "dateFrom": date_from or None,
+                    "dateTo": date_to or None,
+                    "sources": sources or [],
+                    "approvedCount": len(approved_items),
+                },
                 "collectionId": cfg.get("collection_id"),
                 "collectionName": collection_name or None,
-                "sources": sources or [],
+                "items": approved_items,
             },
         )
         batch = stage_payload.get("batch") if isinstance(stage_payload, dict) else None
         batch_id = str((batch or {}).get("id") or "").strip()
-        if batch_id:
-            await _approve_source_batch_api(api_base_url, project_id, batch_id)
-        else:
+        if not batch_id:
             logger.error(
                 "stage_literature_collection: batch_id empty after staging "
                 "(stage_payload keys=%s, batch=%r)",
                 list(stage_payload.keys()) if isinstance(stage_payload, dict) else None,
                 batch,
             )
+            return json.dumps({"status": "error", "error": "Failed to stage source ingest batch"})
+
+        approval_payload = await _approve_source_batch_api(api_base_url, project_id, batch_id)
+        approved_batch = approval_payload.get("batch") if isinstance(approval_payload, dict) else None
+        if not isinstance(approved_batch, dict):
+            return json.dumps(
+                {
+                    "status": "error",
+                    "batch_id": batch_id,
+                    "error": "Source ingest approval failed before import results were returned.",
+                }
+            )
+
+        items_payload = approved_batch.get("items") if isinstance(approved_batch.get("items"), list) else []
+        completed_items = [item for item in items_payload if isinstance(item, dict) and item.get("status") == "completed"]
+        failed_items = [
+            {
+                "title": _clean_text(item.get("title"), limit=180),
+                "error": _clean_text(item.get("error"), limit=240),
+            }
+            for item in items_payload
+            if isinstance(item, dict) and item.get("status") == "failed"
+        ]
+        batch_status = str(approved_batch.get("status") or "").strip()
 
         return json.dumps({
-            "status": "approved" if batch_id else "error",
-            "count": len(approved_results),
-            "batch_id": batch_id or None,
-            "error": None if batch_id else "Failed to stage source ingest batch",
+            "status": "approved" if batch_status == "completed" and not failed_items else "error",
+            "count": len(completed_items),
+            "requested_count": len(approved_items),
+            "batch_id": batch_id,
+            "batch_status": batch_status or None,
+            "failed_items": failed_items,
+            "error": None if batch_status == "completed" and not failed_items else "One or more approved sources failed to import.",
         })
 
     @tool
@@ -985,7 +1119,7 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
                 "message": f"Add web source to project?\n\nURL: {url}\nTitle: {title or '(auto-detect)'}",
             })
         else:
-            approval = {"approved": True}
+            return _approval_unavailable("stage_web_source")
 
         if not isinstance(approval, dict) or not approval.get("approved"):
             return json.dumps({"status": "rejected", "message": "Web source capture was declined."})
@@ -1003,20 +1137,43 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         )
         batch = payload.get("batch") if isinstance(payload, dict) else None
         batch_id = str((batch or {}).get("id") or "").strip()
-        if batch_id:
-            await _approve_source_batch_api(api_base_url, project_id, batch_id)
-        else:
+        if not batch_id:
             logger.error(
                 "stage_web_source: batch_id empty after staging (payload keys=%s, batch=%r)",
                 list(payload.keys()) if isinstance(payload, dict) else None,
                 batch,
             )
+            return json.dumps({"status": "error", "url": url, "error": "Failed to stage web source batch"})
 
+        approval_payload = await _approve_source_batch_api(api_base_url, project_id, batch_id)
+        approved_batch = approval_payload.get("batch") if isinstance(approval_payload, dict) else None
+        if not isinstance(approved_batch, dict):
+            return json.dumps(
+                {
+                    "status": "error",
+                    "url": url,
+                    "batch_id": batch_id,
+                    "error": "Web source approval failed before import results were returned.",
+                }
+            )
+
+        items_payload = approved_batch.get("items") if isinstance(approved_batch.get("items"), list) else []
+        failed_items = [
+            {
+                "title": _clean_text(item.get("title"), limit=180),
+                "error": _clean_text(item.get("error"), limit=240),
+            }
+            for item in items_payload
+            if isinstance(item, dict) and item.get("status") == "failed"
+        ]
+        batch_status = str(approved_batch.get("status") or "").strip()
         return json.dumps({
-            "status": "approved" if batch_id else "error",
+            "status": "approved" if batch_status == "completed" and not failed_items else "error",
             "url": url,
-            "batch_id": batch_id or None,
-            "error": None if batch_id else "Failed to stage web source batch",
+            "batch_id": batch_id,
+            "batch_status": batch_status or None,
+            "failed_items": failed_items,
+            "error": None if batch_status == "completed" and not failed_items else "Web source import failed.",
         })
 
     @tool
@@ -1183,6 +1340,9 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 "3. Use search_project_memories for relevant prior findings\n"
                 "4. Use read_project_document to get full text of promising sources\n"
                 "5. Use stage_literature_collection or stage_web_source to collect sources for the project\n\n"
+                "If the assigned research contains multiple independent questions, actors, or hypotheses, "
+                "focus on your assigned slice and leave cross-slice synthesis to the supervisor.\n"
+                "When staging sources and no collection is already active, suggest a concise collection name derived from the topic.\n"
                 "After one or two targeted searches, synthesize rather than continuing to search.\n\n"
                 "IMPORTANT — Context management:\n"
                 "- Return ONLY a structured summary of findings (under 500 words)\n"
@@ -1281,14 +1441,15 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
         },
         {
             # Override the DeepAgents auto-included general-purpose subagent.
-            # Without this, it gets the generic DeepAgents prompt, inherits all
-            # parent tools, and spins on unfocused work.
+            # Keep it narrow so it acts as a context-isolation fallback rather
+            # than bypassing the specialized researcher/drafter/critic flow.
             "name": "general-purpose",
-            "description": "General-purpose analyst assistant for tasks that don't clearly fit researcher, drafter, or critic roles.",
+            "description": "Fallback analyst for cross-cutting synthesis tasks that do not fit researcher, drafter, or critic roles.",
             "system_prompt": (
-                "You are a general-purpose analyst assistant for Open Analyst.\n\n"
-                "You handle tasks that don't clearly fit the researcher, drafter, or critic specializations. "
-                "You have access to both research tools and drafting tools.\n\n"
+                "You are a narrow fallback analyst for Open Analyst.\n\n"
+                "Use this role only for cross-cutting synthesis that does not clearly belong to the "
+                "researcher, drafter, or critic. You may inspect project context and prepare short "
+                "intermediate syntheses, but you must not execute commands or publish artifacts.\n\n"
                 "IMPORTANT — Context management:\n"
                 "- Return ONLY a concise summary of results (under 500 words)\n"
                 "- Save large outputs to workspace files and reference them\n"
@@ -1301,11 +1462,6 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["search_project_memories"],
                 tool_map["search_literature"],
                 tool_map["list_canvas_documents"],
-                tool_map["save_canvas_markdown"],
-                tool_map["publish_canvas_document"],
-                tool_map["publish_workspace_file"],
-                tool_map["capture_artifact"],
-                tool_map["execute_command"],
             ],
             "middleware": [],
             # general-purpose inherits skills from parent agent automatically
@@ -1318,17 +1474,14 @@ def _build_backend() -> Any:
         return None
 
     def namespace(runtime: Any) -> tuple[str, ...]:
-        config = getattr(runtime, "config", {}) or {}
-        project_id = config.get("configurable", {}).get("project_id", "default")
+        config = _get_runtime_configurable(runtime)
+        project_id = str(config.get("project_id", "default") or "default")
         return ("open-analyst", "projects", project_id, "memories")
 
     def _backend_factory(runtime: Any) -> Any:
-        config = getattr(runtime, "config", {}) or {}
-        workspace_path = config.get("configurable", {}).get("workspace_path", "")
-        if workspace_path:
-            default_root = _workspace_root(workspace_path)
-        else:
-            default_root = _repo_root()
+        config = _get_runtime_configurable(runtime)
+        workspace_path = str(config.get("workspace_path", "") or "")
+        default_root = _workspace_root(workspace_path)
         return CompositeBackend(
             default=(
                 FilesystemBackend(

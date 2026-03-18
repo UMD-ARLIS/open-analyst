@@ -1,4 +1,4 @@
-import { eq, desc, and, sql } from "drizzle-orm";
+import { eq, desc, and, or, sql } from "drizzle-orm";
 import { db } from "../index.server";
 import {
   collections,
@@ -8,7 +8,6 @@ import {
 } from "../schema";
 import {
   buildKnowledgeEmbeddingText,
-  cosineSimilarity,
   embedKnowledgeTexts,
   isKnowledgeEmbeddingConfigured,
 } from "~/lib/knowledge-embedding.server";
@@ -168,17 +167,25 @@ export async function getDocument(
 
 export async function getDocumentBySourceUri(
   projectId: string,
-  sourceUri: string
+  sourceUri: string,
+  sourceType?: string | null,
 ): Promise<Document | undefined> {
   const trimmed = String(sourceUri || "").trim();
   if (!trimmed) return undefined;
 
+  const predicates = [
+    eq(documents.projectId, projectId),
+    eq(documents.sourceUri, trimmed),
+  ];
+  const trimmedSourceType = String(sourceType || "").trim();
+  if (trimmedSourceType) {
+    predicates.push(eq(documents.sourceType, trimmedSourceType));
+  }
+
   const [doc] = await db
     .select()
     .from(documents)
-    .where(
-      and(eq(documents.projectId, projectId), eq(documents.sourceUri, trimmed))
-    )
+    .where(and(...predicates))
     .limit(1);
   return doc;
 }
@@ -349,6 +356,8 @@ export interface RagQueryResult {
   queryVariants: string[];
   totalCandidates: number;
   results: RagResult[];
+  status?: "ok" | "degraded" | "error";
+  error?: string | null;
 }
 
 const STOPWORDS = new Set([
@@ -414,119 +423,77 @@ export async function queryDocuments(
   options: { limit?: number; collectionId?: string } = {}
 ): Promise<RagQueryResult> {
   const limit = Math.min(20, Math.max(1, Number(options.limit || 8)));
-  const docs = await listDocuments(projectId, options.collectionId);
   const variants = buildQueryVariants(query);
+  const totalCandidates = await countDocuments(projectId, options.collectionId);
   const semanticQueryText = buildKnowledgeEmbeddingText({
     title: query,
     content: query,
   });
-  let queryEmbedding: number[] | null = null;
+
   if (semanticQueryText && isKnowledgeEmbeddingConfigured()) {
     try {
       const [embedding] = await embedKnowledgeTexts([semanticQueryText]);
-      queryEmbedding = embedding || null;
-    } catch {
-      queryEmbedding = null;
-    }
-  }
-
-  // Build doc stats
-  const df = new Map<string, number>();
-  const tokenizedDocs = docs.map((doc) => {
-    const tokens = tokenize(`${doc.title || ""} ${doc.content || ""}`)
-      .map(normalizeToken)
-      .filter(Boolean);
-    const unique = new Set(tokens);
-    for (const token of unique) {
-      df.set(token, (df.get(token) || 0) + 1);
-    }
-    return { doc, tokens, text: `${doc.title || ""} ${doc.content || ""}`.toLowerCase() };
-  });
-
-  const aggregated = new Map<string, { doc: Document; score: number; snippetTokens: string[] }>();
-
-  for (const variant of variants) {
-    const queryTokens = tokenizeQuery(variant);
-    for (const entry of tokenizedDocs) {
-      const tf = new Map<string, number>();
-      for (const token of entry.tokens) {
-        tf.set(token, (tf.get(token) || 0) + 1);
-      }
-      let score = 0;
-      for (const token of queryTokens) {
-        const termFreq = tf.get(token) || 0;
-        if (!termFreq) continue;
-        const docFreq = df.get(token) || 1;
-        const idf = Math.log(1 + docs.length / docFreq);
-        score += termFreq * idf;
-      }
-      const loweredQuery = variant.toLowerCase();
-      if (loweredQuery && entry.text.includes(loweredQuery)) score += 3;
-      if (score <= 0) continue;
-
-      const existing = aggregated.get(entry.doc.id) || {
-        doc: entry.doc,
-        score: 0,
-        snippetTokens: [],
-      };
-      existing.score = Math.max(existing.score, score);
-      existing.snippetTokens = queryTokens;
-      aggregated.set(entry.doc.id, existing);
-    }
-  }
-
-  if (queryEmbedding) {
-    const vectorRows = await queryDocumentsByVector(projectId, queryEmbedding, {
-      limit: Math.max(limit * 2, 12),
-      collectionId: options.collectionId,
-    });
-    const vectorScores = new Map(vectorRows.map((row) => [row.id, row.score]));
-
-    for (const doc of docs) {
-      const vectorScore = vectorScores.get(doc.id);
-      if (vectorScore && vectorScore > 0) {
-        const existing = aggregated.get(doc.id) || {
-          doc,
-          score: 0,
-          snippetTokens: tokenizeQuery(query),
+      const queryEmbedding = embedding || null;
+      if (!queryEmbedding?.length) {
+        return {
+          query,
+          queryVariants: variants,
+          totalCandidates,
+          results: [],
+          status: "error",
+          error: "Embedding service returned no query vector.",
         };
-        existing.score = Math.max(existing.score, vectorScore);
-        aggregated.set(doc.id, existing);
-        continue;
       }
-
-      const embedding = Array.isArray(doc.embedding) ? doc.embedding : null;
-      if (!embedding?.length) continue;
-      const semanticScore = cosineSimilarity(queryEmbedding, embedding);
-      if (semanticScore <= 0) continue;
-
-      const existing = aggregated.get(doc.id) || {
-        doc,
-        score: 0,
-        snippetTokens: tokenizeQuery(query),
+      const vectorRows = await queryDocumentsByVector(projectId, queryEmbedding, {
+        limit,
+        collectionId: options.collectionId,
+      });
+      return {
+        query,
+        queryVariants: variants,
+        totalCandidates,
+        results: vectorRows.map((row) => ({
+          id: row.id,
+          title: row.title,
+          sourceUri: row.sourceUri,
+          score: Number(row.score.toFixed(3)),
+          snippet: extractSnippet(row.content || "", tokenizeQuery(query)),
+          metadata: row.metadata || {},
+        })),
+        status: "ok",
+        error: null,
       };
-      existing.score = Math.max(existing.score, semanticScore * 8);
-      aggregated.set(doc.id, existing);
+    } catch (error) {
+      return {
+        query,
+        queryVariants: variants,
+        totalCandidates,
+        results: [],
+        status: "error",
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
   }
 
-  const scored: RagResult[] = Array.from(aggregated.values())
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit)
-    .map(({ doc, score, snippetTokens }) => ({
-      id: doc.id,
-      title: doc.title,
-      sourceUri: doc.sourceUri,
-      score: Number(score.toFixed(3)),
-      snippet: extractSnippet(doc.content || "", snippetTokens),
-      metadata: doc.metadata || {},
-    }));
+  const fallbackRows = await queryDocumentsByTextFallback(projectId, variants, {
+    limit,
+    collectionId: options.collectionId,
+  });
 
   return {
     query,
     queryVariants: variants,
-    totalCandidates: docs.length,
-    results: scored,
+    totalCandidates,
+    results: fallbackRows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      sourceUri: row.sourceUri,
+      score: Number(row.score.toFixed(3)),
+      snippet: extractSnippet(row.content || "", tokenizeQuery(query)),
+      metadata: row.metadata || {},
+    })),
+    status: "degraded",
+    error: null,
   };
 }
 
@@ -534,7 +501,14 @@ async function queryDocumentsByVector(
   projectId: string,
   embedding: number[],
   options: { limit?: number; collectionId?: string } = {}
-): Promise<Array<{ id: string; score: number }>> {
+): Promise<Array<{
+  id: string;
+  title: string | null;
+  sourceUri: string | null;
+  content: string;
+  metadata: unknown;
+  score: number;
+}>> {
   const normalized = normalizeEmbedding(embedding);
   if (!normalized.length) {
     return [];
@@ -548,6 +522,10 @@ async function queryDocumentsByVector(
   const rows = await db
     .select({
       id: documents.id,
+      title: documents.title,
+      sourceUri: documents.sourceUri,
+      content: documents.content,
+      metadata: documents.metadata,
       score: sql<number>`greatest(0, (1 - (${documents.embeddingVector} <=> ${vectorLiteral})) * 8)`,
     })
     .from(documents)
@@ -555,6 +533,85 @@ async function queryDocumentsByVector(
     .orderBy(sql`${documents.embeddingVector} <=> ${vectorLiteral}`)
     .limit(limit);
   return rows.filter((row) => Number.isFinite(row.score) && row.score > 0);
+}
+
+async function queryDocumentsByTextFallback(
+  projectId: string,
+  variants: string[],
+  options: { limit?: number; collectionId?: string } = {},
+): Promise<Array<{
+  id: string;
+  title: string | null;
+  sourceUri: string | null;
+  content: string;
+  metadata: unknown;
+  score: number;
+}>> {
+  const limit = Math.min(50, Math.max(1, Number(options.limit || 8)));
+  const terms = variants.map((variant) => variant.trim()).filter(Boolean).slice(0, 6);
+  if (!terms.length) {
+    return [];
+  }
+
+  const searchPredicates = terms.map((term) =>
+    or(
+      sql`${documents.title} ilike ${`%${term}%`}`,
+      sql`${documents.content} ilike ${`%${term}%`}`,
+    ),
+  );
+  const clauses = [
+    eq(documents.projectId, projectId),
+    ...(options.collectionId ? [eq(documents.collectionId, options.collectionId)] : []),
+    or(...searchPredicates),
+  ];
+  const rows = await db
+    .select({
+      id: documents.id,
+      title: documents.title,
+      sourceUri: documents.sourceUri,
+      content: documents.content,
+      metadata: documents.metadata,
+      updatedAt: documents.updatedAt,
+    })
+    .from(documents)
+    .where(and(...clauses))
+    .orderBy(desc(documents.updatedAt))
+    .limit(Math.max(limit * 3, 18));
+
+  return rows
+    .map((row) => {
+      const lowered = `${row.title || ""} ${row.content || ""}`.toLowerCase();
+      const score = terms.reduce((current, term) => {
+        const normalized = term.toLowerCase();
+        if (!normalized) return current;
+        if (lowered.includes(normalized)) {
+          return current + 2.5;
+        }
+        const tokens = tokenizeQuery(normalized);
+        return current + tokens.reduce((tokenScore, token) => (
+          lowered.includes(token) ? tokenScore + 0.35 : tokenScore
+        ), 0);
+      }, 0);
+      return {
+        ...row,
+        score,
+      };
+    })
+    .filter((row) => row.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+
+async function countDocuments(projectId: string, collectionId?: string): Promise<number> {
+  const clauses = [
+    eq(documents.projectId, projectId),
+    ...(collectionId ? [eq(documents.collectionId, collectionId)] : []),
+  ];
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(documents)
+    .where(and(...clauses));
+  return Number(row?.count || 0);
 }
 
 function normalizeEmbedding(values: number[]): number[] {

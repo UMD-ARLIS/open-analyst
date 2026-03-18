@@ -4,7 +4,6 @@ export default [
   layout("routes/_app.tsx", [
     index("routes/_app._index.tsx"),
     route("projects/:projectId", "routes/_app.projects.$projectId.tsx"),
-    route("projects/:projectId/tasks/:taskId", "routes/_app.projects.$projectId.tasks.$taskId.tsx"),
     route("projects/:projectId/threads/:threadId", "routes/_app.projects.$projectId.threads.$threadId.tsx"),
     route("projects/:projectId/knowledge", "routes/_app.projects.$projectId.knowledge.tsx"),
     route("projects/:projectId/evidence", "routes/_app.projects.$projectId.evidence.tsx"),
