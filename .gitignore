@@ -68,3 +68,9 @@ dist*
 resources/node
 resources/tools
 resources/python
+
+# Local analyst/runtime artifacts
+collections/
+workspace/
+world_models_*.md
+services/langgraph-runtime/.langgraph_api/

@@ -698,6 +698,60 @@ def test_provider_registry_ranks_results_by_query_match() -> None:
 
 
 @pytest.mark.asyncio
+async def test_provider_registry_search_all_detailed_returns_partial_results_on_provider_failure() -> None:
+    class FailingProvider:
+        source_name = "openalex"
+        settings = type("Settings", (), {"provider_search_timeout_seconds": 5.0})()
+
+        async def search(self, query: str, limit: int, date_from: str | None = None, date_to: str | None = None):
+            raise RuntimeError("upstream unavailable")
+
+    class WorkingProvider:
+        source_name = "arxiv"
+        settings = type("Settings", (), {"provider_search_timeout_seconds": 5.0})()
+
+        async def search(self, query: str, limit: int, date_from: str | None = None, date_to: str | None = None):
+            return [
+                PaperRecord(
+                    canonical_id="paper:ok",
+                    provider="arxiv",
+                    source_id="1234.5678",
+                    title="Useful Result",
+                )
+            ]
+
+    registry = ProviderRegistry([FailingProvider(), WorkingProvider()])  # type: ignore[arg-type]
+
+    summary = await registry.search_all_detailed("resilient logistics", 5)
+
+    assert summary.status == "partial"
+    assert len(summary.records) == 1
+    assert summary.records[0].title == "Useful Result"
+    assert "openalex" in summary.provider_status
+    assert summary.provider_status["arxiv"].startswith("ok")
+    assert any("openalex search failed" in warning for warning in summary.warnings)
+
+
+@pytest.mark.asyncio
+async def test_provider_registry_search_all_detailed_returns_error_when_all_providers_fail() -> None:
+    class FailingProvider:
+        source_name = "openalex"
+        settings = type("Settings", (), {"provider_search_timeout_seconds": 5.0})()
+
+        async def search(self, query: str, limit: int, date_from: str | None = None, date_to: str | None = None):
+            raise RuntimeError("upstream unavailable")
+
+    registry = ProviderRegistry([FailingProvider()])  # type: ignore[arg-type]
+
+    summary = await registry.search_all_detailed("resilient logistics", 5)
+
+    assert summary.status == "error"
+    assert summary.records == []
+    assert summary.error is not None
+    assert any("openalex search failed" in warning for warning in summary.warnings)
+
+
+@pytest.mark.asyncio
 async def test_describe_capabilities_matches_mcp_tool_surface(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     configure_test_env(monkeypatch, tmp_path)
     service = AnalystService(Settings())

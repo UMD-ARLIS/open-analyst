@@ -161,6 +161,56 @@ class TestWorkspaceRoot:
         assert not target.exists()
 
 
+class TestLiteratureSearchPayloads:
+    @pytest.fixture(autouse=True)
+    def _import_helpers(self):
+        from graph import _literature_search_failure, _summarize_literature_payload
+
+        self._literature_search_failure = _literature_search_failure
+        self._summarize_literature_payload = _summarize_literature_payload
+
+    def test_detects_structured_search_failure_without_results(self):
+        payload = {
+            "status": "error",
+            "results": [],
+            "error": "Literature search request failed: connection refused.",
+            "warnings": ["openalex search failed"],
+            "provider_status": {"openalex": "error: connection refused"},
+            "sources_used": ["openalex"],
+        }
+
+        failure = self._literature_search_failure(payload)
+
+        assert failure is not None
+        assert failure["status"] == "error"
+        assert "connection refused" in failure["message"]
+        assert failure["provider_status"]["openalex"].startswith("error:")
+
+    def test_summary_preserves_partial_status_and_warnings(self):
+        payload = {
+            "query": "resilient logistics",
+            "current_date": "2026-03-19",
+            "status": "partial",
+            "warnings": ["openalex search timed out after 45 seconds."],
+            "provider_status": {"openalex": "timeout after 45s", "arxiv": "ok (1 results)"},
+            "results": [
+                {
+                    "title": "Useful Result",
+                    "published_at": "2026-03-01",
+                    "venue": "arXiv",
+                    "authors": [{"name": "Jane Doe"}],
+                    "abstract": "A useful paper.",
+                }
+            ],
+        }
+
+        summary = self._summarize_literature_payload(payload, limit=5)
+
+        assert '"status": "partial"' in summary
+        assert '"provider_status"' in summary
+        assert "openalex search timed out" in summary
+
+
 # ── RuntimeProjectContext model validation -----------------------------------
 
 class TestRuntimeProjectContext:

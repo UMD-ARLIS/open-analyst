@@ -241,7 +241,17 @@ function ToolResultBlock({
       try {
         const parsed = JSON.parse(trimmed);
         if (typeof parsed === "object" && parsed.status) {
-          return `${parsed.status}${parsed.count ? ` (${parsed.count} items)` : ""}`;
+          const status = String(parsed.status);
+          const detail =
+            typeof parsed.message === "string"
+              ? parsed.message
+              : typeof parsed.error === "string"
+                ? parsed.error
+                : Array.isArray(parsed.warnings) && typeof parsed.warnings[0] === "string"
+                  ? parsed.warnings[0]
+                  : "";
+          const suffix = parsed.count ? ` (${parsed.count} items)` : "";
+          return detail ? `${status}${suffix}: ${detail}` : `${status}${suffix}`;
         }
       } catch { /* use raw */ }
     }

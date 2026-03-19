@@ -440,17 +440,52 @@ def _summarize_literature_payload(payload: dict[str, Any], *, limit: int) -> str
     summary = {
         "query": _clean_text(payload.get("query"), limit=200),
         "current_date": _clean_text(payload.get("current_date"), limit=32) or None,
+        "status": _clean_text(payload.get("status"), limit=24) or "ok",
         "sources_used": payload.get("sources_used")
         if isinstance(payload.get("sources_used"), list)
         else [],
+        "warnings": [
+            _clean_text(item, limit=220)
+            for item in (payload.get("warnings") if isinstance(payload.get("warnings"), list) else [])
+            if _clean_text(item, limit=220)
+        ],
+        "provider_status": payload.get("provider_status")
+        if isinstance(payload.get("provider_status"), dict)
+        else {},
+        "error": _clean_text(payload.get("error"), limit=240) or None,
         "result_count": len(compact_results),
         "results": compact_results,
         "note": (
             "Results are already ranked and trimmed for synthesis. "
             "Use them directly; do not read any large tool-result files."
+            if compact_results
+            else "If status is partial or error, explain the failure clearly and either retry with narrower sources or proceed with available evidence."
         ),
     }
     return json.dumps(summary, ensure_ascii=False)
+
+
+def _literature_search_failure(payload: dict[str, Any]) -> dict[str, Any] | None:
+    status = str(payload.get("status") or "").strip().lower()
+    raw_results = payload.get("results")
+    result_count = len(raw_results) if isinstance(raw_results, list) else 0
+    if result_count > 0:
+        return None
+    if status not in {"partial", "error"} and not payload.get("error"):
+        return None
+    warnings = payload.get("warnings") if isinstance(payload.get("warnings"), list) else []
+    return {
+        "status": "error",
+        "message": _clean_text(payload.get("error"), limit=240)
+        or _clean_text(warnings[0] if warnings else "Literature search failed.", limit=240),
+        "warnings": [_clean_text(item, limit=220) for item in warnings if _clean_text(item, limit=220)],
+        "provider_status": payload.get("provider_status")
+        if isinstance(payload.get("provider_status"), dict)
+        else {},
+        "sources_used": payload.get("sources_used")
+        if isinstance(payload.get("sources_used"), list)
+        else [],
+    }
 
 
 def _normalize_literature_item_for_ingest(item: dict[str, Any]) -> dict[str, Any] | None:
@@ -650,7 +685,16 @@ async def _search_literature_api(
 ) -> dict[str, Any]:
     base_url = settings.analyst_mcp_base_url.rstrip("/")
     if not base_url:
-        return {"results": [], "sources_used": [], "current_date": None}
+        return {
+            "query": query,
+            "results": [],
+            "sources_used": sources or [],
+            "current_date": None,
+            "status": "error",
+            "warnings": ["Literature search backend is not configured."],
+            "provider_status": {},
+            "error": "Literature search backend is not configured.",
+        }
     try:
         headers = {
             "x-api-key": settings.analyst_mcp_api_key,
@@ -675,10 +719,50 @@ async def _search_literature_api(
             )
             response.raise_for_status()
             payload = response.json()
-        return payload if isinstance(payload, dict) else {"results": []}
+        if isinstance(payload, dict):
+            payload.setdefault("query", query)
+            payload.setdefault("sources_used", sources or [])
+            payload.setdefault("status", "ok")
+            payload.setdefault("warnings", [])
+            payload.setdefault("provider_status", {})
+            payload.setdefault("error", None)
+            return payload
+        return {
+            "query": query,
+            "results": [],
+            "sources_used": sources or [],
+            "current_date": None,
+            "status": "error",
+            "warnings": ["Literature search returned an invalid response payload."],
+            "provider_status": {},
+            "error": "Literature search returned an invalid response payload.",
+        }
+    except httpx.TimeoutException as exc:
+        detail = _clean_text(str(exc) or "request timed out", limit=220)
+        logger.warning("Search literature API call timed out: %s", detail)
+        return {
+            "query": query,
+            "results": [],
+            "sources_used": sources or [],
+            "current_date": None,
+            "status": "error",
+            "warnings": [f"Literature search timed out: {detail}."],
+            "provider_status": {},
+            "error": f"Literature search timed out before any results were returned: {detail}.",
+        }
     except Exception as exc:
         logger.warning("Search literature API call failed: %s", exc)
-        return {"results": [], "sources_used": [], "current_date": None}
+        detail = _clean_text(str(exc) or exc.__class__.__name__, limit=220)
+        return {
+            "query": query,
+            "results": [],
+            "sources_used": sources or [],
+            "current_date": None,
+            "status": "error",
+            "warnings": [f"Literature search request failed: {detail}."],
+            "provider_status": {},
+            "error": f"Literature search request failed: {detail}.",
+        }
 
 
 async def _stage_source_ingest_api(
@@ -1045,6 +1129,9 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
             date_to=date_to or None,
             sources=sources,
         )
+        search_failure = _literature_search_failure(search_payload)
+        if search_failure is not None:
+            return json.dumps(search_failure)
         results = search_payload.get("results") if isinstance(search_payload.get("results"), list) else []
         if not results:
             return json.dumps({"status": "no_results", "message": f"No literature found for '{query}'."})
@@ -1068,12 +1155,20 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
 
         # Step 3: Interrupt for user approval with full paper list
         if interrupt is not None:
+            approval_message = f"Found {len(compact)} sources for '{query}'. Select which to add to project."
+            warnings = search_payload.get("warnings") if isinstance(search_payload.get("warnings"), list) else []
+            if warnings:
+                approval_message += f"\n\nSearch warnings: {_clean_text(warnings[0], limit=220)}"
             approval = interrupt({
                 "type": "source_collection_approval",
                 "query": query,
                 "total_found": len(compact),
                 "sources": compact,
-                "message": f"Found {len(compact)} sources for '{query}'. Select which to add to project.",
+                "message": approval_message,
+                "provider_status": search_payload.get("provider_status")
+                if isinstance(search_payload.get("provider_status"), dict)
+                else {},
+                "warnings": warnings,
             })
         else:
             return _approval_unavailable("stage_literature_collection")

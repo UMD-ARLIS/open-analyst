@@ -43,6 +43,10 @@ class SearchResponse(BaseModel):
     current_date: str
     results: list[PaperRecord]
     sources_used: list[str]
+    status: Literal["ok", "partial", "error"] = "ok"
+    warnings: list[str] = Field(default_factory=list)
+    provider_status: dict[str, str] = Field(default_factory=dict)
+    error: str | None = None
 
 
 class DownloadResult(BaseModel):
