@@ -1,9 +1,10 @@
 import { getProjectProfile } from "~/lib/db/queries/workspace.server";
+import { env } from "~/lib/env.server";
 import { getMcpStatus, getMcpTools, listMcpServers } from "~/lib/mcp.server";
 import { listActiveSkills } from "~/lib/skills.server";
 import { listAvailableTools } from "~/lib/tools.server";
 
-const RUNTIME_URL = process.env.RUNTIME_URL || "http://localhost:8081";
+const RUNTIME_URL = env.LANGGRAPH_RUNTIME_URL;
 
 export interface WorkspaceConnectorSummary {
   id: string;

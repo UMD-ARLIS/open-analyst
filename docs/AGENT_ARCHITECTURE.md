@@ -4,12 +4,15 @@
 
 The runtime in [`services/langgraph-runtime`](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime) is built around:
 
+- LangGraph Agent Server as the owner of threads, runs, streaming, interrupts, and resume
 - `deepagents.create_deep_agent` with supervisor + subagent delegation pattern
 - LangGraph checkpoints for short-term thread continuity
 - LangGraph Postgres store for durable memory
 - DeepAgents built-in middleware: `SummarizationMiddleware` (auto-compacts at 85% context), `AnthropicPromptCachingMiddleware`, `TodoListMiddleware` (`write_todos` tool), `SubAgentMiddleware` (`task` tool), `FilesystemMiddleware` (auto-included filesystem tools)
 - Custom `SupervisorToolGuard` middleware to block built-in filesystem tools on the supervisor
 - `interrupt_on` for human-in-the-loop approval on publish and execute tools
+- FastAPI middleware in [`services/langgraph-runtime/src/webapp.py`](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/webapp.py) that normalizes thread metadata, injects server-built runtime context, and handles direct-browser CORS
+- Server-owned context assembly in [`services/langgraph-runtime/src/runtime_context.py`](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/runtime_context.py)
 
 ## Supervisor (Main Agent)
 
@@ -67,7 +70,7 @@ The runtime uses `interrupt_on` for high-impact tools:
 - `publish_workspace_file` — approve before publishing artifacts
 - `execute_command` — approve shell commands
 
-When interrupted, the LangGraph checkpointer saves state. The web app detects the interrupt, sets the task to `waiting_for_approval`, and the user approves/rejects via the UI. The runtime `/resume` endpoint continues execution.
+When interrupted, the LangGraph checkpointer saves state. The browser resumes directly against Agent Server with the persisted thread metadata. The old same-origin runtime proxy no longer exists.
 
 ## Memory Model
 
@@ -89,7 +92,7 @@ When interrupted, the LangGraph checkpointer saves state. The web app detects th
 
 Repo `skills/*` are loaded into DeepAgents as runtime skills. Each subagent configured with `skills` gets its own isolated `SkillsMiddleware` instance. Skill state is fully isolated between agents.
 
-- Project/thread-pinned skills are passed from the app
+- Active skills are now reconstructed server-side from Open Analyst config and repository skill manifests
 - Matched skills are included in runtime context
 - Full SKILL.md body is injected into the supervisor's user prompt for active skills
 - `skill-creator` remains excluded from normal end-user runtime behavior
@@ -111,3 +114,10 @@ The runtime streams typed events:
 - `memory_proposal` — proposed project memories
 - `error` — runtime failures
 - `interrupt` — human-in-the-loop approval required
+
+## Current Known Gaps
+
+- `stage_literature_collection` still uses a custom raw interrupt path and always requires approval; it has not yet been converted to the native HITL tool-policy flow.
+- Researcher and drafter subagents still rely on default Deep Agents filesystem behavior plus prompt discipline; tool-surface restrictions are not yet fully middleware/backend-driven.
+- Server-side runtime-context assembly currently duplicates some app logic for skills/connectors/config discovery. It is functional, but it is still duplicated.
+- Resume/context enrichment is reliable for the web UI path because the UI sends persisted thread metadata. Generic external clients that omit metadata on `/threads/:id/runs*` are not yet rehydrated server-side.

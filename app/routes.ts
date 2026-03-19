@@ -58,7 +58,6 @@ export default [
     route("projects/:projectId/memory", "routes/api.projects.$projectId.memory.ts"),
     route("projects/:projectId/memory/:memoryId", "routes/api.projects.$projectId.memory.$memoryId.ts"),
     route("models", "routes/api.models.ts"),
-    route("runtime/*", "routes/api.runtime.$.ts"),
     route("debug/store", "routes/api.debug.store.ts"),
   ]),
 

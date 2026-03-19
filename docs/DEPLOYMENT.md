@@ -29,6 +29,10 @@ Minimum:
 Common optional values:
 
 - `ANALYST_MCP_BASE_URL`
+- `OPEN_ANALYST_WEB_URL`
+- `OPEN_ANALYST_WEB_PORT`
+- `CORS_ALLOWED_ORIGINS`
+- `CORS_ALLOWED_ORIGIN_REGEX`
 - `ANALYST_MCP_POSTGRES_DSN`
 - `ARTIFACT_STORAGE_BACKEND`
 - `ARTIFACT_S3_BUCKET`
@@ -99,6 +103,20 @@ curl http://localhost:8081/health
 curl http://localhost:8000/health
 curl -H "x-api-key: $ANALYST_MCP_API_KEY" http://localhost:8000/api/health/details
 ```
+
+## Direct Browser Runtime Access
+
+The browser now talks directly to Agent Server for chat threads and streaming. That means:
+
+- `LANGGRAPH_RUNTIME_URL` must point the web app at the public Agent Server origin.
+- Agent Server must allow the web app origin through CORS.
+- `OPEN_ANALYST_WEB_URL` is the safest way to tell Agent Server which app origin to use when building `api_base_url` for app-owned product routes.
+
+For local development the default assumption is:
+
+- web app on `http://localhost:5173`
+- Agent Server on `http://localhost:8081`
+- Analyst MCP on `http://localhost:8000`
 
 ## Storage Behavior
 

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router";
+import { useLocation, useMatches, useNavigate, useSearchParams } from "react-router";
 import { BookOpen, BrainCircuit, FlaskConical, PanelRightOpen, Plug, Settings2, Sparkles, Square, Wrench } from "lucide-react";
 import { useAnalystStream } from "~/hooks/useAnalystStream";
 import { useAppStore } from "~/lib/store";
@@ -13,6 +13,10 @@ interface AssistantWorkspaceViewProps {
   projectId: string;
   agentThreadId?: string;
   workspaceContext: WorkspaceContextData;
+  threadMetadata?: {
+    collectionId?: string | null;
+    analysisMode?: string | null;
+  };
 }
 
 /**
@@ -79,8 +83,10 @@ export function AssistantWorkspaceView({
   projectId,
   agentThreadId: initialAgentThreadId,
   workspaceContext,
+  threadMetadata,
 }: AssistantWorkspaceViewProps) {
   const location = useLocation();
+  const matches = useMatches();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -92,6 +98,12 @@ export function AssistantWorkspaceView({
   const hasAutoSubmittedPendingPromptRef = useRef(false);
   const [isResuming, setIsResuming] = useState(false);
   const activeCollectionId = useAppStore((state) => state.activeCollectionByProject[projectId] || null);
+  const appLayoutMatch = matches.find((match) => match.id === "routes/_app");
+  const runtimeConfig = appLayoutMatch?.data as { langgraphRuntimeUrl?: unknown } | undefined;
+  const agentServerUrl =
+    typeof runtimeConfig?.langgraphRuntimeUrl === "string"
+      ? runtimeConfig.langgraphRuntimeUrl.replace(/\/+$/g, "")
+      : "http://localhost:8081";
 
   const navigateToThread = useCallback((threadId: string) => {
     if (initialAgentThreadId || hasNavigatedToThreadRef.current) return;
@@ -108,6 +120,7 @@ export function AssistantWorkspaceView({
   }, [initialAgentThreadId, navigate, projectId, searchParams]);
 
   const stream = useAnalystStream({
+    apiUrl: agentServerUrl,
     threadId: initialAgentThreadId,
     onThreadId: useCallback((threadId: string) => {
       navigateToThread(threadId);
@@ -116,6 +129,7 @@ export function AssistantWorkspaceView({
       navigateToThread(meta.thread_id);
     }, [navigateToThread]),
   });
+  type StreamSubmitOptions = NonNullable<Parameters<typeof stream.submit>[1]>;
 
   const deepResearch = searchParams.get("deepResearch") === "true";
   const activePanel = searchParams.get("panel") || "";
@@ -128,6 +142,17 @@ export function AssistantWorkspaceView({
   ).length;
   const isProjectHome = !initialAgentThreadId;
   const analysisMode = deepResearch ? "deep_research" : "chat";
+  const resolvedCollectionId = initialAgentThreadId
+    ? activeCollectionId ?? threadMetadata?.collectionId ?? null
+    : activeCollectionId;
+  const resolvedAnalysisMode = initialAgentThreadId
+    ? (threadMetadata?.analysisMode || "chat")
+    : analysisMode;
+  const requestMetadata = useMemo(() => ({
+    project_id: projectId,
+    collection_id: resolvedCollectionId,
+    analysis_mode: resolvedAnalysisMode,
+  }), [projectId, resolvedCollectionId, resolvedAnalysisMode]);
   const pendingPromptFromNavigation = useMemo(() => {
     const state = location.state as { pendingPrompt?: unknown } | null;
     return typeof state?.pendingPrompt === "string" && state.pendingPrompt.trim()
@@ -177,20 +202,11 @@ export function AssistantWorkspaceView({
     try {
       stream.submit(null, {
         command: { resume: resumeValue },
-        context: {
-          project_id: projectId,
-          collection_id: activeCollectionId,
-          analysis_mode: analysisMode,
-        },
-        metadata: {
-          project_id: projectId,
-          collection_id: activeCollectionId,
-          analysis_mode: analysisMode,
-        },
+        metadata: requestMetadata,
         streamSubgraphs: true,
         onDisconnect: "continue",
         streamResumable: true,
-      } as any);
+      } as StreamSubmitOptions);
       setIsResuming(false);
     } catch (error) {
       console.error("[AssistantWorkspaceView] resume failed", error);
@@ -243,18 +259,14 @@ export function AssistantWorkspaceView({
 
     if (!initialAgentThreadId) {
       try {
-        const response = await fetch("/api/runtime/threads", {
+        const response = await fetch(`${agentServerUrl}/threads`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             "Accept": "application/json",
           },
           body: JSON.stringify({
-            metadata: {
-              project_id: projectId,
-              collection_id: activeCollectionId,
-              analysis_mode: analysisMode,
-            },
+            metadata: requestMetadata,
           }),
         });
         if (!response.ok) {
@@ -309,20 +321,11 @@ export function AssistantWorkspaceView({
               },
             ],
           }),
-          context: {
-            project_id: projectId,
-            collection_id: activeCollectionId,
-            analysis_mode: analysisMode,
-          },
-          metadata: {
-            project_id: projectId,
-            collection_id: activeCollectionId,
-            analysis_mode: analysisMode,
-          },
+          metadata: requestMetadata,
           streamSubgraphs: true,
           onDisconnect: "continue",
           streamResumable: true,
-        } as any,
+        } as StreamSubmitOptions,
       );
     } catch (error) {
       lastSubmittedPromptRef.current = null;
@@ -357,31 +360,20 @@ export function AssistantWorkspaceView({
             },
           ],
         }),
-        context: {
-          project_id: projectId,
-          collection_id: activeCollectionId,
-          analysis_mode: analysisMode,
-        },
-        metadata: {
-          project_id: projectId,
-          collection_id: activeCollectionId,
-          analysis_mode: analysisMode,
-        },
+        metadata: requestMetadata,
         streamSubgraphs: true,
         onDisconnect: "continue",
         streamResumable: true,
-      } as any,
+      } as StreamSubmitOptions,
     );
     navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
   }, [
-    activeCollectionId,
-    analysisMode,
     initialAgentThreadId,
     location.pathname,
     location.search,
     navigate,
     pendingPromptFromNavigation,
-    projectId,
+    requestMetadata,
     shouldAutoSubmitPendingPrompt,
     stream,
   ]);

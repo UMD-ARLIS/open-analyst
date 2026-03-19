@@ -10,8 +10,10 @@
 
 ## Runtime
 
-- [`services/langgraph-runtime/src/main.py`](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/main.py): FastAPI entrypoint
+- [`services/langgraph-runtime/langgraph.json`](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/langgraph.json): Agent Server graph and HTTP app wiring
 - [`services/langgraph-runtime/src/graph.py`](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/graph.py): Deep Agents graph assembly, tools, streaming, runtime policies
+- [`services/langgraph-runtime/src/webapp.py`](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/webapp.py): custom Agent Server middleware, request enrichment, and health route
+- [`services/langgraph-runtime/src/runtime_context.py`](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/runtime_context.py): server-owned project/runtime context assembly
 - [`services/langgraph-runtime/src/models.py`](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/models.py): request/event models
 - [`services/langgraph-runtime/src/retrieval.py`](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/retrieval.py): pgvector and store-backed retrieval
 - [`services/langgraph-runtime/tests/`](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/tests): runtime pytest coverage
@@ -33,6 +35,7 @@
 ## Primary Surfaces
 
 - `AssistantWorkspaceView`: main chat workspace
+- `useAnalystStream`: direct LangGraph/Agent Server client hook
 - `ProjectLeftPanel`: left-side workspace control panel
 - `ProjectContextPanel`: right-side preview/canvas/artifact context panel
 - `ProjectRightDock`: shared resizable right-dock container for Sources, Canvas, and artifact preview

@@ -7,9 +7,10 @@ import {
   listCollections,
   getCollectionDocumentCounts,
 } from "~/lib/db/queries/documents.server";
+import { env } from "~/lib/env.server";
 import { resolveModel } from "~/lib/litellm.server";
 
-const RUNTIME_URL = process.env.RUNTIME_URL || "http://localhost:8081";
+const RUNTIME_URL = env.LANGGRAPH_RUNTIME_URL;
 
 interface AgentThread {
   thread_id: string;
@@ -89,6 +90,7 @@ export async function loader() {
     activeProjectId,
     workingDir: settings.workingDir || "",
     model: resolvedModel,
+    langgraphRuntimeUrl: env.LANGGRAPH_RUNTIME_URL,
     isConfigured: true,
     sidebarThreads,
     sidebarCollections,

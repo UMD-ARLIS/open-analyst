@@ -4,43 +4,39 @@
 
 Open Analyst has three active services:
 
-- `web`: React Router application and same-origin API layer
-- `langgraph-runtime`: Deep Agents orchestration runtime
+- `web`: React Router application and product API layer
+- `langgraph-runtime`: LangGraph Agent Server + Deep Agents orchestration runtime
 - `analyst-mcp`: external acquisition and literature workflow service
 
-The runtime is the core agent system. The web app persists product state and streams runtime events to the browser. Analyst MCP is a specialized connector service used when research requires external article search, collection, or artifact acquisition.
+The runtime is the core agent system. The browser now connects directly to the Agent Server for threads, runs, streaming, interrupts, and resume. The web app still owns product APIs such as project CRUD, artifact routes, source-ingest routes, canvas routes, and memory management. Analyst MCP remains the specialized external acquisition service used for literature search, collection, and artifact download.
 
 ## Request Flow
 
-1. The browser sends a prompt to the web app.
-2. The web app persists the user message on a task/thread.
-3. The web app builds project, connector, skill, and memory context.
-4. The web app matches skills and emits a skill activation status event.
-5. The web app calls the runtime `/invoke` endpoint in streaming mode.
-6. The runtime supervisor plans via `write_todos` and delegates to subagents via `task()`.
-7. Runtime events stream back with agent attribution (`lc_agent_name` metadata):
-   - `status` — progress updates, delegation events ("Delegating to researcher: ..."), plan updates
-   - `tool_call_start` / `tool_call_end` — with actor field (supervisor, researcher, drafter, critic)
-   - `text_delta` — token-level streaming from the supervisor (subagent text is filtered)
-   - `memory_proposal` — proposed project memories
-   - `interrupt` — human-in-the-loop approval required for publish/execute tools
-   - `error` — runtime failures
-8. The web app stores events, persists the assistant message, and updates task status.
-9. If interrupted, task enters `waiting_for_approval`. User approves/rejects via UI. Web app calls runtime `/resume`.
+1. The browser creates or opens an Agent Server thread directly.
+2. The browser sends only lightweight thread metadata: `project_id`, optional `collection_id`, and `analysis_mode`.
+3. Agent Server middleware in `services/langgraph-runtime/src/webapp.py` normalizes that metadata, adds CORS handling, and builds the typed runtime context.
+4. Server-side context assembly in `services/langgraph-runtime/src/runtime_context.py` loads project/profile data from Postgres and active skills/connectors from Open Analyst config files.
+5. The runtime supervisor plans via `write_todos` and delegates to subagents via `task()`.
+6. Agent Server streams events back to the browser with agent attribution:
+   - `status`
+   - `tool_call_start` / `tool_call_end`
+   - `text_delta`
+   - `interrupt`
+   - `error`
+7. If interrupted, the browser resumes execution directly against Agent Server using the same thread metadata.
 
 ## User-Facing Model
 
 - `projects`: top-level workspace boundary
-- `tasks`: the persisted chat thread object currently used by the UI
-- `messages`: user and assistant turns on a task
-- `task_events`: structured runtime stream events
+- `threads`: Agent Server conversation boundary used by the UI
+- `messages`: Agent Server state history plus rendered UI message blocks
 - `project_memories`: approval and UI-facing durable memory records
 - `documents`: indexed project documents
 - `source_ingest_batches` and `source_ingest_items`: staged source collection awaiting approval or import
 - `artifacts` and `artifact_versions`: stored outputs
 - `canvas_documents`: editable markdown-first workspace documents
 
-The current codebase still uses `tasks/messages/task_events` as the active user-facing thread model. Older run-first docs are obsolete.
+The chat path is now thread-first and Agent Server-native. The older `api/runtime` proxy path and proxy-built runtime context are removed.
 
 ## Persistence Layers
 
@@ -64,7 +60,7 @@ Artifact routing works like this:
 
 ### Workspace Files
 
-The UI and app maintain project workspace roots and artifact metadata. The supervisor delegates all file operations to subagents via `task()`. The `SupervisorToolGuard` middleware blocks built-in filesystem tools on the supervisor to enforce this delegation pattern.
+The runtime resolves workspace roots server-side. The supervisor delegates all file operations to subagents via `task()`. `SupervisorToolGuard` still blocks built-in filesystem tools on the supervisor.
 
 ### Source And Artifact Flow
 
@@ -89,4 +85,4 @@ Research-heavy turns can additionally use Analyst MCP literature search through 
 - center: interactive chat thread
 - right panel: source preview, artifacts, canvas
 
-The app is no longer intended to be run-first. The chat thread is the primary control surface.
+The web app is no longer the assistant transport layer. It is the product shell around a direct Agent Server client.

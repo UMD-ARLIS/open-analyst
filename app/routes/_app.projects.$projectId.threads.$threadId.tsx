@@ -6,7 +6,7 @@ import { AssistantWorkspaceView } from "~/components/AssistantWorkspaceView";
 export { loader } from "./_app.projects.$projectId.threads.$threadId.loader.server";
 
 export default function ThreadRoute() {
-  const { projectId, threadId, workspaceContext } = useLoaderData<
+  const { projectId, threadId, workspaceContext, threadMetadata } = useLoaderData<
     typeof import("./_app.projects.$projectId.threads.$threadId.loader.server").loader
   >();
   const setActiveProjectId = useAppStore((state) => state.setActiveProjectId);
@@ -20,6 +20,7 @@ export default function ThreadRoute() {
       projectId={projectId}
       agentThreadId={threadId}
       workspaceContext={workspaceContext}
+      threadMetadata={threadMetadata}
     />
   );
 }
