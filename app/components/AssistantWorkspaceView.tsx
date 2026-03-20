@@ -36,6 +36,7 @@ type StreamTodo = {
 };
 
 type StreamInterrupt = {
+  id?: string;
   value?: Record<string, unknown>;
 };
 
@@ -201,7 +202,7 @@ export function AssistantWorkspaceView({
   const lastSubmittedPromptRef = useRef<string | null>(null);
   const hasNavigatedToThreadRef = useRef(false);
   const hasAutoSubmittedPendingPromptRef = useRef(false);
-  const [isResuming, setIsResuming] = useState(false);
+  const [resumingInterruptId, setResumingInterruptId] = useState<string | null>(null);
   const activeCollectionId = useAppStore((state) => state.activeCollectionByProject[projectId] || null);
   const appLayoutMatch = matches.find((match) => match.id === "routes/_app");
   const runtimeConfig = appLayoutMatch?.data as { langgraphRuntimeUrl?: unknown } | undefined;
@@ -306,30 +307,27 @@ export function AssistantWorkspaceView({
     ];
   }, [displayedMessages, initialAgentThreadId, pendingPromptFromNavigation]);
 
-  const interruptValue = useMemo(() => {
-    if (!stream.interrupt) return null;
-    const value = stream.interrupt.value as Record<string, unknown> | undefined;
-    if (!value || typeof value !== "object") return null;
-    return { type: String(value.type || "tool_approval"), ...value };
-  }, [stream.interrupt]);
-
-  const interruptValues = useMemo(() => {
+  const pendingInterrupts = useMemo(() => {
     const rawInterrupts = Array.isArray((stream as { interrupts?: unknown }).interrupts)
       ? ((stream as { interrupts?: unknown[] }).interrupts || [])
-      : interruptValue
-        ? [{ value: interruptValue }]
+      : stream.interrupt
+        ? [stream.interrupt]
         : [];
-    return rawInterrupts
-      .map((item) => {
-        if (!item || typeof item !== "object") return null;
-        const interrupt = item as StreamInterrupt;
-        const value = interrupt.value;
-        return value && typeof value === "object"
-          ? { type: String((value as Record<string, unknown>).type || "tool_approval"), ...(value as Record<string, unknown>) }
-          : null;
-      })
-      .filter((item): item is Record<string, unknown> => item !== null);
-  }, [interruptValue, stream]);
+    const unique = new Map<string, { id?: string; value: Record<string, unknown> }>();
+    rawInterrupts.forEach((item, index) => {
+      if (!item || typeof item !== "object") return;
+      const interrupt = item as StreamInterrupt;
+      const value = interrupt.value;
+      if (!value || typeof value !== "object") return;
+      const normalizedValue = {
+        type: String((value as Record<string, unknown>).type || "tool_approval"),
+        ...(value as Record<string, unknown>),
+      };
+      const key = interrupt.id || `${normalizedValue.type}-${index}`;
+      unique.set(key, { id: interrupt.id, value: normalizedValue });
+    });
+    return Array.from(unique.values());
+  }, [stream]);
 
   const planTodos = useMemo(() => {
     const values = (stream.values || {}) as Record<string, unknown>;
@@ -374,22 +372,22 @@ export function AssistantWorkspaceView({
     () => planTodos.filter((todo) => todo.status === "completed" || todo.status === "complete").length,
     [planTodos],
   );
-  const hasRailContent = planTodos.length > 0 || activeSubagents.length > 0 || recentSubagents.length > 0 || interruptValues.length > 0;
+  const hasRailContent = planTodos.length > 0 || activeSubagents.length > 0 || recentSubagents.length > 0 || pendingInterrupts.length > 0;
 
-  const handleInterruptResume = async (resumeValue: Record<string, unknown>) => {
-    setIsResuming(true);
+  const handleInterruptResume = async (resumeValue: Record<string, unknown>, interruptId?: string) => {
+    setResumingInterruptId(interruptId || "__next__");
     try {
       stream.submit(null, {
-        command: { resume: resumeValue },
+        command: { resume: interruptId ? { [interruptId]: resumeValue } : resumeValue },
         metadata: requestMetadata,
         streamSubgraphs: true,
         onDisconnect: "continue",
         streamResumable: true,
       } as StreamSubmitOptions);
-      setIsResuming(false);
+      setResumingInterruptId(null);
     } catch (error) {
       console.error("[AssistantWorkspaceView] resume failed", error);
-      setIsResuming(false);
+      setResumingInterruptId(null);
     }
   };
 
@@ -684,18 +682,18 @@ export function AssistantWorkspaceView({
           <ShieldAlert className="h-4 w-4 text-accent" />
           <h2 className="text-sm font-semibold text-text-primary">Approvals</h2>
         </div>
-        {interruptValues.length > 0 ? (
+        {pendingInterrupts.length > 0 ? (
           <div className="space-y-2">
-            {interruptValues.map((value, index) => (
+            {pendingInterrupts.map((interrupt, index) => (
               <div
-                key={`${String(value.type || "approval")}-${index}`}
+                key={interrupt.id || `${String(interrupt.value.type || "approval")}-${index}`}
                 className="rounded-xl border border-warning/30 bg-warning/5 px-3 py-2.5"
               >
                 <div className="text-xs font-semibold uppercase tracking-[0.14em] text-warning">
-                  {prettifyName(String(value.type || "approval"))}
+                  {prettifyName(String(interrupt.value.type || "approval"))}
                 </div>
                 <p className="mt-1 text-sm text-text-secondary">
-                  {summarizeApproval(value, index)}
+                  {summarizeApproval(interrupt.value, index)}
                 </p>
               </div>
             ))}
@@ -794,13 +792,14 @@ export function AssistantWorkspaceView({
                 </React.Fragment>
               ))}
 
-              {interruptValue ? (
+              {pendingInterrupts.map((interrupt, index) => (
                 <InterruptCard
-                  interrupt={{ value: interruptValue }}
-                  onResume={handleInterruptResume}
-                  isProcessing={isResuming}
+                  key={interrupt.id || `${String(interrupt.value.type || "approval")}-${index}`}
+                  interrupt={{ id: interrupt.id, value: interrupt.value }}
+                  onResume={(resumeValue) => void handleInterruptResume(resumeValue, interrupt.id)}
+                  isProcessing={resumingInterruptId !== null}
                 />
-              ) : null}
+              ))}
             </div>
 
             {hasRailContent ? (

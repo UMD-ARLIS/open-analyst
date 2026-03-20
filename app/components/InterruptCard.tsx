@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { CheckCircle, XCircle, ExternalLink, ChevronDown, ChevronRight } from "lucide-react";
 
 interface SourceItem {
@@ -19,6 +19,8 @@ interface InterruptValue {
   total_found?: number;
   sources?: SourceItem[];
   message?: string;
+  warnings?: string[];
+  provider_status?: Record<string, unknown>;
   url?: string;
   title?: string;
   // For tool-level interrupts (execute_command, publish)
@@ -28,7 +30,7 @@ interface InterruptValue {
 }
 
 interface InterruptCardProps {
-  interrupt: { value: InterruptValue };
+  interrupt: { id?: string; value: InterruptValue };
   onResume: (value: Record<string, unknown>) => void;
   isProcessing?: boolean;
 }
@@ -42,7 +44,11 @@ function SourceCollectionCard({
   onResume: (value: Record<string, unknown>) => void;
   isProcessing?: boolean;
 }) {
-  const sources = interrupt.sources || [];
+  const sources = useMemo(() => interrupt.sources || [], [interrupt.sources]);
+  const warnings = useMemo(
+    () => (Array.isArray(interrupt.warnings) ? interrupt.warnings.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : []),
+    [interrupt.warnings],
+  );
   const [selected, setSelected] = useState<Set<number>>(
     () => new Set(sources.map((s) => s.index))
   );
@@ -94,6 +100,19 @@ function SourceCollectionCard({
           {selected.size === sources.length ? "Deselect all" : "Select all"}
         </button>
       </div>
+
+      {interrupt.message ? (
+        <p className="text-xs text-amber-100/85 leading-relaxed">{interrupt.message}</p>
+      ) : null}
+
+      {warnings.length > 0 ? (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-950/40 px-3 py-2 text-xs text-amber-100 space-y-1">
+          <div className="font-medium text-amber-300">Retrieval warnings</div>
+          {warnings.map((warning, index) => (
+            <p key={`${warning}-${index}`}>{warning}</p>
+          ))}
+        </div>
+      ) : null}
 
       <div className="max-h-80 overflow-y-auto space-y-2">
         {sources.map((source) => (

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
 import re
 import shlex
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import httpx
 
@@ -234,7 +237,7 @@ def _runtime_capabilities_payload(cfg: dict[str, Any]) -> dict[str, Any]:
             },
             {
                 "name": "propose_project_memory",
-                "description": "Propose a durable project memory for later approval.",
+                "description": "Persist a durable shared project memory for later retrieval.",
             },
         ],
         "subagents": [
@@ -258,6 +261,7 @@ def _runtime_capabilities_payload(cfg: dict[str, Any]) -> dict[str, Any]:
                     "search_project_documents",
                     "read_project_document",
                     "search_project_memories",
+                    "propose_project_memory",
                 ],
             },
             {
@@ -268,6 +272,7 @@ def _runtime_capabilities_payload(cfg: dict[str, Any]) -> dict[str, Any]:
                     "read_project_document",
                     "search_project_memories",
                     "list_canvas_documents",
+                    "propose_project_memory",
                 ],
             },
             {
@@ -280,6 +285,7 @@ def _runtime_capabilities_payload(cfg: dict[str, Any]) -> dict[str, Any]:
                     "list_canvas_documents",
                     "save_canvas_markdown",
                     "list_active_skills",
+                    "propose_project_memory",
                 ],
             },
             {
@@ -367,6 +373,146 @@ def _artifact_meta_sentinel(payload: dict[str, Any]) -> str:
     )
 
 
+def _utc_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_iso8601(value: str) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        normalized = text.replace("Z", "+00:00")
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+
+def _cache_key_for_literature_search(
+    *,
+    query: str,
+    limit: int,
+    date_from: str,
+    date_to: str,
+    sources: list[str] | None,
+) -> str:
+    payload = {
+        "query": query.strip(),
+        "limit": int(limit),
+        "date_from": date_from.strip(),
+        "date_to": date_to.strip(),
+        "sources": sorted(str(item).strip() for item in (sources or []) if str(item).strip()),
+    }
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+    return f"literature-search:{digest}"
+
+
+def _runtime_thread_id(runtime: Any | None = None) -> str:
+    if runtime is not None:
+        runtime_config = getattr(runtime, "config", None) or {}
+        if isinstance(runtime_config, dict):
+            configurable = runtime_config.get("configurable")
+            if isinstance(configurable, dict):
+                thread_id = str(configurable.get("thread_id") or configurable.get("threadId") or "").strip()
+                if thread_id:
+                    return thread_id
+            thread_id = str(runtime_config.get("thread_id") or runtime_config.get("threadId") or "").strip()
+            if thread_id:
+                return thread_id
+    if get_config is None:
+        return ""
+    try:
+        current = get_config() or {}
+    except RuntimeError:
+        return ""
+    configurable = current.get("configurable")
+    if isinstance(configurable, dict):
+        thread_id = str(configurable.get("thread_id") or configurable.get("threadId") or "").strip()
+        if thread_id:
+            return thread_id
+    return str(current.get("thread_id") or current.get("threadId") or "").strip()
+
+
+def _staged_search_namespace(project_id: str, runtime: Any | None = None) -> tuple[str, ...]:
+    thread_id = _runtime_thread_id(runtime)
+    if thread_id:
+        return ("open-analyst", "projects", project_id, "thread-search-cache", thread_id)
+    return ("open-analyst", "projects", project_id, "search-cache")
+
+
+async def _get_cached_literature_search(
+    *,
+    runtime: Any | None,
+    project_id: str,
+    query: str,
+    limit: int,
+    date_from: str,
+    date_to: str,
+    sources: list[str] | None,
+    max_age_seconds: int = 1800,
+) -> dict[str, Any] | None:
+    store = getattr(runtime, "store", None) if runtime is not None else None
+    if store is None or not project_id:
+        return None
+    key = _cache_key_for_literature_search(
+        query=query,
+        limit=limit,
+        date_from=date_from,
+        date_to=date_to,
+        sources=sources,
+    )
+    try:
+        item = await store.aget(_staged_search_namespace(project_id, runtime), key)
+    except Exception:
+        logger.exception("Failed to load cached literature search payload")
+        return None
+    value = item.value if item and isinstance(item.value, dict) else {}
+    payload = value.get("payload") if isinstance(value.get("payload"), dict) else None
+    cached_at = _parse_iso8601(str(value.get("cachedAt") or ""))
+    if payload is None or cached_at is None:
+        return None
+    age = (datetime.now(timezone.utc) - cached_at).total_seconds()
+    if age > max_age_seconds:
+        return None
+    return payload
+
+
+async def _cache_literature_search(
+    *,
+    runtime: Any | None,
+    project_id: str,
+    query: str,
+    limit: int,
+    date_from: str,
+    date_to: str,
+    sources: list[str] | None,
+    payload: dict[str, Any],
+) -> None:
+    store = getattr(runtime, "store", None) if runtime is not None else None
+    if store is None or not project_id:
+        return
+    key = _cache_key_for_literature_search(
+        query=query,
+        limit=limit,
+        date_from=date_from,
+        date_to=date_to,
+        sources=sources,
+    )
+    try:
+        await store.aput(
+            _staged_search_namespace(project_id, runtime),
+            key,
+            {
+                "query": query,
+                "cachedAt": _utc_timestamp(),
+                "payload": payload,
+            },
+            index=False,
+        )
+    except Exception:
+        logger.exception("Failed to cache literature search payload")
+
+
 
 
 def _system_prompt() -> str:
@@ -377,7 +523,7 @@ def _system_prompt() -> str:
         "Prefer grounded answers with explicit uncertainty. "
         "When the user asks what you can do, answer from the actual active tools, connectors, and skills. "
         "Your direct tools are limited to project retrieval, capability inspection, canvas inspection, "
-        "and memory proposals; specialized work should be delegated.\n\n"
+        "and shared memory persistence; specialized work should be delegated.\n\n"
         "## Delegation\n"
         "Use the `task` tool to delegate specialized work to subagents:\n"
         "- subagent_type='reviewer': request clarification, branch analysis, and numbered user choices when the task is ambiguous\n"
@@ -410,6 +556,9 @@ def _system_prompt() -> str:
         "When one subagent's work must inform another, compress the findings into a short handoff and, if needed, "
         "store larger material in canvas documents, /memory-files/, /artifacts/, or promoted project memory. "
         "Pass references and summaries, not raw dumps.\n\n"
+        "When retriever or researcher outputs contain reusable findings, persist a distilled shared memory so future runs can reuse it before launching broad retrieval again.\n\n"
+        "Before launching a broad retrieval pass, check search_project_memories and reuse relevant findings unless the user explicitly asks for a refresh or revalidation. "
+        "If the user asks what is already known or previously collected, default to memories and project documents first; do not launch new retrieval unless a concrete gap blocks an answer.\n\n"
         "You can invoke multiple task() calls in parallel for independent work "
         "(e.g., multiple retriever tasks for separate source sets, or multiple researcher tasks for competing hypotheses).\n"
         "When a request naturally decomposes into independent lines of effort, launch multiple subagents in parallel before synthesizing.\n\n"
@@ -421,7 +570,8 @@ def _system_prompt() -> str:
         "## Planning\n"
         "Before beginning any multi-step, retrieval-heavy, or drafting-heavy task, use `write_todos` to create a visible plan. "
         "Do this before the first subagent delegation. Update todos after every major delegation boundary. "
-        "This is mandatory for complex work because the UI depends on it.\n\n"
+        "This is mandatory for complex work because the UI depends on it. "
+        "For any request that will require delegation, your first substantive action should be `write_todos` unless you can fully answer from current context in one turn.\n\n"
         "## Filesystem and commands\n"
         "You do NOT have direct filesystem access. Do not use ls, read_file, write_file, "
         "edit_file, glob, grep, or execute. All file operations and command execution "
@@ -1182,6 +1332,47 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         )
         return _summarize_literature_payload(payload, limit=effective_limit)
 
+    async def _persist_project_memory(
+        *,
+        runtime: ToolRuntime | None,
+        title: str,
+        summary: str,
+        content: str,
+        memory_type: str,
+        metadata: dict[str, Any] | None = None,
+        provenance: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        cfg = _get_project_config(runtime)
+        project_id = str(cfg.get("project_id", "") or "").strip()
+        if not project_id:
+            return {}
+        store = getattr(runtime, "store", None) if runtime is not None else None
+        if store is None:
+            return {}
+
+        timestamp = _utc_timestamp()
+        normalized_memory_type = memory_type.strip() or "finding"
+        memory_id = str(uuid4())
+        record = {
+            "title": title.strip() or "Analyst memory",
+            "summary": summary.strip() or content.strip()[:220],
+            "content": content.strip(),
+            "memoryType": normalized_memory_type,
+            "memory_type": normalized_memory_type,
+            "status": "active",
+            "metadata": metadata or {},
+            "provenance": provenance or {},
+            "createdAt": timestamp,
+            "updatedAt": timestamp,
+        }
+        await retrieval_service.upsert_store_memory(
+            project_id,
+            memory_id,
+            record,
+            store=store,
+        )
+        return {"id": memory_id, **record}
+
     @tool
     async def stage_literature_collection(
         query: str,
@@ -1201,13 +1392,34 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
 
         # Step 1: Search literature
         effective_limit = max(1, min(int(limit or 10), 20))
-        search_payload = await _search_literature_api(
-            query,
+        search_payload = await _get_cached_literature_search(
+            runtime=runtime,
+            project_id=project_id,
+            query=query,
             limit=effective_limit,
-            date_from=date_from or None,
-            date_to=date_to or None,
+            date_from=date_from,
+            date_to=date_to,
             sources=sources,
         )
+        if search_payload is None:
+            search_payload = await _search_literature_api(
+                query,
+                limit=effective_limit,
+                date_from=date_from or None,
+                date_to=date_to or None,
+                sources=sources,
+            )
+            if isinstance(search_payload, dict) and isinstance(search_payload.get("results"), list):
+                await _cache_literature_search(
+                    runtime=runtime,
+                    project_id=project_id,
+                    query=query,
+                    limit=effective_limit,
+                    date_from=date_from,
+                    date_to=date_to,
+                    sources=sources,
+                    payload=search_payload,
+                )
         search_failure = _literature_search_failure(search_payload)
         if search_failure is not None:
             return json.dumps(search_failure)
@@ -1336,6 +1548,85 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         ]
         batch_status = str(approved_batch.get("status") or "").strip()
 
+        if completed_items:
+            warnings = search_payload.get("warnings") if isinstance(search_payload.get("warnings"), list) else []
+            top_titles = [
+                _clean_text(item.get("title"), limit=180)
+                for item in approved_results[:8]
+                if isinstance(item, dict) and _clean_text(item.get("title"), limit=180)
+            ]
+            memory_lines = [
+                f"Query: {query}",
+                f"Imported sources: {len(completed_items)} of {len(approved_items)} approved selections.",
+                f"Batch ID: {batch_id}",
+            ]
+            if warnings:
+                memory_lines.append(
+                    "Search warnings: "
+                    + "; ".join(
+                        _clean_text(warning, limit=200)
+                        for warning in warnings[:3]
+                        if _clean_text(warning, limit=200)
+                    )
+                )
+            if top_titles:
+                memory_lines.append("Imported titles:")
+                memory_lines.extend(f"- {title}" for title in top_titles)
+            if failed_items:
+                memory_lines.append(
+                    "Failed imports: "
+                    + "; ".join(
+                        _clean_text(item.get("title"), limit=120)
+                        for item in failed_items[:3]
+                        if _clean_text(item.get("title"), limit=120)
+                    )
+                )
+            await _persist_project_memory(
+                runtime=runtime,
+                title=f"Literature retrieval: {_clean_text(query, limit=80)}",
+                summary=(
+                    f"Imported {len(completed_items)} approved sources for "
+                    f"'{_clean_text(query, limit=80)}'."
+                ),
+                content="\n".join(memory_lines),
+                memory_type="retrieval_finding",
+                metadata={
+                    "kind": "literature_collection",
+                    "query": query,
+                    "approvedCount": len(approved_items),
+                    "completedCount": len(completed_items),
+                    "failedCount": len(failed_items),
+                    "batchId": batch_id,
+                    "providerStatus": search_payload.get("provider_status")
+                    if isinstance(search_payload.get("provider_status"), dict)
+                    else {},
+                    "warnings": warnings,
+                    "sourceIds": [
+                        str(item.get("canonical_id") or item.get("paper_id") or item.get("doi") or "")
+                        for item in approved_results
+                        if isinstance(item, dict)
+                    ],
+                },
+                provenance={
+                    "tool": "stage_literature_collection",
+                    "query": query,
+                    "collectionId": cfg.get("collection_id"),
+                    "collectionName": collection_name or None,
+                    "dateFrom": date_from or None,
+                    "dateTo": date_to or None,
+                    "sources": sources or [],
+                    "batchId": batch_id,
+                    "importedItems": [
+                        {
+                            "title": _clean_text(item.get("title"), limit=180),
+                            "documentId": str(item.get("document_id") or item.get("documentId") or "").strip() or None,
+                            "artifactId": str(item.get("artifact_id") or item.get("artifactId") or "").strip() or None,
+                        }
+                        for item in completed_items
+                    ],
+                },
+            )
+
         return json.dumps({
             "status": "approved" if batch_status == "completed" and not failed_items else "error",
             "count": len(completed_items),
@@ -1416,7 +1707,47 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
             for item in items_payload
             if isinstance(item, dict) and item.get("status") == "failed"
         ]
+        completed_items = [item for item in items_payload if isinstance(item, dict) and item.get("status") == "completed"]
         batch_status = str(approved_batch.get("status") or "").strip()
+        if completed_items:
+            normalized_title = _clean_text(title or url, limit=140)
+            await _persist_project_memory(
+                runtime=runtime,
+                title=f"Web source captured: {normalized_title}",
+                summary=f"Added web source '{normalized_title}' to the project.",
+                content="\n".join(
+                    [
+                        f"Source URL: {url}",
+                        f"Title: {normalized_title}",
+                        f"Batch ID: {batch_id}",
+                        f"Imported items: {len(completed_items)}",
+                    ]
+                ),
+                memory_type="retrieval_finding",
+                metadata={
+                    "kind": "web_source_capture",
+                    "url": url,
+                    "title": normalized_title,
+                    "batchId": batch_id,
+                    "completedCount": len(completed_items),
+                    "failedCount": len(failed_items),
+                },
+                provenance={
+                    "tool": "stage_web_source",
+                    "url": url,
+                    "collectionId": cfg.get("collection_id"),
+                    "collectionName": collection_name or None,
+                    "batchId": batch_id,
+                    "importedItems": [
+                        {
+                            "title": _clean_text(item.get("title"), limit=180),
+                            "documentId": str(item.get("document_id") or item.get("documentId") or "").strip() or None,
+                            "artifactId": str(item.get("artifact_id") or item.get("artifactId") or "").strip() or None,
+                        }
+                        for item in completed_items
+                    ],
+                },
+            )
         return json.dumps({
             "status": "approved" if batch_status == "completed" and not failed_items else "error",
             "url": url,
@@ -1527,15 +1858,19 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         content: str,
         summary: str = "",
         memory_type: str = "finding",
+        runtime: ToolRuntime = None,
     ) -> str:
-        """Propose a durable project memory for later user approval."""
-        entry = {
-            "title": title.strip() or "Analyst memory",
-            "summary": (summary.strip() or content.strip()[:220]),
-            "content": content.strip(),
-            "memory_type": memory_type.strip() or "finding",
-        }
-        return json.dumps(entry)
+        """Persist a durable shared project memory for later retrieval."""
+        entry = await _persist_project_memory(
+            runtime=runtime,
+            title=title,
+            summary=summary,
+            content=content,
+            memory_type=memory_type,
+            metadata={"kind": "agent_memory"},
+            provenance={"tool": "propose_project_memory"},
+        )
+        return json.dumps(entry or {})
 
     # All tools are built here but the supervisor only gets a minimal
     # coordination set.  Heavy-lifting tools live on subagents exclusively
@@ -1612,10 +1947,11 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 "Workflow:\n"
                 "1. Use search_literature to find relevant papers and articles\n"
                 "2. Use search_project_documents to check what already exists in the project\n"
-                "3. Use search_project_memories for relevant prior findings\n"
-                "4. Use read_project_document for promising in-project sources\n"
-                "5. Prefer stage_literature_collection for academic papers so imports use canonical identifiers\n"
-                "6. Use stage_web_source for non-paper web pages or when literature search cannot identify the source\n\n"
+                "3. Use search_project_memories for relevant prior findings before broad external retrieval\n"
+                "4. If existing memories and project documents answer the request, summarize them and stop instead of re-running retrieval\n"
+                "5. Use read_project_document for promising in-project sources\n"
+                "6. Prefer stage_literature_collection for academic papers so imports use canonical identifiers\n"
+                "7. Use stage_web_source for non-paper web pages or when literature search cannot identify the source\n\n"
                 "Parallelism guidance:\n"
                 "- Safe to parallelize across independent queries, source sets, or provider slices\n"
                 "- Avoid redundant retries and avoid broad fan-out that is likely to trigger rate limits\n\n"
@@ -1623,7 +1959,9 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 "- Return ONLY a structured retrieval summary (under 350 words)\n"
                 "- Include: what was searched, what was staged or found, high-value sources, and unresolved gaps\n"
                 "- Do NOT draft conclusions beyond short retrieval notes\n"
-                "- Save larger raw material to /memory-files/ when needed and return only compact references"
+                "- Save larger raw material to /memory-files/ when needed and return only compact references\n"
+                "- If relevant memories already cover the request, say that directly and avoid external retrieval\n"
+                "- When you produce reusable retrieval findings, call propose_project_memory with a distilled summary before finishing"
             ),
             "model": model,
             "tools": [
@@ -1633,6 +1971,7 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["search_project_documents"],
                 tool_map["read_project_document"],
                 tool_map["search_project_memories"],
+                tool_map["propose_project_memory"],
             ],
             "middleware": [],
             "skills": ["/skills/content-extraction/"],
@@ -1652,7 +1991,8 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 "- Return ONLY a structured summary of findings (under 500 words)\n"
                 "- Include: key findings, evidence support, confidence levels, competing hypotheses, and gaps\n"
                 "- Do NOT return raw tool output dumps or long source excerpts\n"
-                "- If the task references large evidence packs, cite the specific documents or /memory-files/ paths instead of copying them"
+                "- If the task references large evidence packs, cite the specific documents or /memory-files/ paths instead of copying them\n"
+                "- When your findings are likely to matter later, persist a distilled shared memory before finishing"
             ),
             "model": model,
             "tools": [
@@ -1660,6 +2000,7 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["read_project_document"],
                 tool_map["search_project_memories"],
                 tool_map["list_canvas_documents"],
+                tool_map["propose_project_memory"],
             ],
             "middleware": [],
             "skills": ["/skills/content-extraction/"],
@@ -1676,7 +2017,8 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 "IMPORTANT — Context management:\n"
                 "- Return ONLY a concise planning summary (under 300 words)\n"
                 "- Include: plan title, canvas document name if created, major sections, and unresolved issues\n"
-                "- Keep the full outline in canvas, not in your response"
+                "- Keep the full outline in canvas, not in your response\n"
+                "- If the plan captures durable framing or decisions, persist a short shared memory"
             ),
             "model": model,
             "tools": [
@@ -1686,6 +2028,7 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["list_canvas_documents"],
                 tool_map["save_canvas_markdown"],
                 tool_map["list_active_skills"],
+                tool_map["propose_project_memory"],
             ],
             "middleware": [],
             "skills": [

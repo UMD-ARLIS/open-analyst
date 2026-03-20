@@ -311,7 +311,7 @@ class RuntimeRetrievalService:
                     "title": title,
                     "summary": summary,
                     "content": content,
-                    "memory_type": str(value.get("memory_type") or "note"),
+                    "memory_type": str(value.get("memory_type") or value.get("memoryType") or "note"),
                     "score": round(float(item.score or 0), 3),
                     "provenance": value.get("provenance") or {},
                 }
