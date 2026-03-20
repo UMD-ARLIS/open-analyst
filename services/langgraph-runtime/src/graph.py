@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import re
 import shlex
 from datetime import datetime, timezone
@@ -43,14 +44,20 @@ except ImportError:  # pragma: no cover
     AgentMiddleware = None
 
 try:
-    from langchain_core.messages import ToolMessage
+    from langchain_core.messages import AIMessage, ToolMessage
 except ImportError:  # pragma: no cover
+    AIMessage = None
     ToolMessage = None
 
 try:
     from langchain_core.tools import tool
 except ImportError:  # pragma: no cover
     tool = None
+
+try:
+    from langchain_core.rate_limiters import InMemoryRateLimiter
+except ImportError:  # pragma: no cover
+    InMemoryRateLimiter = None
 
 try:
     from langchain_openai import ChatOpenAI
@@ -79,6 +86,107 @@ CONSOLIDATED_APPROVAL_HARD_LIMIT = 500
 CONSOLIDATED_RECOMMENDED_MAX = 60
 CONSOLIDATED_BRANCH_PREVIEW_LIMIT = 3
 CONSOLIDATED_IMPORT_CHUNK_SIZE = 25
+_MODEL_CONCURRENCY_SEMAPHORE: asyncio.Semaphore | None = None
+_MODEL_RATE_LIMITER: Any | None = None
+
+
+def _iter_exception_chain(exc: Exception) -> list[Exception]:
+    seen: set[int] = set()
+    stack: list[Exception] = [exc]
+    chain: list[Exception] = []
+    while stack:
+        current = stack.pop()
+        marker = id(current)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        chain.append(current)
+        for nested in (getattr(current, "__cause__", None), getattr(current, "__context__", None)):
+            if isinstance(nested, Exception):
+                stack.append(nested)
+    return chain
+
+
+def _extract_error_status_code(exc: Exception) -> int | None:
+    for current in _iter_exception_chain(exc):
+        status_code = getattr(current, "status_code", None)
+        if isinstance(status_code, int):
+            return status_code
+        response = getattr(current, "response", None)
+        response_status = getattr(response, "status_code", None)
+        if isinstance(response_status, int):
+            return response_status
+    return None
+
+
+def _is_retryable_model_error(exc: Exception) -> bool:
+    if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError)):
+        return True
+    status_code = _extract_error_status_code(exc)
+    if status_code in {408, 409, 429}:
+        return True
+    if isinstance(status_code, int) and 500 <= status_code < 600:
+        return True
+    lowered_chain = " | ".join(str(item).lower() for item in _iter_exception_chain(exc))
+    return any(
+        token in lowered_chain
+        for token in (
+            "429",
+            "rate limit",
+            "too many requests",
+            "throttl",
+            "temporarily unavailable",
+            "service unavailable",
+            "timed out",
+            "timeout",
+            "connection reset",
+        )
+    )
+
+
+def _format_model_transient_failure(exc: Exception) -> str:
+    status_code = _extract_error_status_code(exc)
+    if status_code == 429 or "throttl" in str(exc).lower() or "rate limit" in str(exc).lower():
+        return (
+            "The model provider is temporarily rate limited. Continue with the work completed so far, "
+            "avoid starting new parallel branches right now, and tell the user that this branch can be retried shortly."
+        )
+    return (
+        "The model provider is temporarily unavailable. Continue with any completed work so far and tell the user "
+        "that the workflow can be resumed once the provider recovers."
+    )
+
+
+def _retry_delay_seconds(attempt: int) -> float:
+    base_delay = settings.chat_retry_initial_delay_seconds * (
+        settings.chat_retry_backoff_factor ** max(attempt, 0)
+    )
+    capped_delay = min(base_delay, settings.chat_retry_max_delay_seconds)
+    jitter = 1.0 + random.uniform(-0.2, 0.2)
+    return max(0.0, capped_delay * jitter)
+
+
+def _model_concurrency_semaphore() -> asyncio.Semaphore | None:
+    global _MODEL_CONCURRENCY_SEMAPHORE
+    limit = settings.effective_chat_max_concurrent_requests
+    if limit <= 0:
+        return None
+    if _MODEL_CONCURRENCY_SEMAPHORE is None:
+        _MODEL_CONCURRENCY_SEMAPHORE = asyncio.Semaphore(limit)
+    return _MODEL_CONCURRENCY_SEMAPHORE
+
+
+def _model_rate_limiter() -> Any | None:
+    global _MODEL_RATE_LIMITER
+    if InMemoryRateLimiter is None or settings.effective_chat_rate_limit_rps <= 0:
+        return None
+    if _MODEL_RATE_LIMITER is None:
+        _MODEL_RATE_LIMITER = InMemoryRateLimiter(
+            requests_per_second=settings.effective_chat_rate_limit_rps,
+            check_every_n_seconds=settings.chat_rate_limit_check_every_seconds,
+            max_bucket_size=max(1, settings.effective_chat_rate_limit_max_bucket_size),
+        )
+    return _MODEL_RATE_LIMITER
 
 
 
@@ -122,6 +230,56 @@ class SupervisorToolGuard(AgentMiddleware if AgentMiddleware is not None else ob
         if ToolMessage is not None and tool_name in self.BLOCKED_TOOLS:
             return self._block(request)
         return await handler(request)
+
+
+class ResilientModelMiddleware(AgentMiddleware if AgentMiddleware is not None else object):
+    """Add client-side admission control and graceful retry/fallback for transient model failures.
+
+    LangChain already supports retries and fallbacks at the middleware layer. We keep the
+    policy here so it is explicit for the Deep Agents runtime:
+    - prevent Bedrock/LiteLLM bursts with a shared semaphore
+    - retry transient 429/network/server failures with exponential backoff
+    - optionally fall back to alternate chat models
+    - if all transient attempts fail, return an AIMessage instead of crashing the run
+    """
+
+    def __init__(self, fallback_models: list[Any] | None = None) -> None:
+        super().__init__()
+        self.fallback_models = [model for model in (fallback_models or []) if model is not None]
+
+    async def _invoke_with_retries(self, request: Any, handler: Any, model_override: Any | None = None) -> Any:
+        active_request = request.override(model=model_override) if model_override is not None else request
+        max_retries = max(0, int(settings.chat_retry_max_retries))
+
+        for attempt in range(max_retries + 1):
+            semaphore = _model_concurrency_semaphore()
+            try:
+                if semaphore is None:
+                    return await handler(active_request)
+                async with semaphore:
+                    return await handler(active_request)
+            except Exception as exc:
+                if not _is_retryable_model_error(exc):
+                    raise
+                if attempt >= max_retries:
+                    raise
+                await asyncio.sleep(_retry_delay_seconds(attempt))
+        raise RuntimeError("Unexpected retry loop completion")
+
+    async def awrap_model_call(self, request: Any, handler: Any) -> Any:
+        try:
+            return await self._invoke_with_retries(request, handler)
+        except Exception as primary_exc:
+            if _is_retryable_model_error(primary_exc):
+                for fallback_model in self.fallback_models:
+                    try:
+                        return await self._invoke_with_retries(request, handler, model_override=fallback_model)
+                    except Exception as fallback_exc:
+                        if not _is_retryable_model_error(fallback_exc):
+                            raise
+                if AIMessage is not None:
+                    return AIMessage(content=_format_model_transient_failure(primary_exc))
+            raise
 
 
 def _coerce_context_mapping(value: Any) -> dict[str, Any]:
@@ -2771,6 +2929,7 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
     # Each subagent gets ONLY the tools it needs (no inheritance from parent).
     # Skills are only assigned where relevant (each gets its own isolated SkillsMiddleware).
     # System prompts instruct concise returns to prevent context bloat.
+    subagent_middleware = _build_subagent_middleware()
     return [
         {
             "name": "reviewer",
@@ -2795,7 +2954,7 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["list_canvas_documents"],
                 tool_map["list_active_skills"],
             ],
-            "middleware": [],
+            "middleware": list(subagent_middleware),
         },
         {
             "name": "retriever",
@@ -2832,7 +2991,7 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["search_project_memories"],
                 tool_map["propose_project_memory"],
             ],
-            "middleware": [],
+            "middleware": list(subagent_middleware),
             "skills": ["/skills/content-extraction/"],
         },
         {
@@ -2861,7 +3020,7 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["list_canvas_documents"],
                 tool_map["propose_project_memory"],
             ],
-            "middleware": [],
+            "middleware": list(subagent_middleware),
             "skills": ["/skills/content-extraction/"],
         },
         {
@@ -2889,7 +3048,7 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["list_active_skills"],
                 tool_map["propose_project_memory"],
             ],
-            "middleware": [],
+            "middleware": list(subagent_middleware),
             "skills": [
                 "/skills/arlis-bulletin/",
                 "/skills/schedule/",
@@ -2921,7 +3080,7 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["save_canvas_markdown"],
                 tool_map["list_canvas_documents"],
             ],
-            "middleware": [],
+            "middleware": list(subagent_middleware),
             "skills": [
                 "/skills/arlis-bulletin/",
                 "/skills/schedule/",
@@ -2950,7 +3109,7 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["capture_artifact"],
                 tool_map["list_canvas_documents"],
             ],
-            "middleware": [],
+            "middleware": list(subagent_middleware),
             "skills": [
                 "/skills/docx/",
                 "/skills/xlsx/",
@@ -2991,7 +3150,7 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["read_project_document"],
                 tool_map["list_canvas_documents"],
             ],
-            "middleware": [],
+            "middleware": list(subagent_middleware),
             # Critic doesn't need skills — it reviews, not creates
         },
         {
@@ -3015,7 +3174,7 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["publish_workspace_file"],
                 tool_map["capture_artifact"],
             ],
-            "middleware": [],
+            "middleware": list(subagent_middleware),
         },
         {
             # Override the DeepAgents auto-included general-purpose subagent.
@@ -3041,7 +3200,7 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["search_literature"],
                 tool_map["list_canvas_documents"],
             ],
-            "middleware": [],
+            "middleware": list(subagent_middleware),
             # general-purpose inherits skills from parent agent automatically
         },
     ]
@@ -3105,13 +3264,47 @@ def _build_backend() -> Any:
 
 
 def _build_model() -> Any:
-    """Build the LLM model instance for the deep agent."""
+    """Build the primary LLM model instance for the deep agent."""
     if ChatOpenAI is None:
         raise RuntimeError("langchain-openai is not installed")
     model_kwargs = {**settings.chat_model_kwargs}
-    model_kwargs.setdefault("max_retries", 10)
+    model_kwargs.setdefault("max_retries", max(0, min(2, int(settings.chat_retry_max_retries))))
     model_kwargs.setdefault("timeout", 120)
+    rate_limiter = _model_rate_limiter()
+    if rate_limiter is not None:
+        model_kwargs["rate_limiter"] = rate_limiter
     return ChatOpenAI(**model_kwargs)
+
+
+def _build_chat_model(model_name: str) -> Any:
+    if ChatOpenAI is None:
+        raise RuntimeError("langchain-openai is not installed")
+    model_kwargs = {
+        **settings.chat_model_kwargs,
+        "model": model_name,
+        "max_retries": max(0, min(2, int(settings.chat_retry_max_retries))),
+        "timeout": 120,
+    }
+    rate_limiter = _model_rate_limiter()
+    if rate_limiter is not None:
+        model_kwargs["rate_limiter"] = rate_limiter
+    return ChatOpenAI(**model_kwargs)
+
+
+def _build_runtime_middleware() -> list[Any]:
+    middleware: list[Any] = []
+    if AgentMiddleware is not None:
+        fallback_models = [_build_chat_model(model_name) for model_name in settings.fallback_chat_models]
+        middleware.append(ResilientModelMiddleware(fallback_models=fallback_models))
+        middleware.append(SupervisorToolGuard())
+    return middleware
+
+
+def _build_subagent_middleware() -> list[Any]:
+    if AgentMiddleware is None:
+        return []
+    fallback_models = [_build_chat_model(model_name) for model_name in settings.fallback_chat_models]
+    return [ResilientModelMiddleware(fallback_models=fallback_models)]
 
 
 def make_graph() -> Any:
@@ -3130,7 +3323,7 @@ def make_graph() -> Any:
         name="open-analyst",
         system_prompt=_system_prompt(),
         tools=supervisor_tools,
-        middleware=[SupervisorToolGuard()] if AgentMiddleware is not None else [],
+        middleware=_build_runtime_middleware(),
         skills=_skill_paths(),
         memory=["/memories/AGENTS.md"],
         subagents=_build_subagents(model, all_tools),

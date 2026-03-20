@@ -33,7 +33,16 @@ class RuntimeSettings(BaseSettings):
     litellm_base_url: str = Field(default="http://localhost:4000", alias="LITELLM_BASE_URL")
     litellm_api_key: str = Field(default="", alias="LITELLM_API_KEY")
     default_chat_model: str = Field(default="gpt-4.1-mini", alias="LITELLM_CHAT_MODEL")
+    fallback_chat_models_raw: str = Field(default="", alias="LITELLM_FALLBACK_CHAT_MODELS")
     litellm_embedding_model: str = Field(default="", alias="LITELLM_EMBEDDING_MODEL")
+    chat_retry_max_retries: int = Field(default=8, alias="CHAT_RETRY_MAX_RETRIES")
+    chat_retry_initial_delay_seconds: float = Field(default=2.0, alias="CHAT_RETRY_INITIAL_DELAY_SECONDS")
+    chat_retry_backoff_factor: float = Field(default=2.0, alias="CHAT_RETRY_BACKOFF_FACTOR")
+    chat_retry_max_delay_seconds: float = Field(default=45.0, alias="CHAT_RETRY_MAX_DELAY_SECONDS")
+    chat_rate_limit_rps: float = Field(default=0.0, alias="CHAT_RATE_LIMIT_RPS")
+    chat_rate_limit_check_every_seconds: float = Field(default=0.1, alias="CHAT_RATE_LIMIT_CHECK_EVERY_SECONDS")
+    chat_rate_limit_max_bucket_size: int = Field(default=0, alias="CHAT_RATE_LIMIT_MAX_BUCKET_SIZE")
+    chat_max_concurrent_requests: int = Field(default=0, alias="CHAT_MAX_CONCURRENT_REQUESTS")
     database_url: str = Field(default="", alias="DATABASE_URL")
     analyst_mcp_base_url: str = Field(default="http://localhost:8000", alias="ANALYST_MCP_BASE_URL")
     analyst_mcp_api_key: str = Field(default="change-me", alias="ANALYST_MCP_API_KEY")
@@ -53,6 +62,42 @@ class RuntimeSettings(BaseSettings):
             "api_key": self.litellm_api_key or "unused",
             "timeout": self.request_timeout_seconds,
         }
+
+    @cached_property
+    def fallback_chat_models(self) -> list[str]:
+        return [
+            item.strip()
+            for item in self.fallback_chat_models_raw.split(",")
+            if item.strip()
+        ]
+
+    @cached_property
+    def is_bedrock_chat_model(self) -> bool:
+        return "bedrock" in self.default_chat_model.lower()
+
+    @cached_property
+    def effective_chat_rate_limit_rps(self) -> float:
+        if self.chat_rate_limit_rps > 0:
+            return float(self.chat_rate_limit_rps)
+        if self.is_bedrock_chat_model:
+            return 0.75
+        return 0.0
+
+    @cached_property
+    def effective_chat_rate_limit_max_bucket_size(self) -> int:
+        if self.chat_rate_limit_max_bucket_size > 0:
+            return int(self.chat_rate_limit_max_bucket_size)
+        if self.is_bedrock_chat_model:
+            return 2
+        return 0
+
+    @cached_property
+    def effective_chat_max_concurrent_requests(self) -> int:
+        if self.chat_max_concurrent_requests > 0:
+            return int(self.chat_max_concurrent_requests)
+        if self.is_bedrock_chat_model:
+            return 2
+        return 0
 
     @cached_property
     def cors_allowed_origins(self) -> list[str]:
