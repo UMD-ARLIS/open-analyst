@@ -308,13 +308,38 @@ export function AssistantWorkspaceView({
   }, [displayedMessages, initialAgentThreadId, pendingPromptFromNavigation]);
 
   const pendingInterrupts = useMemo(() => {
-    const rawInterrupts = Array.isArray((stream as { interrupts?: unknown }).interrupts)
-      ? ((stream as { interrupts?: unknown[] }).interrupts || [])
-      : stream.interrupt
-        ? [stream.interrupt]
-        : [];
+    const interruptCandidates: unknown[] = [];
+    const rootInterrupts = (stream as { interrupts?: unknown }).interrupts;
+    const values = (stream.values || {}) as Record<string, unknown>;
+    const valueInterrupts = values.interrupts;
+
+    const collectInterrupts = (source: unknown) => {
+      if (Array.isArray(source)) {
+        interruptCandidates.push(...source);
+        return;
+      }
+      if (!source || typeof source !== "object") return;
+      for (const value of Object.values(source as Record<string, unknown>)) {
+        if (Array.isArray(value)) {
+          interruptCandidates.push(...value);
+        } else if (value && typeof value === "object") {
+          interruptCandidates.push(value);
+        }
+      }
+    };
+
+    collectInterrupts(rootInterrupts);
+    collectInterrupts(valueInterrupts);
+
+    if (stream.interrupt) {
+      interruptCandidates.push(stream.interrupt);
+    }
+    if (values.interrupt) {
+      interruptCandidates.push(values.interrupt);
+    }
+
     const unique = new Map<string, { id?: string; value: Record<string, unknown> }>();
-    rawInterrupts.forEach((item, index) => {
+    interruptCandidates.forEach((item, index) => {
       if (!item || typeof item !== "object") return;
       const interrupt = item as StreamInterrupt;
       const value = interrupt.value;

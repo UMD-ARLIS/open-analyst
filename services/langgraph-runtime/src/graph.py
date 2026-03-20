@@ -74,6 +74,11 @@ except ImportError:  # pragma: no cover
 
 tracer = get_tracer()
 HTML_TAG_RE = re.compile(r"<[^>]+>")
+CONSOLIDATED_APPROVAL_SOFT_LIMIT = 200
+CONSOLIDATED_APPROVAL_HARD_LIMIT = 500
+CONSOLIDATED_RECOMMENDED_MAX = 60
+CONSOLIDATED_BRANCH_PREVIEW_LIMIT = 3
+CONSOLIDATED_IMPORT_CHUNK_SIZE = 25
 
 
 
@@ -433,6 +438,32 @@ def _runtime_thread_id(runtime: Any | None = None) -> str:
     return str(current.get("thread_id") or current.get("threadId") or "").strip()
 
 
+def _runtime_run_id(runtime: Any | None = None) -> str:
+    if runtime is not None:
+        runtime_config = getattr(runtime, "config", None) or {}
+        if isinstance(runtime_config, dict):
+            configurable = runtime_config.get("configurable")
+            if isinstance(configurable, dict):
+                run_id = str(configurable.get("run_id") or configurable.get("runId") or "").strip()
+                if run_id:
+                    return run_id
+            run_id = str(runtime_config.get("run_id") or runtime_config.get("runId") or "").strip()
+            if run_id:
+                return run_id
+    if get_config is None:
+        return ""
+    try:
+        current = get_config() or {}
+    except RuntimeError:
+        return ""
+    configurable = current.get("configurable")
+    if isinstance(configurable, dict):
+        run_id = str(configurable.get("run_id") or configurable.get("runId") or "").strip()
+        if run_id:
+            return run_id
+    return str(current.get("run_id") or current.get("runId") or "").strip()
+
+
 def _staged_search_namespace(project_id: str, runtime: Any | None = None) -> tuple[str, ...]:
     thread_id = _runtime_thread_id(runtime)
     if thread_id:
@@ -515,6 +546,309 @@ async def _cache_literature_search(
 
 
 
+def _retrieval_candidate_namespace(project_id: str, runtime: Any | None = None) -> tuple[str, ...]:
+    thread_id = _runtime_thread_id(runtime)
+    if thread_id:
+        return ("open-analyst", "projects", project_id, "thread-retrieval-candidates", thread_id)
+    return ("open-analyst", "projects", project_id, "retrieval-candidates")
+
+
+def _normalize_branch_label(value: str, query: str) -> str:
+    label = _clean_text(value, limit=120)
+    if label:
+        return label
+    return _clean_text(query, limit=120) or "Retrieval branch"
+
+
+def _normalize_provider_status(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[str, Any] = {}
+    for provider, raw in value.items():
+        if isinstance(raw, dict):
+            normalized[str(provider)] = {
+                "status": _clean_text(raw.get("status"), limit=32) or None,
+                "count": int(raw.get("count") or 0),
+                "error": _clean_text(raw.get("error"), limit=220) or None,
+            }
+        elif raw is not None:
+            normalized[str(provider)] = {"status": _clean_text(raw, limit=64) or None}
+    return normalized
+
+
+def _candidate_identity_parts(item: dict[str, Any]) -> dict[str, str]:
+    canonical_id = str(
+        item.get("canonical_id") or item.get("canonicalId") or item.get("paper_id") or ""
+    ).strip()
+    doi = str(item.get("doi") or "").strip().lower()
+    url = str(item.get("url") or item.get("pdf_url") or "").strip().lower().rstrip("/")
+    published_at = _clean_text(item.get("published_at") or item.get("publishedAt"), limit=32)
+    year = published_at[:4] if published_at else ""
+    title = _clean_text(item.get("title"), limit=240).lower()
+    normalized_title = re.sub(r"[^a-z0-9]+", " ", title).strip()
+    return {
+        "canonical_id": canonical_id,
+        "doi": doi,
+        "url": url,
+        "title": normalized_title,
+        "year": year,
+    }
+
+
+def _candidate_key(item: dict[str, Any]) -> str:
+    parts = _candidate_identity_parts(item)
+    if parts["canonical_id"]:
+        return f"canonical:{parts['canonical_id']}"
+    if parts["doi"]:
+        return f"doi:{parts['doi']}"
+    if parts["url"]:
+        return f"url:{parts['url']}"
+    if parts["title"]:
+        suffix = f":{parts['year']}" if parts["year"] else ""
+        return f"title:{parts['title']}{suffix}"
+    digest = hashlib.sha256(json.dumps(item, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    return f"fallback:{digest}"
+
+
+def _normalize_candidate_source(
+    item: dict[str, Any],
+    *,
+    index: int,
+    query: str,
+    branch_label: str,
+) -> dict[str, Any] | None:
+    normalized = _normalize_literature_item_for_ingest(item)
+    if normalized is None:
+        return None
+    title = _clean_text(item.get("title"), limit=220) or normalized["title"]
+    published_at = _clean_text(item.get("published_at") or item.get("publishedAt"), limit=32)
+    return {
+        "key": _candidate_key(item),
+        "index": index,
+        "title": title,
+        "authors": _clean_authors(item.get("authors"), limit=12),
+        "venue": _clean_text(item.get("venue"), limit=120),
+        "year": published_at[:4] if published_at else "",
+        "published_at": published_at or None,
+        "abstract": _clean_text(item.get("abstract"), limit=1200),
+        "doi": _clean_text(item.get("doi"), limit=120) or None,
+        "url": _clean_text(item.get("url"), limit=200) or None,
+        "pdf_url": _clean_text(item.get("pdf_url"), limit=200) or None,
+        "citation_count": int(item.get("citation_count") or item.get("citationCount") or 0),
+        "canonical_id": normalized["normalizedMetadata"].get("canonicalId"),
+        "provider": _clean_text(item.get("provider"), limit=80) or None,
+        "topics": [
+            _clean_text(topic, limit=80)
+            for topic in (item.get("topics") if isinstance(item.get("topics"), list) else [])
+            if _clean_text(topic, limit=80)
+        ][:12],
+        "query": _clean_text(query, limit=220),
+        "branch_label": _normalize_branch_label(branch_label, query),
+        "ingest_item": normalized,
+    }
+
+
+async def _store_retrieval_candidate_batch(
+    *,
+    runtime: Any | None,
+    project_id: str,
+    query: str,
+    branch_label: str,
+    date_from: str,
+    date_to: str,
+    sources: list[str] | None,
+    payload: dict[str, Any],
+    candidates: list[dict[str, Any]],
+) -> str:
+    store = getattr(runtime, "store", None) if runtime is not None else None
+    if store is None or not project_id:
+        return ""
+    batch_id = str(uuid4())
+    try:
+        await store.aput(
+            _retrieval_candidate_namespace(project_id, runtime),
+            batch_id,
+            {
+                "type": "literature_candidate_batch",
+                "batchId": batch_id,
+                "query": query,
+                "branchLabel": _normalize_branch_label(branch_label, query),
+                "dateFrom": date_from or None,
+                "dateTo": date_to or None,
+                "runId": _runtime_run_id(runtime) or None,
+                "sources": sorted(str(item).strip() for item in (sources or []) if str(item).strip()),
+                "providerStatus": _normalize_provider_status(payload.get("provider_status")),
+                "warnings": [
+                    _clean_text(item, limit=220)
+                    for item in (payload.get("warnings") if isinstance(payload.get("warnings"), list) else [])
+                    if _clean_text(item, limit=220)
+                ],
+                "candidates": candidates,
+                "createdAt": _utc_timestamp(),
+            },
+            index=False,
+        )
+    except Exception:
+        logger.exception("Failed to persist retrieval candidate batch")
+        return ""
+    return batch_id
+
+
+async def _load_retrieval_candidate_batches(
+    *,
+    runtime: Any | None,
+    project_id: str,
+    limit: int = 64,
+    max_age_seconds: int = 1800,
+) -> list[dict[str, Any]]:
+    store = getattr(runtime, "store", None) if runtime is not None else None
+    if store is None or not project_id:
+        return []
+    try:
+        items = await store.asearch(
+            _retrieval_candidate_namespace(project_id, runtime),
+            query=None,
+            limit=limit,
+        )
+    except Exception:
+        logger.exception("Failed to load retrieval candidate batches")
+        return []
+    batches: list[dict[str, Any]] = []
+    now = datetime.now(timezone.utc)
+    for item in items:
+        value = item.value if isinstance(item.value, dict) else {}
+        if value.get("type") != "literature_candidate_batch":
+            continue
+        created_at = _parse_iso8601(str(value.get("createdAt") or ""))
+        if created_at is not None and (now - created_at).total_seconds() > max_age_seconds:
+            continue
+        batches.append({"key": str(item.key), **value})
+    return batches
+
+
+async def _clear_retrieval_candidate_batches(
+    *,
+    runtime: Any | None,
+    project_id: str,
+    batch_keys: list[str],
+) -> None:
+    store = getattr(runtime, "store", None) if runtime is not None else None
+    if store is None or not project_id:
+        return
+    namespace = _retrieval_candidate_namespace(project_id, runtime)
+    for batch_key in batch_keys:
+        if not batch_key:
+            continue
+        try:
+            await store.adelete(namespace, batch_key)
+        except Exception:
+            logger.exception("Failed to delete retrieval candidate batch %s", batch_key)
+
+
+def _merge_candidate_batches(
+    batches: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], dict[str, Any], list[str]]:
+    merged_by_key: dict[str, dict[str, Any]] = {}
+    branch_counts: dict[str, dict[str, Any]] = {}
+    warnings: list[str] = []
+    warning_keys: set[str] = set()
+    provider_status: dict[str, Any] = {}
+    batch_keys: list[str] = []
+
+    def add_warning(message: str) -> None:
+        if not message or message in warning_keys:
+            return
+        warning_keys.add(message)
+        warnings.append(message)
+
+    for batch in batches:
+        batch_key = str(batch.get("key") or batch.get("batchId") or "").strip()
+        if batch_key:
+            batch_keys.append(batch_key)
+        branch_label = _normalize_branch_label(
+            str(batch.get("branchLabel") or ""),
+            str(batch.get("query") or ""),
+        )
+        branch_entry = branch_counts.setdefault(
+            branch_label,
+            {"label": branch_label, "query": _clean_text(batch.get("query"), limit=220), "candidate_count": 0},
+        )
+        candidates = batch.get("candidates") if isinstance(batch.get("candidates"), list) else []
+        branch_entry["candidate_count"] = int(branch_entry.get("candidate_count") or 0) + len(candidates)
+
+        for warning in batch.get("warnings") if isinstance(batch.get("warnings"), list) else []:
+            cleaned = _clean_text(warning, limit=220)
+            if cleaned:
+                add_warning(cleaned)
+
+        batch_provider_status = batch.get("providerStatus") if isinstance(batch.get("providerStatus"), dict) else {}
+        if batch_provider_status:
+            provider_status[branch_label] = batch_provider_status
+
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            key = str(candidate.get("key") or "").strip()
+            if not key:
+                continue
+            existing = merged_by_key.get(key)
+            if existing is None:
+                merged_by_key[key] = {
+                    **candidate,
+                    "branches": [branch_label],
+                    "queries": [str(batch.get("query") or "").strip()] if str(batch.get("query") or "").strip() else [],
+                    "duplicate_count": 1,
+                }
+                continue
+
+            existing["duplicate_count"] = int(existing.get("duplicate_count") or 1) + 1
+            existing_branches = existing.setdefault("branches", [])
+            if branch_label and branch_label not in existing_branches:
+                existing_branches.append(branch_label)
+            query_value = str(batch.get("query") or "").strip()
+            existing_queries = existing.setdefault("queries", [])
+            if query_value and query_value not in existing_queries:
+                existing_queries.append(query_value)
+            if len(str(candidate.get("abstract") or "")) > len(str(existing.get("abstract") or "")):
+                existing["abstract"] = candidate.get("abstract")
+            if not existing.get("url") and candidate.get("url"):
+                existing["url"] = candidate.get("url")
+            if not existing.get("pdf_url") and candidate.get("pdf_url"):
+                existing["pdf_url"] = candidate.get("pdf_url")
+            if int(candidate.get("citation_count") or 0) > int(existing.get("citation_count") or 0):
+                existing["citation_count"] = candidate.get("citation_count")
+
+    merged_sources = sorted(
+        merged_by_key.values(),
+        key=lambda item: (
+            -int(item.get("duplicate_count") or 1),
+            -int(item.get("citation_count") or 0),
+            str(item.get("year") or ""),
+            str(item.get("title") or "").lower(),
+        ),
+    )
+    return merged_sources, list(branch_counts.values()), warnings, provider_status, batch_keys
+
+
+def _recommended_candidate_keys(merged_sources: list[dict[str, Any]]) -> set[str]:
+    total = len(merged_sources)
+    if total == 0:
+        return set()
+    if total <= 40:
+        return {str(source.get("key") or "").strip() for source in merged_sources if str(source.get("key") or "").strip()}
+    recommended_count = min(CONSOLIDATED_RECOMMENDED_MAX, max(25, round(total * 0.35)))
+    return {
+        str(source.get("key") or "").strip()
+        for source in merged_sources[:recommended_count]
+        if str(source.get("key") or "").strip()
+    }
+
+
+def _chunk_items(items: list[dict[str, Any]], chunk_size: int) -> list[list[dict[str, Any]]]:
+    size = max(1, int(chunk_size or 1))
+    return [items[index:index + size] for index in range(0, len(items), size)]
+
+
 def _system_prompt() -> str:
     return (
         "You are Open Analyst, a deeply agentic analyst assistant. "
@@ -536,7 +870,7 @@ def _system_prompt() -> str:
         "- subagent_type='publisher': publish approved outputs and project artifacts\n"
         "- subagent_type='general-purpose': narrow fallback for synthesis that does not fit the named specialists\n\n"
         "If the user wants to collect or add sources to the project, delegate immediately to "
-        "the retriever subagent. Source-staging tools are intentionally not direct supervisor tools.\n\n"
+        "the retriever subagent. Retriever branches gather candidates first; then you call approve_collected_literature once to present one consolidated approval.\n\n"
         "Never call a tool that appears only under a subagent's capabilities as if it were a direct supervisor tool. "
         "Use task(subagent_type=...) for those capabilities.\n\n"
         "Delegate rather than doing everything yourself. The retriever gathers sources, the researcher synthesizes them, "
@@ -557,6 +891,7 @@ def _system_prompt() -> str:
         "store larger material in canvas documents, /memory-files/, /artifacts/, or promoted project memory. "
         "Pass references and summaries, not raw dumps.\n\n"
         "When retriever or researcher outputs contain reusable findings, persist a distilled shared memory so future runs can reuse it before launching broad retrieval again.\n\n"
+        "After parallel retriever branches finish, consolidate their candidates and request one final approval. Do not ask the user to approve each branch separately.\n\n"
         "Before launching a broad retrieval pass, check search_project_memories and reuse relevant findings unless the user explicitly asks for a refresh or revalidation. "
         "If the user asks what is already known or previously collected, default to memories and project documents first; do not launch new retrieval unless a concrete gap blocks an answer.\n\n"
         "You can invoke multiple task() calls in parallel for independent work "
@@ -1373,6 +1708,526 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         )
         return {"id": memory_id, **record}
 
+    async def _import_approved_literature_items(
+        *,
+        api_base_url: str,
+        project_id: str,
+        collection_id: str | None,
+        collection_name: str,
+        query_label: str,
+        approved_items: list[dict[str, Any]],
+        metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not approved_items:
+            return {"status": "error", "error": "No approved literature items were provided."}
+
+        stage_payload = await _stage_source_ingest_api(
+            api_base_url,
+            project_id,
+            {
+                "origin": "literature",
+                "query": query_label,
+                "summary": f"Approved {len(approved_items)} literature source(s) from analyst retrieval.",
+                "metadata": metadata,
+                "collectionId": collection_id,
+                "collectionName": collection_name or None,
+                "items": approved_items,
+            },
+        )
+        batch = stage_payload.get("batch") if isinstance(stage_payload, dict) else None
+        batch_id = str((batch or {}).get("id") or "").strip()
+        if not batch_id:
+            logger.error(
+                "_import_approved_literature_items: batch_id empty after staging "
+                "(stage_payload keys=%s, batch=%r)",
+                list(stage_payload.keys()) if isinstance(stage_payload, dict) else None,
+                batch,
+            )
+            return {"status": "error", "error": "Failed to stage source ingest batch"}
+
+        approval_payload = await _approve_source_batch_api(api_base_url, project_id, batch_id)
+        approved_batch = approval_payload.get("batch") if isinstance(approval_payload, dict) else None
+        if not isinstance(approved_batch, dict):
+            return {
+                "status": "error",
+                "batch_id": batch_id,
+                "error": "Source ingest approval failed before import results were returned.",
+            }
+
+        items_payload = approved_batch.get("items") if isinstance(approved_batch.get("items"), list) else []
+        completed_items = [item for item in items_payload if isinstance(item, dict) and item.get("status") == "completed"]
+        failed_items = [
+            {
+                "title": _clean_text(item.get("title"), limit=180),
+                "error": _clean_text(item.get("error"), limit=240),
+            }
+            for item in items_payload
+            if isinstance(item, dict) and item.get("status") == "failed"
+        ]
+        batch_status = str(approved_batch.get("status") or "").strip()
+        return {
+            "status": "approved" if batch_status == "completed" and not failed_items else "error",
+            "count": len(completed_items),
+            "requested_count": len(approved_items),
+            "batch_id": batch_id,
+            "batch_status": batch_status or None,
+            "failed_items": failed_items,
+            "completed_items": completed_items,
+            "approved_batch": approved_batch,
+            "error": None if batch_status == "completed" and not failed_items else "One or more approved sources failed to import.",
+        }
+
+    async def _import_literature_in_chunks(
+        *,
+        api_base_url: str,
+        project_id: str,
+        collection_id: str | None,
+        collection_name: str,
+        query_label: str,
+        approved_items: list[dict[str, Any]],
+        metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not approved_items:
+            return {"status": "error", "error": "No approved literature items were provided."}
+
+        chunks = _chunk_items(approved_items, CONSOLIDATED_IMPORT_CHUNK_SIZE)
+        aggregated_completed: list[dict[str, Any]] = []
+        aggregated_failed: list[dict[str, Any]] = []
+        batch_ids: list[str] = []
+        chunk_results: list[dict[str, Any]] = []
+
+        for chunk_index, chunk_items in enumerate(chunks, start=1):
+            chunk_result = await _import_approved_literature_items(
+                api_base_url=api_base_url,
+                project_id=project_id,
+                collection_id=collection_id,
+                collection_name=collection_name,
+                query_label=(
+                    query_label
+                    if len(chunks) == 1
+                    else f"{query_label} [chunk {chunk_index}/{len(chunks)}]"
+                ),
+                approved_items=chunk_items,
+                metadata={
+                    **metadata,
+                    "chunkIndex": chunk_index,
+                    "chunkCount": len(chunks),
+                    "chunkSize": len(chunk_items),
+                },
+            )
+            batch_id = str(chunk_result.get("batch_id") or "").strip()
+            if batch_id:
+                batch_ids.append(batch_id)
+            chunk_results.append(
+                {
+                    "chunk_index": chunk_index,
+                    "chunk_size": len(chunk_items),
+                    "status": chunk_result.get("status"),
+                    "batch_id": batch_id or None,
+                    "failed_items": chunk_result.get("failed_items") if isinstance(chunk_result.get("failed_items"), list) else [],
+                    "error": chunk_result.get("error"),
+                }
+            )
+            aggregated_completed.extend(
+                chunk_result.get("completed_items")
+                if isinstance(chunk_result.get("completed_items"), list)
+                else []
+            )
+            aggregated_failed.extend(
+                chunk_result.get("failed_items")
+                if isinstance(chunk_result.get("failed_items"), list)
+                else []
+            )
+
+        chunk_failures = [chunk for chunk in chunk_results if chunk.get("status") != "approved"]
+        return {
+            "status": "approved" if not chunk_failures and not aggregated_failed else "error",
+            "count": len(aggregated_completed),
+            "requested_count": len(approved_items),
+            "batch_id": batch_ids[0] if len(batch_ids) == 1 else None,
+            "batch_ids": batch_ids,
+            "chunk_count": len(chunks),
+            "completed_chunks": len(chunks) - len(chunk_failures),
+            "failed_chunks": chunk_failures,
+            "failed_items": aggregated_failed,
+            "completed_items": aggregated_completed,
+            "error": None if not chunk_failures and not aggregated_failed else "One or more import chunks failed.",
+        }
+
+    @tool
+    async def collect_literature_candidates(
+        query: str,
+        branch_label: str = "",
+        limit: int = 10,
+        date_from: str = "",
+        date_to: str = "",
+        sources: list[str] | None = None,
+        runtime: ToolRuntime = None,
+    ) -> str:
+        """Search literature and store a thread-scoped candidate batch for later consolidated approval."""
+        cfg = _get_project_config(runtime)
+        project_id = cfg.get("project_id", "")
+        if not project_id:
+            return "{}"
+
+        effective_limit = max(1, min(int(limit or 10), 20))
+        search_payload = await _get_cached_literature_search(
+            runtime=runtime,
+            project_id=project_id,
+            query=query,
+            limit=effective_limit,
+            date_from=date_from,
+            date_to=date_to,
+            sources=sources,
+        )
+        if search_payload is None:
+            search_payload = await _search_literature_api(
+                query,
+                limit=effective_limit,
+                date_from=date_from or None,
+                date_to=date_to or None,
+                sources=sources,
+            )
+            if isinstance(search_payload, dict) and isinstance(search_payload.get("results"), list):
+                await _cache_literature_search(
+                    runtime=runtime,
+                    project_id=project_id,
+                    query=query,
+                    limit=effective_limit,
+                    date_from=date_from,
+                    date_to=date_to,
+                    sources=sources,
+                    payload=search_payload,
+                )
+        search_failure = _literature_search_failure(search_payload)
+        if search_failure is not None:
+            return json.dumps(search_failure)
+
+        results = search_payload.get("results") if isinstance(search_payload.get("results"), list) else []
+        if not results:
+            return json.dumps({"status": "no_results", "message": f"No literature found for '{query}'."})
+
+        normalized_branch = _normalize_branch_label(branch_label, query)
+        candidates = [
+            candidate
+            for index, item in enumerate(results)
+            if isinstance(item, dict)
+            for candidate in [_normalize_candidate_source(item, index=index, query=query, branch_label=normalized_branch)]
+            if candidate is not None
+        ]
+        if not candidates:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": "No literature candidates could be normalized for approval.",
+                }
+            )
+
+        batch_id = await _store_retrieval_candidate_batch(
+            runtime=runtime,
+            project_id=project_id,
+            query=query,
+            branch_label=normalized_branch,
+            date_from=date_from,
+            date_to=date_to,
+            sources=sources,
+            payload=search_payload,
+            candidates=candidates,
+        )
+
+        top_titles = [
+            _clean_text(candidate.get("title"), limit=180)
+            for candidate in candidates[:6]
+            if _clean_text(candidate.get("title"), limit=180)
+        ]
+        return json.dumps(
+            {
+                "status": "collected",
+                "batch_id": batch_id or None,
+                "query": query,
+                "branch_label": normalized_branch,
+                "candidate_count": len(candidates),
+                "top_titles": top_titles,
+                "warnings": [
+                    _clean_text(item, limit=220)
+                    for item in (search_payload.get("warnings") if isinstance(search_payload.get("warnings"), list) else [])
+                    if _clean_text(item, limit=220)
+                ],
+                "provider_status": _normalize_provider_status(search_payload.get("provider_status")),
+                "message": (
+                    f"Collected {len(candidates)} candidate source(s) for {normalized_branch}. "
+                    "These are queued for consolidated approval by the supervisor."
+                ),
+            }
+        )
+
+    @tool
+    async def approve_collected_literature(
+        collection_name: str = "",
+        runtime: ToolRuntime = None,
+    ) -> str:
+        """Deduplicate collected literature candidates and present one consolidated approval."""
+        cfg = _get_project_config(runtime)
+        api_base_url = cfg.get("api_base_url", "")
+        project_id = cfg.get("project_id", "")
+        if not project_id:
+            return "{}"
+
+        batches = await _load_retrieval_candidate_batches(runtime=runtime, project_id=project_id)
+        if not batches:
+            return json.dumps(
+                {
+                    "status": "no_candidates",
+                    "message": "No staged retrieval candidates are waiting for approval.",
+                }
+            )
+
+        merged_sources, branch_summaries, warnings, provider_status, batch_keys = _merge_candidate_batches(batches)
+        if not merged_sources:
+            await _clear_retrieval_candidate_batches(runtime=runtime, project_id=project_id, batch_keys=batch_keys)
+            return json.dumps(
+                {
+                    "status": "no_candidates",
+                    "message": "Retrieved candidates were empty after normalization.",
+                }
+            )
+
+        if len(merged_sources) > CONSOLIDATED_APPROVAL_HARD_LIMIT:
+            await _clear_retrieval_candidate_batches(runtime=runtime, project_id=project_id, batch_keys=batch_keys)
+            return json.dumps(
+                {
+                    "status": "too_many_candidates",
+                    "total_found": len(merged_sources),
+                    "hard_limit": CONSOLIDATED_APPROVAL_HARD_LIMIT,
+                    "message": (
+                        f"Parallel retrieval produced {len(merged_sources)} unique sources, which exceeds the current "
+                        f"review limit of {CONSOLIDATED_APPROVAL_HARD_LIMIT}. Narrow the retrieval scope or split it "
+                        "into staged imports."
+                    ),
+                }
+            )
+
+        recommended_keys = _recommended_candidate_keys(merged_sources)
+        selection_hint = "recommended" if len(merged_sources) > 40 and recommended_keys else "all"
+
+        compact_sources = [
+            {
+                "index": index,
+                "key": str(source.get("key") or ""),
+                "title": _clean_text(source.get("title"), limit=220),
+                "authors": source.get("authors") if isinstance(source.get("authors"), list) else [],
+                "venue": _clean_text(source.get("venue"), limit=120),
+                "year": _clean_text(source.get("year"), limit=8),
+                "abstract": _clean_text(source.get("abstract"), limit=220),
+                "doi": _clean_text(source.get("doi"), limit=120) or None,
+                "url": _clean_text(source.get("url") or source.get("pdf_url"), limit=200) or None,
+                "citation_count": int(source.get("citation_count") or 0),
+                "branch_preview": [
+                    _clean_text(label, limit=80)
+                    for label in (
+                        source.get("branches")[:CONSOLIDATED_BRANCH_PREVIEW_LIMIT]
+                        if isinstance(source.get("branches"), list)
+                        else []
+                    )
+                    if _clean_text(label, limit=80)
+                ],
+                "branch_count": len(source.get("branches")) if isinstance(source.get("branches"), list) else 0,
+                "duplicate_count": int(source.get("duplicate_count") or 1),
+                "recommended": str(source.get("key") or "") in recommended_keys,
+            }
+            for index, source in enumerate(merged_sources)
+        ]
+
+        if interrupt is None:
+            return _approval_unavailable("approve_collected_literature")
+
+        approval = interrupt(
+            {
+                "type": "consolidated_source_approval",
+                "message": (
+                    f"Parallel retrieval compiled {sum(int(batch.get('candidate_count') or 0) for batch in branch_summaries)} "
+                    f"candidate results across {len(branch_summaries)} retrieval branch(es). "
+                    f"After deduplication, {len(compact_sources)} unique sources are ready to add to the project."
+                ),
+                "total_found": len(compact_sources),
+                "total_candidates": sum(int(batch.get("candidate_count") or 0) for batch in branch_summaries),
+                "total_batches": len(branch_summaries),
+                "recommended_count": len(recommended_keys),
+                "selection_hint": selection_hint,
+                "soft_limit": CONSOLIDATED_APPROVAL_SOFT_LIMIT,
+                "sources": compact_sources,
+                "groups": branch_summaries,
+                "warnings": warnings,
+                "provider_status": provider_status,
+            }
+        )
+
+        if not isinstance(approval, dict) or not approval.get("approved"):
+            await _clear_retrieval_candidate_batches(runtime=runtime, project_id=project_id, batch_keys=batch_keys)
+            return json.dumps(
+                {
+                    "status": "rejected",
+                    "message": "The consolidated source approval was declined by the user.",
+                }
+            )
+
+        selection_mode = _clean_text(approval.get("selection_mode"), limit=32).lower() or ""
+        approved_keys_raw = approval.get("approved_keys")
+        approved_keys = {
+            str(item).strip()
+            for item in approved_keys_raw
+            if str(item).strip()
+        } if isinstance(approved_keys_raw, list) else set()
+        excluded_keys_raw = approval.get("excluded_keys")
+        excluded_keys = {
+            str(item).strip()
+            for item in excluded_keys_raw
+            if str(item).strip()
+        } if isinstance(excluded_keys_raw, list) else set()
+
+        approved_sources: list[dict[str, Any]]
+        if selection_mode == "all":
+            approved_sources = list(merged_sources)
+        elif selection_mode == "recommended":
+            approved_sources = [
+                source for source in merged_sources if str(source.get("key") or "") in recommended_keys
+            ]
+        elif selection_mode == "all_except":
+            approved_sources = [
+                source for source in merged_sources if str(source.get("key") or "") not in excluded_keys
+            ]
+        elif approved_keys:
+            approved_sources = [
+                source for source in merged_sources if str(source.get("key") or "") in approved_keys
+            ]
+        else:
+            approved_indices_raw = approval.get("approved_indices")
+            approved_indices: set[int] = set()
+            if isinstance(approved_indices_raw, list):
+                for item in approved_indices_raw:
+                    try:
+                        approved_indices.add(int(str(item).strip()))
+                    except (TypeError, ValueError):
+                        continue
+            approved_sources = [
+                source
+                for index, source in enumerate(merged_sources)
+                if not approved_indices or index in approved_indices
+            ]
+
+        if not approved_sources:
+            await _clear_retrieval_candidate_batches(runtime=runtime, project_id=project_id, batch_keys=batch_keys)
+            return json.dumps({"status": "rejected", "message": "No sources selected."})
+
+        approved_items = [
+            source.get("ingest_item")
+            for source in approved_sources
+            if isinstance(source.get("ingest_item"), dict)
+        ]
+        if not approved_items:
+            await _clear_retrieval_candidate_batches(runtime=runtime, project_id=project_id, batch_keys=batch_keys)
+            return json.dumps({"status": "error", "error": "No approved literature items could be normalized."})
+
+        query_label = " | ".join(
+            query
+            for query in (
+                _clean_text(summary.get("query"), limit=120)
+                for summary in branch_summaries
+                if isinstance(summary, dict)
+            )
+            if query
+        )[:500]
+        import_result = await _import_literature_in_chunks(
+            api_base_url=api_base_url,
+            project_id=project_id,
+            collection_id=cfg.get("collection_id"),
+            collection_name=collection_name,
+            query_label=query_label or "Consolidated literature retrieval",
+            approved_items=approved_items,
+            metadata={
+                "approvedCount": len(approved_items),
+                "retrievalBatches": len(branch_summaries),
+                "dedupedCandidateCount": len(compact_sources),
+                "selectionHint": selection_hint,
+                "selectionMode": selection_mode or ("all" if len(approved_items) == len(compact_sources) else "custom"),
+                "branchSummaries": branch_summaries,
+                "providerStatus": provider_status,
+                "warnings": warnings,
+            },
+        )
+
+        await _clear_retrieval_candidate_batches(runtime=runtime, project_id=project_id, batch_keys=batch_keys)
+
+        completed_items = import_result.get("completed_items") if isinstance(import_result.get("completed_items"), list) else []
+        failed_items = import_result.get("failed_items") if isinstance(import_result.get("failed_items"), list) else []
+        if completed_items:
+            top_titles = [
+                _clean_text(source.get("title"), limit=180)
+                for source in approved_sources[:8]
+                if _clean_text(source.get("title"), limit=180)
+            ]
+            memory_lines = [
+                "Consolidated retrieval approval completed.",
+                f"Retrieval branches: {len(branch_summaries)}",
+                f"Unique approved sources: {len(approved_items)}",
+                f"Imported sources: {len(completed_items)} of {len(approved_items)} approved selections.",
+                f"Import chunks: {int(import_result.get('chunk_count') or 0)}",
+            ]
+            batch_ids = import_result.get("batch_ids") if isinstance(import_result.get("batch_ids"), list) else []
+            if batch_ids:
+                memory_lines.append(f"Batch IDs: {', '.join(str(item) for item in batch_ids[:4])}")
+            if warnings:
+                memory_lines.append("Search warnings: " + "; ".join(warnings[:3]))
+            if top_titles:
+                memory_lines.append("Imported titles:")
+                memory_lines.extend(f"- {title}" for title in top_titles)
+            await _persist_project_memory(
+                runtime=runtime,
+                title=f"Literature retrieval: {_clean_text(query_label or 'consolidated approval', limit=80)}",
+                summary=(
+                    f"Imported {len(completed_items)} approved sources from a consolidated "
+                    f"{len(branch_summaries)}-branch retrieval pass."
+                ),
+                content="\n".join(memory_lines),
+                memory_type="retrieval_finding",
+                metadata={
+                    "kind": "consolidated_literature_collection",
+                    "approvedCount": len(approved_items),
+                    "completedCount": len(completed_items),
+                    "failedCount": len(failed_items),
+                    "batchId": import_result.get("batch_id"),
+                    "batchIds": batch_ids,
+                    "chunkCount": int(import_result.get("chunk_count") or 0),
+                    "branchSummaries": branch_summaries,
+                    "providerStatus": provider_status,
+                    "selectionMode": selection_mode or ("all" if len(approved_items) == len(compact_sources) else "custom"),
+                    "warnings": warnings,
+                    "sourceIds": [
+                        str(source.get("canonical_id") or source.get("doi") or source.get("key") or "")
+                        for source in approved_sources
+                    ],
+                },
+                provenance={
+                    "tool": "approve_collected_literature",
+                    "collectionId": cfg.get("collection_id"),
+                    "collectionName": collection_name or None,
+                    "batchId": import_result.get("batch_id"),
+                    "batchIds": batch_ids,
+                    "chunkCount": int(import_result.get("chunk_count") or 0),
+                    "branchSummaries": branch_summaries,
+                    "importedItems": [
+                        {
+                            "title": _clean_text(item.get("title"), limit=180),
+                            "documentId": str(item.get("document_id") or item.get("documentId") or "").strip() or None,
+                            "artifactId": str(item.get("artifact_id") or item.get("artifactId") or "").strip() or None,
+                        }
+                        for item in completed_items
+                    ],
+                },
+            )
+
+        return json.dumps(import_result)
+
     @tool
     async def stage_literature_collection(
         query: str,
@@ -1882,6 +2737,8 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         "read_project_document": read_project_document,
         "search_project_memories": search_project_memories,
         "search_literature": search_literature,
+        "collect_literature_candidates": collect_literature_candidates,
+        "approve_collected_literature": approve_collected_literature,
         "stage_literature_collection": stage_literature_collection,
         "stage_web_source": stage_web_source,
         "list_active_connectors": list_active_connectors,
@@ -1903,6 +2760,7 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         list_active_skills,         # Answer "what can you do?"
         describe_runtime_capabilities,  # Answer tool/connector questions
         list_canvas_documents,      # Check current canvas state
+        approve_collected_literature,  # One consolidated approval after parallel retrieval
         propose_project_memory,     # Persist findings across threads
     ]
 
@@ -1941,23 +2799,24 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
         },
         {
             "name": "retriever",
-            "description": "Fetches literature, stages sources, and gathers project evidence without drafting conclusions.",
+            "description": "Fetches literature candidates, stages web sources when needed, and gathers project evidence without drafting conclusions.",
             "system_prompt": (
-                "You are the retrieval specialist for Open Analyst. Your job is source discovery, source staging, and targeted retrieval.\n\n"
+                "You are the retrieval specialist for Open Analyst. Your job is source discovery, candidate collection, and targeted retrieval.\n\n"
                 "Workflow:\n"
-                "1. Use search_literature to find relevant papers and articles\n"
+                "1. Use search_literature or collect_literature_candidates to find relevant papers and articles\n"
                 "2. Use search_project_documents to check what already exists in the project\n"
                 "3. Use search_project_memories for relevant prior findings before broad external retrieval\n"
                 "4. If existing memories and project documents answer the request, summarize them and stop instead of re-running retrieval\n"
                 "5. Use read_project_document for promising in-project sources\n"
-                "6. Prefer stage_literature_collection for academic papers so imports use canonical identifiers\n"
-                "7. Use stage_web_source for non-paper web pages or when literature search cannot identify the source\n\n"
+                "6. Prefer collect_literature_candidates for academic papers so the supervisor can present one consolidated approval after all retriever branches finish\n"
+                "7. Use stage_web_source for non-paper web pages or when literature search cannot identify the source\n"
+                "8. Do NOT ask the user for literature approval yourself; return candidates and let the supervisor call approve_collected_literature once\n\n"
                 "Parallelism guidance:\n"
                 "- Safe to parallelize across independent queries, source sets, or provider slices\n"
                 "- Avoid redundant retries and avoid broad fan-out that is likely to trigger rate limits\n\n"
                 "IMPORTANT — Context management:\n"
                 "- Return ONLY a structured retrieval summary (under 350 words)\n"
-                "- Include: what was searched, what was staged or found, high-value sources, and unresolved gaps\n"
+                "- Include: what was searched, what candidate batches were collected or what was found, high-value sources, and unresolved gaps\n"
                 "- Do NOT draft conclusions beyond short retrieval notes\n"
                 "- Save larger raw material to /memory-files/ when needed and return only compact references\n"
                 "- If relevant memories already cover the request, say that directly and avoid external retrieval\n"
@@ -1966,7 +2825,7 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
             "model": model,
             "tools": [
                 tool_map["search_literature"],
-                tool_map["stage_literature_collection"],
+                tool_map["collect_literature_candidates"],
                 tool_map["stage_web_source"],
                 tool_map["search_project_documents"],
                 tool_map["read_project_document"],
