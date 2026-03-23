@@ -64,7 +64,7 @@ CLAUDE.md
 .codex/*
 .agents/
 .cursor/
-# AGENTS.md
+AGENTS.md
 
 dist*
 resources/node
