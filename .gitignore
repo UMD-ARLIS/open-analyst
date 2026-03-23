@@ -55,14 +55,15 @@ coverage/
 *.pem
 *.p12
 
-# Claude 
+# Claude
 .claude/*
-!.claude/skills/
 CLAUDE.md
 
 
 # codex
 .codex/*
+.agents/
+.cursor/
 # AGENTS.md
 
 dist*
@@ -75,3 +76,5 @@ collections/
 workspace/
 world_models_*.md
 services/langgraph-runtime/.langgraph_api/
+services/langgraph-runtime/.venv/
+services/langgraph-runtime/.pytest_cache/
