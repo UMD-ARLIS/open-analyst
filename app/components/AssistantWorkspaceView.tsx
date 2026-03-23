@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useMatches, useNavigate, useSearchParams } from "react-router";
 import {
   BookOpen,
@@ -128,6 +128,40 @@ function deriveThreadSummary(prompt: string): string {
   return cleaned.slice(0, 140);
 }
 
+function summarizeMessageContent(content: unknown): string {
+  if (typeof content === "string") return content.trim().slice(0, 80);
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((block) => {
+      if (typeof block === "string") return block;
+      if (!block || typeof block !== "object") return "";
+      const candidate = block as Record<string, unknown>;
+      if (candidate.type === "text" && typeof candidate.text === "string") {
+        return candidate.text;
+      }
+      if (candidate.type === "tool_use") {
+        return `${String(candidate.name || "tool")} ${JSON.stringify(candidate.input || {})}`;
+      }
+      return "";
+    })
+    .join(" ")
+    .trim()
+    .slice(0, 80);
+}
+
+function buildStableMessageId(
+  msg: { id?: string; type: string; content: unknown; tool_calls?: unknown[] },
+  sessionId: string,
+  index: number,
+): string {
+  if (msg.id && msg.id.trim()) return msg.id;
+  const toolCallId = Array.isArray(msg.tool_calls)
+    ? String((msg.tool_calls[0] as { id?: string } | undefined)?.id || "").trim()
+    : "";
+  const fingerprint = toolCallId || summarizeMessageContent(msg.content).replace(/\s+/g, "-").slice(0, 32) || "message";
+  return `lg-${sessionId || "thread"}-${msg.type}-${index}-${fingerprint}`;
+}
+
 /**
  * Convert a LangGraph BaseMessage (from useStream) to our Message type
  * so MessageCard can render it.
@@ -135,6 +169,8 @@ function deriveThreadSummary(prompt: string): string {
 function langGraphMessageToMessage(
   msg: { id?: string; type: string; content: unknown; tool_calls?: unknown[] },
   sessionId: string,
+  index: number,
+  timestamp: number,
 ): Message | null {
   const role = msg.type === "human" ? "user" : msg.type === "ai" ? "assistant" : null;
   if (!role) return null;
@@ -178,11 +214,11 @@ function langGraphMessageToMessage(
   if (content.length === 0) return null;
 
   return {
-    id: msg.id || `lg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    id: buildStableMessageId(msg, sessionId, index),
     sessionId,
     role,
     content,
-    timestamp: Date.now(),
+    timestamp,
   };
 }
 
@@ -250,6 +286,20 @@ export function AssistantWorkspaceView({
   const deepResearch = searchParams.get("deepResearch") === "true";
   const activePanel = searchParams.get("panel") || "";
   const isProjectHome = !initialAgentThreadId;
+  const deferredStreamMessages = useDeferredValue(stream.messages || []);
+  const deferredStreamValues = useDeferredValue((stream.values || {}) as Record<string, unknown>);
+  const deferredStreamInterrupts = useDeferredValue((stream as { interrupts?: unknown }).interrupts);
+  const deferredStreamActiveSubagents = useDeferredValue(
+    Array.isArray((stream as { activeSubagents?: unknown }).activeSubagents)
+      ? ((stream as { activeSubagents?: unknown[] }).activeSubagents || [])
+      : [],
+  );
+  const deferredStreamSubagents = useDeferredValue(
+    Array.isArray((stream as { subagents?: unknown }).subagents)
+      ? ((stream as { subagents?: unknown[] }).subagents || [])
+      : [],
+  );
+  const messageTimestampCacheRef = useRef<Map<string, number>>(new Map());
   const contextSummary = useMemo(() => {
     const connectorCount = workspaceContext.activeConnectorIds.length;
     const skillCount = workspaceContext.skills.filter((skill) => skill.pinned || skill.enabled).length;
@@ -285,15 +335,24 @@ export function AssistantWorkspaceView({
   }, [location.state]);
 
   const displayedMessages = useMemo(() => {
-    return (stream.messages || [])
-      .map((msg) =>
-        langGraphMessageToMessage(
-          msg as { id?: string; type: string; content: unknown; tool_calls?: unknown[] },
+    const nextTimestampCache = new Map<string, number>();
+    const messages = deferredStreamMessages
+      .map((msg, index) => {
+        const typedMessage = msg as { id?: string; type: string; content: unknown; tool_calls?: unknown[] };
+        const stableId = buildStableMessageId(typedMessage, initialAgentThreadId || "", index);
+        const timestamp = messageTimestampCacheRef.current.get(stableId) || Date.now();
+        nextTimestampCache.set(stableId, timestamp);
+        return langGraphMessageToMessage(
+          typedMessage,
           initialAgentThreadId || "",
-        ),
-      )
+          index,
+          timestamp,
+        );
+      })
       .filter((message): message is Message => message !== null);
-  }, [initialAgentThreadId, stream.messages]);
+    messageTimestampCacheRef.current = nextTimestampCache;
+    return messages;
+  }, [deferredStreamMessages, initialAgentThreadId]);
 
   const renderedMessages = useMemo(() => {
     if (displayedMessages.length > 0 || !initialAgentThreadId || !pendingPromptFromNavigation) {
@@ -312,9 +371,7 @@ export function AssistantWorkspaceView({
 
   const pendingInterrupts = useMemo(() => {
     const interruptCandidates: unknown[] = [];
-    const rootInterrupts = (stream as { interrupts?: unknown }).interrupts;
-    const values = (stream.values || {}) as Record<string, unknown>;
-    const valueInterrupts = values.interrupts;
+    const valueInterrupts = deferredStreamValues.__interrupt__ ?? deferredStreamValues.interrupts;
 
     const collectInterrupts = (source: unknown) => {
       if (Array.isArray(source)) {
@@ -331,14 +388,14 @@ export function AssistantWorkspaceView({
       }
     };
 
-    collectInterrupts(rootInterrupts);
+    collectInterrupts(deferredStreamInterrupts);
     collectInterrupts(valueInterrupts);
 
     if (stream.interrupt) {
       interruptCandidates.push(stream.interrupt);
     }
-    if (values.interrupt) {
-      interruptCandidates.push(values.interrupt);
+    if (deferredStreamValues.interrupt) {
+      interruptCandidates.push(deferredStreamValues.interrupt);
     }
 
     const unique = new Map<string, { id?: string; value: Record<string, unknown> }>();
@@ -355,32 +412,27 @@ export function AssistantWorkspaceView({
       unique.set(key, { id: interrupt.id, value: normalizedValue });
     });
     return Array.from(unique.values());
-  }, [stream]);
+  }, [deferredStreamInterrupts, deferredStreamValues, stream.interrupt]);
 
   const planTodos = useMemo(() => {
-    const values = (stream.values || {}) as Record<string, unknown>;
-    const rawTodos = Array.isArray(values.todos)
-      ? values.todos
-      : Array.isArray(values.active_plan)
-        ? values.active_plan
+    const rawTodos = Array.isArray(deferredStreamValues.todos)
+      ? deferredStreamValues.todos
+      : Array.isArray(deferredStreamValues.active_plan)
+        ? deferredStreamValues.active_plan
         : [];
     return rawTodos.map(normalizeTodo).filter((todo): todo is StreamTodo => todo !== null);
-  }, [stream.values]);
+  }, [deferredStreamValues]);
 
   const activeSubagents = useMemo(() => {
-    const raw = Array.isArray((stream as { activeSubagents?: unknown }).activeSubagents)
-      ? ((stream as { activeSubagents?: unknown[] }).activeSubagents || [])
-      : [];
-    return raw.map(normalizeSubagent).filter((subagent): subagent is StreamSubagent => subagent !== null);
-  }, [stream]);
+    return deferredStreamActiveSubagents
+      .map(normalizeSubagent)
+      .filter((subagent): subagent is StreamSubagent => subagent !== null);
+  }, [deferredStreamActiveSubagents]);
 
   const recentSubagents = useMemo(() => {
-    const raw = Array.isArray((stream as { subagents?: unknown }).subagents)
-      ? ((stream as { subagents?: unknown[] }).subagents || [])
-      : [];
     const activeIds = new Set(activeSubagents.map((subagent) => subagent.id).filter(Boolean));
     const unique = new Map<string, StreamSubagent>();
-    for (const item of raw) {
+    for (const item of deferredStreamSubagents) {
       const subagent = normalizeSubagent(item);
       if (!subagent) continue;
       const fallbackId = `${subagent.toolCall?.id || ""}:${subagent.toolCall?.args?.subagent_type || "agent"}:${subagent.status || "pending"}`;
@@ -394,7 +446,29 @@ export function AssistantWorkspaceView({
       })
       .slice(-6)
       .reverse();
-  }, [activeSubagents, stream]);
+  }, [activeSubagents, deferredStreamSubagents]);
+
+  const subagentsByMessageId = useMemo(() => {
+    const getter = stream.getSubagentsByMessage;
+    const grouped = new Map<string, StreamSubagent[]>();
+    const subagentCount = deferredStreamSubagents.length;
+    if (subagentCount === 0 && displayedMessages.length === 0) return grouped;
+    if (!getter) return grouped;
+    displayedMessages.forEach((message) => {
+      if (message.role !== "assistant") return;
+      try {
+        const subagents = (getter(message.id) || [])
+          .map(normalizeSubagent)
+          .filter((subagent): subagent is StreamSubagent => subagent !== null);
+        if (subagents.length > 0) {
+          grouped.set(message.id, subagents);
+        }
+      } catch {
+        // Ignore transient SDK lookup issues during stream transitions.
+      }
+    });
+    return grouped;
+  }, [displayedMessages, stream.getSubagentsByMessage, deferredStreamSubagents.length]);
 
   const completedTodoCount = useMemo(
     () => planTodos.filter((todo) => todo.status === "completed" || todo.status === "complete").length,
@@ -418,19 +492,6 @@ export function AssistantWorkspaceView({
       setResumingInterruptId(null);
     }
   };
-
-  const getSubagentsForMessage = useCallback(
-    (messageId: string) => {
-      const getter = stream.getSubagentsByMessage;
-      if (!getter) return [];
-      try {
-        return (getter(messageId) || []) as Array<Record<string, unknown>>;
-      } catch {
-        return [];
-      }
-    },
-    [stream],
-  );
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -579,6 +640,8 @@ export function AssistantWorkspaceView({
     shouldAutoSubmitPendingPrompt,
     stream,
   ]);
+
+  const lastRenderedMessageId = renderedMessages[renderedMessages.length - 1]?.id;
 
   const rail = hasRailContent ? (
     <div className="space-y-4">
@@ -812,10 +875,10 @@ export function AssistantWorkspaceView({
                 <React.Fragment key={message.id}>
                   <MessageCard
                     message={message}
-                    isStreaming={stream.isLoading && message === renderedMessages[renderedMessages.length - 1]}
+                    isStreaming={stream.isLoading && message.id === lastRenderedMessageId}
                   />
                   {message.role === "assistant" ? (
-                    <SubagentCards subagents={getSubagentsForMessage(message.id)} />
+                    <SubagentCards subagents={subagentsByMessageId.get(message.id) || []} />
                   ) : null}
                 </React.Fragment>
               ))}

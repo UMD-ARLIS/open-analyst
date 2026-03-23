@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Check, ChevronDown, ChevronRight, Copy, Download, ExternalLink, FileText, Loader2, Sparkles, Terminal } from "lucide-react";
@@ -355,7 +355,7 @@ function ContentBlockView({
   }
 }
 
-export function MessageCard({ message, isStreaming }: MessageCardProps) {
+export const MessageCard = memo(function MessageCard({ message, isStreaming }: MessageCardProps) {
   const isUser = message.role === "user";
   const contentBlocks = normalizeContent(message.content);
   const [copied, setCopied] = useState(false);
@@ -416,4 +416,4 @@ export function MessageCard({ message, isStreaming }: MessageCardProps) {
       {isStreaming ? <span className="inline-block w-2 h-4 bg-accent ml-1 animate-pulse" /> : null}
     </div>
   );
-}
+});

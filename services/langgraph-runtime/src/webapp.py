@@ -54,6 +54,16 @@ def _json_object(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _runtime_context_payload(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump()
+        return dumped if isinstance(dumped, dict) else {}
+    return {}
+
+
 def _is_thread_run_request_path(path: str) -> bool:
     """Return True for Agent Server thread run entrypoints.
 
@@ -234,9 +244,10 @@ async def enrich_run_payload(body: dict[str, Any], request: Request) -> dict[str
         prompt=_get_input_prompt(body),
         messages=_get_input_messages(body),
     )
+    runtime_context_payload = _runtime_context_payload(runtime_context)
     payload = {
         **body,
-        "context": runtime_context.model_dump(),
+        "context": runtime_context_payload,
         "metadata": {
             **_json_object(body.get("metadata")),
             "project_id": project_id,
@@ -244,7 +255,7 @@ async def enrich_run_payload(body: dict[str, Any], request: Request) -> dict[str
             "analysis_mode": analysis_mode,
         },
     }
-    return apply_runtime_system_prompt(payload, runtime_context.model_dump(), analysis_mode)
+    return apply_runtime_system_prompt(payload, runtime_context_payload, analysis_mode)
 
 
 def _replace_json_body(request: Request, payload: dict[str, Any]) -> None:

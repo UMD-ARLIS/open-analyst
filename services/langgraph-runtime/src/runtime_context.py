@@ -505,28 +505,28 @@ class RuntimeContextService:
             _trimmed(project.get("id")),
         )
 
-        return RuntimeProjectContext(
-            project_id=_trimmed(project["id"]),
-            project_name=_trimmed(project.get("name")),
-            workspace_path=resolve_project_workspace(project),
-            workspace_slug=workspace_slug,
-            shared_storage_backend="s3" if shared_storage["backend"] == "s3" else "local",
-            shared_storage_local_root=shared_storage["local_root"],
-            shared_storage_bucket=shared_storage["bucket"],
-            shared_storage_region=shared_storage["region"],
-            shared_storage_endpoint=shared_storage["endpoint"],
-            shared_storage_prefix=shared_storage["prefix"],
-            current_date=now.date().isoformat(),
-            current_datetime_utc=now.isoformat().replace("+00:00", "Z"),
-            analysis_mode=_trimmed(analysis_mode) or "chat",
-            brief=_trimmed(profile.get("brief")),
-            retrieval_policy=_json_object(profile.get("retrieval_policy")),
-            memory_profile=_json_object(profile.get("memory_profile")),
-            templates=profile.get("templates") if isinstance(profile.get("templates"), list) else [],
-            agent_policies=_json_object(profile.get("agent_policies")),
-            connector_ids=enabled_connector_ids,
-            active_connector_ids=active_connector_ids,
-            available_tools=[
+        return {
+            "project_id": _trimmed(project["id"]),
+            "project_name": _trimmed(project.get("name")),
+            "workspace_path": resolve_project_workspace(project),
+            "workspace_slug": workspace_slug,
+            "shared_storage_backend": "s3" if shared_storage["backend"] == "s3" else "local",
+            "shared_storage_local_root": shared_storage["local_root"],
+            "shared_storage_bucket": shared_storage["bucket"],
+            "shared_storage_region": shared_storage["region"],
+            "shared_storage_endpoint": shared_storage["endpoint"],
+            "shared_storage_prefix": shared_storage["prefix"],
+            "current_date": now.date().isoformat(),
+            "current_datetime_utc": now.isoformat().replace("+00:00", "Z"),
+            "analysis_mode": _trimmed(analysis_mode) or "chat",
+            "brief": _trimmed(profile.get("brief")),
+            "retrieval_policy": _json_object(profile.get("retrieval_policy")),
+            "memory_profile": _json_object(profile.get("memory_profile")),
+            "templates": profile.get("templates") if isinstance(profile.get("templates"), list) else [],
+            "agent_policies": _json_object(profile.get("agent_policies")),
+            "connector_ids": enabled_connector_ids,
+            "active_connector_ids": active_connector_ids,
+            "available_tools": [
                 {
                     "name": tool["name"],
                     "description": tool["description"],
@@ -535,12 +535,12 @@ class RuntimeContextService:
                 }
                 for tool in LOCAL_TOOL_DEFINITIONS
             ],
-            available_skills=all_skills,
-            pinned_skill_ids=pinned_skill_ids,
-            matched_skill_ids=matched_skill_ids,
-            api_base_url=_trimmed(api_base_url),
-            collection_id=_uuid_or_none(collection_id),
-        )
+            "available_skills": all_skills,
+            "pinned_skill_ids": pinned_skill_ids,
+            "matched_skill_ids": matched_skill_ids,
+            "api_base_url": _trimmed(api_base_url),
+            "collection_id": _uuid_or_none(collection_id),
+        }
 
     async def _load_project(self, project_id: str) -> dict[str, Any] | None:
         rows = await self._fetch(
