@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  node-security:
+    name: Node / security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Audit production dependencies
+        run: pnpm audit:prod
+
+  node-build:
+    name: Node / build
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://open_analyst:open_analyst_dev@localhost:5432/open_analyst
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Lint app
+        run: pnpm lint
+
+      - name: Build app
+        run: pnpm build

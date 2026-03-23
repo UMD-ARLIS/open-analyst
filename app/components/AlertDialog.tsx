@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef } from 'react';
 
 interface AlertDialogProps {
   open: boolean;
@@ -26,34 +26,22 @@ export function AlertDialog({
   onConfirm,
   onCancel,
 }: AlertDialogProps) {
-  const [inputValue, setInputValue] = useState(inputDefaultValue);
   const inputRef = useRef<HTMLInputElement>(null);
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const inputId = useId();
 
   useEffect(() => {
-    setInputValue(inputDefaultValue);
-  }, [inputDefaultValue, open]);
-
-  useEffect(() => {
     if (open) {
-      dialogRef.current?.showModal();
-      // Focus input or confirm button
       requestAnimationFrame(() => {
-        if (inputRef.current) {
-          inputRef.current.focus();
-          inputRef.current.select();
-        }
+        inputRef.current?.focus();
+        inputRef.current?.select();
       });
-    } else {
-      dialogRef.current?.close();
     }
   }, [open]);
 
   if (!open) return null;
 
   const handleConfirm = () => {
-    onConfirm(inputLabel ? inputValue : undefined);
+    onConfirm(inputLabel ? inputRef.current?.value ?? inputDefaultValue : undefined);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -65,12 +53,13 @@ export function AlertDialog({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60" onClick={onCancel} onKeyDown={handleKeyDown}>
-      <dialog
-        ref={dialogRef}
-        className="bg-surface rounded-xl border border-border shadow-2xl p-0 w-full max-w-md mx-4 backdrop:bg-transparent"
-        onClose={onCancel}
+      <div
+        className="bg-surface rounded-xl border border-border shadow-2xl p-0 w-full max-w-md mx-4"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
       >
-        <div className="p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div className="p-5 space-y-4">
           <h3 className="text-base font-semibold text-text-primary">{title}</h3>
           {message && <p className="text-sm text-text-secondary">{message}</p>}
 
@@ -78,12 +67,12 @@ export function AlertDialog({
             <div className="space-y-1">
               <label htmlFor={inputId} className="text-sm text-text-secondary">{inputLabel}</label>
               <input
+                key={`${inputId}:${inputDefaultValue}`}
                 id={inputId}
                 ref={inputRef}
                 type="text"
                 className="input w-full"
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
+                defaultValue={inputDefaultValue}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
@@ -106,7 +95,7 @@ export function AlertDialog({
             </button>
           </div>
         </div>
-      </dialog>
+      </div>
     </div>
   );
 }

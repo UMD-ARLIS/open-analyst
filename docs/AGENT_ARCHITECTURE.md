@@ -1,70 +1,160 @@
 # Agent Architecture
 
-Open Analyst now uses a conservative multi-agent structure:
+## Runtime Foundation
 
-- `primary chat agent`: owns the user session, tool orchestration, and final answer
-- `research worker`: optional specialist for `deep_research` turns
-- `analyst-mcp`: remains a tool service, not an autonomous peer agent
+The runtime in [`services/langgraph-runtime`](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime) is built around:
 
-## Current delegation model
+- LangGraph Agent Server as the owner of threads, runs, streaming, interrupts, and resume
+- `deepagents.create_deep_agent` with supervisor + subagent delegation pattern
+- LangGraph checkpoints for short-term thread continuity
+- LangGraph Postgres store for durable memory
+- DeepAgents built-in middleware: `SummarizationMiddleware` (auto-compacts at 85% context), `AnthropicPromptCachingMiddleware`, `TodoListMiddleware` (`write_todos` tool), `SubAgentMiddleware` (`task` tool), `FilesystemMiddleware` (auto-included filesystem tools)
+- Custom `SupervisorToolGuard` middleware to block built-in filesystem tools on the supervisor
+- Custom `ResilientModelMiddleware` on the supervisor and subagents to add shared admission control, transient retry/backoff, optional fallback models, and graceful degradation for LiteLLM/Bedrock throttling
+- `interrupt_on` for human-in-the-loop approval on publish and execute tools
+- FastAPI middleware in [`services/langgraph-runtime/src/webapp.py`](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/webapp.py) that normalizes thread metadata, injects server-built runtime context, and handles direct-browser CORS
+- Server-owned context assembly in [`services/langgraph-runtime/src/runtime_context.py`](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/runtime_context.py)
 
-The browser and web app contract does not change. Requests still flow through the React Router server into the Strands service.
+This split is intentional:
 
-When `deep_research` is enabled:
+- Agent Server owns durable runtime concerns
+- Deep Agents owns planning and delegation concerns
+- Open Analyst owns app-specific runtime context derivation and product APIs
 
-1. The primary agent invokes a bounded research worker first.
-2. The worker receives a narrowed tool set focused on web, paper, and MCP research tools.
-3. The worker returns a compact evidence bundle.
-4. The primary agent uses that evidence to produce the final answer.
+## Supervisor (Main Agent)
 
-If the worker fails, the primary agent continues without it.
+The supervisor is a thin coordinator. It has only 7 direct tools:
 
-## Current cost and quota tradeoff
+- `search_project_documents` — quick context checks before delegating
+- `search_project_memories` — recall prior findings
+- `list_active_skills` — answer "what can you do?"
+- `describe_runtime_capabilities` — answer tool/connector questions
+- `list_canvas_documents` — check current canvas state
+- `approve_collected_literature` — present one consolidated literature approval after retriever branches finish
+- `propose_project_memory` — persist findings across threads
 
-The current runtime favors capability over strict token efficiency.
+Plus auto-included by DeepAgents:
+- `task` — delegate work to subagents (the primary tool)
+- `write_todos` — create and update visible plans
 
-Today the primary agent system prompt may include:
+The supervisor does NOT have filesystem tools. DeepAgents auto-injects `ls`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`, `execute` via `FilesystemMiddleware`, but `SupervisorToolGuard` blocks them and returns an error directing the agent to delegate via `task()`.
 
-- matched skill instructions
-- selected skill reference excerpts
-- compact task memory
-- optional research-worker evidence
-- project retrieval snippets
+## Specialist Subagents
 
-That keeps the agent effective on complex tasks, but it also means the Strands request size can grow well beyond the raw user message. Combined with multi-step tool workflows, one user turn may consume several sequential Sonnet completions.
+Each subagent gets only the tools it needs. Skills are only assigned where relevant.
 
-Known consequence:
+### reviewer
+- **Purpose:** clarify ambiguous requests and propose recommended next paths before expensive work begins
+- **Tools:** `search_project_documents`, `search_project_memories`, `list_canvas_documents`, `list_active_skills`
 
-- Bedrock `429` incidents on this stack are currently more correlated with prompt inflation plus multi-step tool loops than with simple per-request chat volume
+### retriever
+- **Purpose:** collect literature candidates, stage web sources, and inspect existing project evidence
+- **Tools:** `search_literature`, `collect_literature_candidates`, `stage_web_source`, `search_project_documents`, `read_project_document`, `search_project_memories`, `propose_project_memory`
+- **Skills:** `/skills/content-extraction/`
+- **Approval model:** retrievers do not interrupt the user directly for literature approval; they return candidate batches to the supervisor
 
-Highest-risk workflows:
+### researcher
+- **Purpose:** synthesize evidence into findings, competing hypotheses, confidence, and gaps
+- **Tools:** `search_project_documents`, `read_project_document`, `search_project_memories`, `list_canvas_documents`, `propose_project_memory`
+- **Skills:** `/skills/content-extraction/`
 
-- `deep_research`
-- report or bulletin generation
-- repeated file-generation / retry loops
-- turns that match several heavy repo skills at once
+### argument-planner
+- **Purpose:** turn research into structured plans and outlines staged in canvas
+- **Tools:** `search_project_documents`, `read_project_document`, `search_project_memories`, `list_canvas_documents`, `save_canvas_markdown`, `list_active_skills`, `propose_project_memory`
 
-## Why this shape
+### drafter
+- **Purpose:** create and revise substantive draft content in canvas
+- **Tools:** `search_project_documents`, `read_project_document`, `search_project_memories`, `save_canvas_markdown`, `list_canvas_documents`
 
-This repo benefits from specialization on research-heavy tasks, but it does not yet need a general-purpose agent swarm.
+### packager
+- **Purpose:** generate delivery formats and capture artifacts
+- **Tools:** `list_directory`, `read_project_document`, `execute_command`, `capture_artifact`, `list_canvas_documents`
 
-- Reliability: one agent still owns the conversation and persistence.
-- Efficiency: delegation happens only on explicitly research-oriented turns.
-- Resilience: worker failure degrades to the existing single-agent path.
-- Containment: tools remain deterministic capabilities instead of autonomous peers.
+### critic
+- **Purpose:** review products for evidence grounding, structure, and quality gaps
+- **Tools:** `search_project_documents`, `search_project_memories`, `read_project_document`, `list_canvas_documents`
 
-## Near-term guidance
+### publisher
+- **Purpose:** publish approved outputs into project knowledge surfaces and artifact destinations
+- **Tools:** `list_canvas_documents`, `publish_canvas_document`, `publish_workspace_file`, `capture_artifact`
 
-- Keep session memory on the primary agent only.
-- Keep research-worker memory ephemeral and request-scoped.
-- Pass only a compact brief into the worker and a compact evidence bundle back out.
-- Track request-shape growth in `agent_request_shape` logs before adding more prompt-side context.
-- Add more specialists only when a task class is frequent, clearly separable, and measurably improves latency or answer quality.
+### general-purpose
+- **Purpose:** narrow fallback for cross-cutting synthesis that does not fit the named specialists
+- **Tools:** `search_project_documents`, `read_project_document`, `search_project_memories`, `search_literature`, `list_canvas_documents`
 
-## Future expansion
+## Subagent Observability
 
-If the system needs more specialization later, add workers in this order:
+All events from `astream_events` carry `metadata.lc_agent_name` to identify which agent produced them. The stream maps this to the `actor` field in `RuntimeEvent`:
+- Supervisor events: `actor="supervisor"` or `actor="open-analyst"`
+- Subagent events: `actor="researcher"`, `actor="drafter"`, `actor="critic"`, etc.
 
-1. `research worker` for breadth-first evidence gathering
-2. `execution worker` only if long-running deterministic tool workflows become common
-3. Avoid peer-to-peer autonomous agent meshes until there is a concrete eval-backed need
+Supervisor text streams to the user in real-time via `text_delta`. Subagent text is filtered out (internal working) — it returns to the supervisor as the `task` tool result.
+
+## Human-in-the-Loop
+
+The runtime uses `interrupt_on` for high-impact tools:
+- `publish_canvas_document` — approve before publishing
+- `publish_workspace_file` — approve before publishing artifacts
+- `execute_command` — approve shell commands
+
+For literature retrieval, the preferred path is supervisor-owned consolidated approval:
+
+- retriever branches collect candidate batches in parallel
+- the supervisor deduplicates and ranks them
+- the user approves one consolidated source set
+- approved imports run in chunks behind that single approval
+
+When interrupted, the LangGraph checkpointer saves state. The browser resumes directly against Agent Server with the persisted thread metadata. The old same-origin runtime proxy no longer exists.
+
+Persisted thread metadata helps routing and resume, but it is not itself the full invocation context. The server still needs to derive typed runtime context for each run entrypoint.
+
+## Memory Model
+
+### Short-Term Memory
+- Persisted via LangGraph checkpointer, scoped to the active thread
+- `SummarizationMiddleware` auto-compacts conversation at 85% of context window
+
+### Long-Term Memory
+- Stored in the LangGraph Postgres store
+- Mirrored from approved app memory records
+- Queried through `search_project_memories` tool
+
+### Retrieval Corpus
+- Project documents embedded into pgvector
+- Promoted project memories
+- External literature fetched on demand from Analyst MCP
+
+## Skill Model
+
+Repo `skills/*` are loaded into DeepAgents as runtime skills. Each subagent configured with `skills` gets its own isolated `SkillsMiddleware` instance. Skill state is fully isolated between agents.
+
+- Active skills are now reconstructed server-side from Open Analyst config and repository skill manifests
+- Matched skills are included in runtime context
+- Full SKILL.md body is injected into the supervisor's user prompt for active skills
+- `skill-creator` remains excluded from normal end-user runtime behavior
+
+## Context Bloat Prevention
+
+- Supervisor only sees subagent final results (not their internal tool calls)
+- All subagent system prompts enforce return size limits
+- Subagents save large data to workspace files and return summaries
+- `SummarizationMiddleware` truncates large tool outputs in older messages
+- `task()` descriptions must be self-contained (subagents are stateless)
+
+## Streaming Events
+
+The runtime streams typed events:
+- `status` — phase/progress updates, skill activation, plan updates, delegation status
+- `tool_call_start` / `tool_call_end` — tool invocations with agent attribution
+- `text_delta` — token-level streaming (supervisor only)
+- `memory_proposal` — proposed project memories
+- `error` — runtime failures
+- `interrupt` — human-in-the-loop approval required
+
+## Current Known Gaps
+
+- The legacy `stage_literature_collection` tool still uses a custom raw interrupt path and always requires approval. Consolidated literature approval is the preferred path, but the old direct staging tool has not yet been converted to native HITL/tool-policy handling.
+- Researcher and drafter subagents still rely on default Deep Agents filesystem behavior plus prompt discipline; tool-surface restrictions are not yet fully middleware/backend-driven.
+- Server-side runtime-context assembly currently duplicates some app logic for skills/connectors/config discovery. It is functional, but it is still duplicated.
+- Resume/context enrichment is reliable for the web UI path because the UI sends persisted routing metadata. Generic external clients that omit metadata on `/threads/:id/runs*` are not yet rehydrated server-side.
+- Bedrock/LiteLLM throttling is now mitigated with shared admission control, retries, and optional fallbacks, but the exact quota-safe settings still depend on your deployed provider limits.

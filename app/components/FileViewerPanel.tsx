@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAppStore } from '~/lib/store';
 import type { ArtifactMeta } from '~/lib/types';
-import { X, Download, FileText, FileSpreadsheet, Image, GripVertical, BookOpen } from 'lucide-react';
+import { X, Download, FileText, FileSpreadsheet, Image, BookOpen, FileAudio, FileVideo, Loader2 } from 'lucide-react';
 import { DocxRenderer } from '~/components/file-renderers/DocxRenderer';
 import { XlsxRenderer } from '~/components/file-renderers/XlsxRenderer';
 import { TextRenderer } from '~/components/file-renderers/TextRenderer';
+import { useArtifactObjectUrl } from '~/components/file-renderers/useArtifactObjectUrl';
 
 function getArtifactIconColor(mimeType: string): { icon: typeof FileText; color: string } {
   if (mimeType.includes('pdf')) return { icon: FileText, color: 'text-red-500' };
@@ -44,18 +44,104 @@ function isTextMime(mimeType: string): boolean {
   return (
     mimeType.startsWith('text/') ||
     mimeType === 'application/json' ||
+    mimeType === 'application/javascript' ||
     mimeType === 'application/xml' ||
     mimeType.includes('+xml') ||
     mimeType.includes('+json')
   );
 }
 
+function isHtmlMime(mimeType: string, filename: string): boolean {
+  return mimeType.includes('html') || filename.endsWith('.html') || filename.endsWith('.htm');
+}
+
+function isAudioMime(mimeType: string): boolean {
+  return mimeType.startsWith('audio/');
+}
+
+function isVideoMime(mimeType: string): boolean {
+  return mimeType.startsWith('video/');
+}
+
+function MetadataPreview({ artifact }: { artifact: ArtifactMeta }) {
+  const metadata = artifact.metadata || {};
+
+  return (
+    <div className="p-5 space-y-4">
+      <div className="rounded-xl border border-border bg-background px-4 py-3 space-y-2">
+        <div className="text-xs uppercase tracking-[0.16em] text-text-muted">Artifact metadata</div>
+        <dl className="space-y-2 text-sm">
+          <div className="grid grid-cols-[120px_1fr] gap-3">
+            <dt className="text-text-muted">Filename</dt>
+            <dd className="break-all text-text-primary">{artifact.filename}</dd>
+          </div>
+          <div className="grid grid-cols-[120px_1fr] gap-3">
+            <dt className="text-text-muted">Type</dt>
+            <dd className="break-all text-text-primary">{artifact.mimeType}</dd>
+          </div>
+          <div className="grid grid-cols-[120px_1fr] gap-3">
+            <dt className="text-text-muted">Size</dt>
+            <dd className="text-text-primary">{formatFileSize(artifact.size)}</dd>
+          </div>
+          {artifact.storageUri ? (
+            <div className="grid grid-cols-[120px_1fr] gap-3">
+              <dt className="text-text-muted">Storage</dt>
+              <dd className="break-all text-text-primary">{artifact.storageUri}</dd>
+            </div>
+          ) : null}
+        </dl>
+      </div>
+
+      {artifact.textPreview ? (
+        <div className="rounded-xl border border-border bg-background px-4 py-3">
+          <div className="text-xs uppercase tracking-[0.16em] text-text-muted mb-2">Extracted text</div>
+          <pre className="text-xs whitespace-pre-wrap break-words text-text-secondary">
+            {artifact.textPreview}
+          </pre>
+        </div>
+      ) : null}
+
+      {Object.keys(metadata).length ? (
+        <div className="rounded-xl border border-border bg-background px-4 py-3">
+          <div className="text-xs uppercase tracking-[0.16em] text-text-muted mb-2">Metadata JSON</div>
+          <pre className="text-xs whitespace-pre-wrap break-words text-text-secondary">
+            {JSON.stringify(metadata, null, 2)}
+          </pre>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function FileContent({ artifact }: { artifact: ArtifactMeta }) {
+  const lowerFilename = artifact.filename.toLowerCase();
+  const isPdf = artifact.mimeType === 'application/pdf';
+  const isImage = artifact.mimeType.startsWith('image/');
+  const isDocx = isDocxMime(artifact);
+  const isXlsx = isXlsxMime(artifact);
+  const isHtml = isHtmlMime(artifact.mimeType, lowerFilename);
+  const isAudio = isAudioMime(artifact.mimeType);
+  const isVideo = isVideoMime(artifact.mimeType);
+  const isText = isTextMime(artifact.mimeType);
+  const needsObjectUrl =
+    isPdf || isImage || isDocx || isXlsx || isHtml || isAudio || isVideo || isText;
+  const objectUrl = useArtifactObjectUrl(artifact.artifactUrl, needsObjectUrl);
+  const previewUrl = needsObjectUrl ? objectUrl : artifact.artifactUrl;
+
+  if (needsObjectUrl && !previewUrl) {
+    return (
+      <div className="flex h-full items-center justify-center p-8 text-text-muted">
+        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+        Loading preview...
+      </div>
+    );
+  }
+
   // PDF
-  if (artifact.mimeType === 'application/pdf') {
+  if (isPdf) {
     return (
       <iframe
-        src={artifact.artifactUrl}
+        src={previewUrl}
         className="w-full h-full border-0"
         title={artifact.filename}
       />
@@ -63,11 +149,11 @@ function FileContent({ artifact }: { artifact: ArtifactMeta }) {
   }
 
   // Image
-  if (artifact.mimeType.startsWith('image/')) {
+  if (isImage) {
     return (
       <div className="flex items-center justify-center p-4 overflow-auto h-full">
         <img
-          src={artifact.artifactUrl}
+          src={previewUrl}
           alt={artifact.filename}
           className="max-w-full max-h-full object-contain"
         />
@@ -76,40 +162,42 @@ function FileContent({ artifact }: { artifact: ArtifactMeta }) {
   }
 
   // DOCX
-  if (isDocxMime(artifact)) {
-    return <DocxRenderer url={artifact.artifactUrl} />;
+  if (isDocx) {
+    return <DocxRenderer url={previewUrl} />;
   }
 
   // XLSX / XLS / CSV
-  if (isXlsxMime(artifact)) {
-    return <XlsxRenderer url={artifact.artifactUrl} />;
+  if (isXlsx) {
+    return <XlsxRenderer url={previewUrl} />;
+  }
+
+  if (isHtml) {
+    return <iframe src={previewUrl} className="w-full h-full border-0 bg-white" title={artifact.filename} />;
+  }
+
+  if (isAudio) {
+    return (
+      <div className="h-full flex items-center justify-center p-6">
+        <audio controls src={previewUrl} className="w-full max-w-xl" />
+      </div>
+    );
+  }
+
+  if (isVideo) {
+    return (
+      <div className="h-full flex items-center justify-center p-4 bg-black/10">
+        <video controls src={previewUrl} className="max-w-full max-h-full" />
+      </div>
+    );
   }
 
   // Text-based
-  if (isTextMime(artifact.mimeType)) {
-    return <TextRenderer url={artifact.artifactUrl} />;
+  if (isText) {
+    return <TextRenderer url={previewUrl} />;
   }
 
-  // Fallback: download
-  return (
-    <div className="flex flex-col items-center justify-center h-full gap-4 p-8 text-text-muted">
-      <FileText className="w-12 h-12" />
-      <p className="text-sm">Preview not available for this file type</p>
-      <p className="text-xs">{artifact.mimeType}</p>
-      <a
-        href={artifact.downloadUrl}
-        download
-        className="px-4 py-2 rounded-lg bg-accent text-white text-sm hover:bg-accent-hover transition-colors"
-      >
-        Download File
-      </a>
-    </div>
-  );
+  return <MetadataPreview artifact={artifact} />;
 }
-
-const MIN_WIDTH = 320;
-const MAX_WIDTH = 1200;
-const DEFAULT_WIDTH = 480;
 
 interface FileViewerPanelProps {
   onOpenKnowledge?: () => void;
@@ -118,68 +206,19 @@ interface FileViewerPanelProps {
 export function FileViewerPanel({ onOpenKnowledge }: FileViewerPanelProps) {
   const artifact = useAppStore((s) => s.fileViewerArtifact);
   const closeFileViewer = useAppStore((s) => s.closeFileViewer);
-  const [width, setWidth] = useState(DEFAULT_WIDTH);
-  const isDragging = useRef(false);
-  const startX = useRef(0);
-  const startWidth = useRef(0);
-
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    isDragging.current = true;
-    startX.current = e.clientX;
-    startWidth.current = width;
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-  }, [width]);
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isDragging.current) return;
-      // Dragging left edge → moving left = wider panel
-      const delta = startX.current - e.clientX;
-      const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth.current + delta));
-      setWidth(newWidth);
-    };
-
-    const handleMouseUp = () => {
-      if (!isDragging.current) return;
-      isDragging.current = false;
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, []);
 
   if (!artifact) return null;
 
   const { icon: Icon, color } = getArtifactIconColor(artifact.mimeType);
+  const HeaderIcon =
+    isAudioMime(artifact.mimeType) ? FileAudio : isVideoMime(artifact.mimeType) ? FileVideo : Icon;
 
   return (
-    <div
-      className="border-l border-border bg-surface flex flex-col overflow-hidden shrink-0 relative"
-      style={{ width }}
-    >
-      {/* Drag handle on left edge */}
-      <div
-        onMouseDown={handleMouseDown}
-        className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize z-10 group flex items-center"
-      >
-        <div className="absolute inset-0 hover:bg-accent/20 transition-colors" />
-        <div className="absolute left-0 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity text-text-muted">
-          <GripVertical className="w-3 h-3" />
-        </div>
-      </div>
-
+    <div className="bg-surface flex flex-col shrink-0 relative min-h-0 h-full">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border shrink-0">
         <div className={`w-7 h-7 rounded-lg bg-surface-muted flex items-center justify-center ${color}`}>
-          <Icon className="w-3.5 h-3.5" />
+          <HeaderIcon className="w-3.5 h-3.5" />
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-text-primary truncate">
@@ -219,7 +258,7 @@ export function FileViewerPanel({ onOpenKnowledge }: FileViewerPanelProps) {
       </div>
 
       {/* Content — scrollable */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto min-h-0">
         <FileContent artifact={artifact} />
       </div>
     </div>

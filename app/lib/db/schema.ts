@@ -1,184 +1,182 @@
-import {
-  pgTable,
-  uuid,
-  varchar,
-  text,
-  jsonb,
-  timestamp,
-  boolean,
-  index,
-  uniqueIndex,
-} from "drizzle-orm/pg-core";
+export interface Project {
+  id: string;
+  userId: string;
+  name: string;
+  description: string | null;
+  datastores: unknown[];
+  workspaceSlug: string;
+  workspaceLocalRoot: string | null;
+  artifactBackend: string | null;
+  artifactLocalRoot: string | null;
+  artifactS3Bucket: string | null;
+  artifactS3Region: string | null;
+  artifactS3Endpoint: string | null;
+  artifactS3Prefix: string | null;
+  createdAt: Date | null;
+  updatedAt: Date | null;
+}
 
-// --- projects ---
+export type NewProject = Omit<Project, "id" | "createdAt" | "updatedAt">;
 
-export const projects = pgTable(
-  "projects",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    userId: varchar("user_id", { length: 255 }).notNull(),
-    name: varchar("name", { length: 255 }).notNull(),
-    description: text("description").default(""),
-    datastores: jsonb("datastores").default([]),
-    workspaceSlug: varchar("workspace_slug", { length: 255 }).notNull().default(""),
-    workspaceLocalRoot: text("workspace_local_root"),
-    artifactBackend: varchar("artifact_backend", { length: 16 })
-      .notNull()
-      .default("env"),
-    artifactLocalRoot: text("artifact_local_root"),
-    artifactS3Bucket: text("artifact_s3_bucket"),
-    artifactS3Region: varchar("artifact_s3_region", { length: 255 }),
-    artifactS3Endpoint: text("artifact_s3_endpoint"),
-    artifactS3Prefix: text("artifact_s3_prefix"),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-  },
-  (table) => [index("projects_user_id_idx").on(table.userId)]
-);
+export interface Collection {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string | null;
+  createdAt: Date | null;
+  updatedAt: Date | null;
+}
 
-// --- collections ---
+export type NewCollection = Omit<Collection, "id" | "createdAt" | "updatedAt">;
 
-export const collections = pgTable(
-  "collections",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    projectId: uuid("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    name: varchar("name", { length: 255 }).notNull(),
-    description: text("description").default(""),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-  },
-  (table) => [
-    index("collections_project_id_idx").on(table.projectId),
-    uniqueIndex("collections_project_name_idx").on(
-      table.projectId,
-      table.name
-    ),
-  ]
-);
+export interface Document {
+  id: string;
+  projectId: string;
+  collectionId: string | null;
+  title: string | null;
+  sourceType: string | null;
+  sourceUri: string | null;
+  storageUri: string | null;
+  content: string | null;
+  metadata: Record<string, unknown> | null;
+  embedding: number[] | null;
+  embeddingVector: number[] | null;
+  createdAt: Date | null;
+  updatedAt: Date | null;
+}
 
-// --- documents ---
+export type NewDocument = Omit<Document, "id" | "createdAt" | "updatedAt">;
 
-export const documents = pgTable(
-  "documents",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    projectId: uuid("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    collectionId: uuid("collection_id").references(() => collections.id, {
-      onDelete: "set null",
-    }),
-    title: varchar("title", { length: 500 }).default("Untitled"),
-    sourceType: varchar("source_type", { length: 50 }).default("manual"),
-    sourceUri: text("source_uri"),
-    storageUri: text("storage_uri"),
-    content: text("content"),
-    metadata: jsonb("metadata").default({}),
-    embedding: jsonb("embedding").$type<number[] | null>(),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-  },
-  (table) => [
-    index("documents_project_id_idx").on(table.projectId),
-    index("documents_collection_id_idx").on(table.collectionId),
-  ]
-);
+export interface Settings {
+  id: string;
+  userId: string;
+  activeProjectId: string | null;
+  model: string | null;
+  workingDir: string | null;
+  workingDirType: string | null;
+  s3Uri: string | null;
+  agentBackend: string | null;
+  devLogsEnabled: boolean | null;
+  updatedAt: Date | null;
+}
 
-// --- tasks (replaces sessions + runs) ---
+export type NewSettings = Omit<Settings, "id" | "updatedAt">;
 
-export const tasks = pgTable(
-  "tasks",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    projectId: uuid("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    title: varchar("title", { length: 500 }).default("New Task"),
-    type: varchar("type", { length: 50 }).default("chat"),
-    status: varchar("status", { length: 50 }).default("idle"),
-    cwd: text("cwd"),
-    planSnapshot: jsonb("plan_snapshot"),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-  },
-  (table) => [
-    index("tasks_project_updated_idx").on(table.projectId, table.updatedAt),
-    index("tasks_status_idx").on(table.status),
-  ]
-);
+export interface ProjectProfile {
+  id: string;
+  projectId: string;
+  brief: string | null;
+  retrievalPolicy: Record<string, unknown> | null;
+  memoryProfile: Record<string, unknown> | null;
+  templates: unknown[] | null;
+  agentPolicies: Record<string, unknown> | null;
+  defaultConnectorIds: string[] | null;
+  createdAt: Date | null;
+  updatedAt: Date | null;
+}
 
-// --- messages ---
+export type NewProjectProfile = Omit<ProjectProfile, "id" | "createdAt" | "updatedAt">;
 
-export const messages = pgTable(
-  "messages",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    taskId: uuid("task_id")
-      .notNull()
-      .references(() => tasks.id, { onDelete: "cascade" }),
-    role: varchar("role", { length: 20 }).notNull(),
-    content: jsonb("content").notNull(),
-    tokenUsage: jsonb("token_usage"),
-    timestamp: timestamp("timestamp", { withTimezone: true }).defaultNow(),
-  },
-  (table) => [
-    index("messages_task_timestamp_idx").on(table.taskId, table.timestamp),
-  ]
-);
+export interface Artifact {
+  id: string;
+  projectId: string;
+  title: string;
+  kind: string;
+  mimeType: string;
+  storageUri: string | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: Date | null;
+  updatedAt: Date | null;
+}
 
-// --- task_events (replaces run_events) ---
+export type NewArtifact = Omit<Artifact, "id" | "createdAt" | "updatedAt">;
 
-export const taskEvents = pgTable(
-  "task_events",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    taskId: uuid("task_id")
-      .notNull()
-      .references(() => tasks.id, { onDelete: "cascade" }),
-    type: varchar("type", { length: 100 }).notNull(),
-    payload: jsonb("payload").default({}),
-    timestamp: timestamp("timestamp", { withTimezone: true }).defaultNow(),
-  },
-  (table) => [index("task_events_task_id_idx").on(table.taskId)]
-);
+export interface ArtifactVersion {
+  id: string;
+  artifactId: string;
+  version: number;
+  title: string;
+  changeSummary: string | null;
+  storageUri: string | null;
+  contentText: string | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: Date | null;
+}
 
-// --- settings (per-user) ---
+export type NewArtifactVersion = Omit<ArtifactVersion, "id" | "createdAt">;
 
-export const settings = pgTable(
-  "settings",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    userId: varchar("user_id", { length: 255 }).notNull(),
-    activeProjectId: uuid("active_project_id"),
-    model: varchar("model", { length: 255 }).default(""),
-    workingDir: text("working_dir"),
-    workingDirType: varchar("working_dir_type", { length: 20 }).default(
-      "local"
-    ),
-    s3Uri: text("s3_uri"),
-    agentBackend: varchar("agent_backend", { length: 50 }).default("strands"),
-    devLogsEnabled: boolean("dev_logs_enabled").default(false),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-  },
-  (table) => [uniqueIndex("settings_user_id_idx").on(table.userId)]
-);
+export interface EvidenceItem {
+  id: string;
+  projectId: string;
+  collectionId: string | null;
+  documentId: string | null;
+  artifactId: string | null;
+  title: string;
+  evidenceType: string;
+  sourceUri: string | null;
+  citationText: string | null;
+  extractedText: string | null;
+  confidence: string | null;
+  provenance: Record<string, unknown> | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: Date | null;
+  updatedAt: Date | null;
+}
 
-// --- Type exports ---
+export type NewEvidenceItem = Omit<EvidenceItem, "id" | "createdAt" | "updatedAt">;
 
-export type Project = typeof projects.$inferSelect;
-export type NewProject = typeof projects.$inferInsert;
-export type Collection = typeof collections.$inferSelect;
-export type NewCollection = typeof collections.$inferInsert;
-export type Document = typeof documents.$inferSelect;
-export type NewDocument = typeof documents.$inferInsert;
-export type Task = typeof tasks.$inferSelect;
-export type NewTask = typeof tasks.$inferInsert;
-export type MessageRow = typeof messages.$inferSelect;
-export type NewMessage = typeof messages.$inferInsert;
-export type TaskEvent = typeof taskEvents.$inferSelect;
-export type NewTaskEvent = typeof taskEvents.$inferInsert;
-export type Settings = typeof settings.$inferSelect;
-export type NewSettings = typeof settings.$inferInsert;
+export interface SourceIngestBatch {
+  id: string;
+  projectId: string;
+  collectionId: string | null;
+  collectionName: string | null;
+  origin: string;
+  status: string;
+  query: string | null;
+  summary: string | null;
+  requestedCount: number;
+  importedCount: number;
+  metadata: Record<string, unknown> | null;
+  createdAt: Date | null;
+  updatedAt: Date | null;
+  approvedAt: Date | null;
+  completedAt: Date | null;
+  rejectedAt: Date | null;
+}
+
+export type NewSourceIngestBatch = Omit<SourceIngestBatch, "id" | "createdAt" | "updatedAt">;
+
+export interface SourceIngestItem {
+  id: string;
+  batchId: string;
+  projectId: string;
+  documentId: string | null;
+  externalId: string | null;
+  sourceUrl: string | null;
+  title: string;
+  mimeTypeHint: string | null;
+  targetFilename: string | null;
+  normalizedMetadata: Record<string, unknown> | null;
+  storageUri: string | null;
+  status: string;
+  error: string | null;
+  createdAt: Date | null;
+  updatedAt: Date | null;
+  importedAt: Date | null;
+}
+
+export type NewSourceIngestItem = Omit<SourceIngestItem, "id" | "createdAt" | "updatedAt">;
+
+export interface CanvasDocument {
+  id: string;
+  projectId: string;
+  artifactId: string | null;
+  title: string;
+  documentType: string;
+  content: Record<string, unknown> | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: Date | null;
+  updatedAt: Date | null;
+}
+
+export type NewCanvasDocument = Omit<CanvasDocument, "id" | "createdAt" | "updatedAt">;

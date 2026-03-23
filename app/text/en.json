@@ -227,7 +227,7 @@
   "sidebar": {
     "recents": "Recents",
     "expandToView": "Expand to view tasks",
-    "noTasks": "No tasks yet",
+    "noTasks": "No runs yet",
     "deleteAll": "Delete all conversations",
     "localTasks": "These tasks run locally and aren't synced across devices.",
     "apiConfigured": "API Configured",

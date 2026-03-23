@@ -71,13 +71,17 @@ export interface ToolUseContent {
 }
 
 export interface ArtifactMeta {
-  documentId: string;
+  documentId?: string;
+  artifactId?: string;
   filename: string;
   mimeType: string;
   size: number;
   artifactUrl: string;
   downloadUrl: string;
   title?: string;
+  storageUri?: string;
+  metadata?: Record<string, unknown>;
+  textPreview?: string;
 }
 
 export interface ToolResultContent {

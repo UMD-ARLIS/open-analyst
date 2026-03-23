@@ -107,3 +107,20 @@ export function buildProjectArtifactUrls(projectId: string, documentId: string, 
     downloadUrl: `${artifactUrl}?download=1`,
   };
 }
+
+export function buildProjectStandaloneArtifactUrls(
+  projectId: string,
+  artifactId: string,
+  apiBaseUrl = ""
+): {
+  artifactUrl: string;
+  downloadUrl: string;
+} {
+  const base = apiBaseUrl.trim().replace(/\/+$/g, "");
+  const relative = `/api/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}/content`;
+  const artifactUrl = base ? `${base}${relative}` : relative;
+  return {
+    artifactUrl,
+    downloadUrl: `${artifactUrl}?download=1`,
+  };
+}

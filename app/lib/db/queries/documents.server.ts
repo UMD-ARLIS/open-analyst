@@ -1,42 +1,46 @@
-import { eq, desc, and, sql } from "drizzle-orm";
-import { db } from "../index.server";
-import {
-  collections,
-  documents,
-  type Collection,
-  type Document,
-} from "../schema";
+import { queryRow, queryRows } from "../index.server";
+import { type Collection, type Document } from "../schema";
 import {
   buildKnowledgeEmbeddingText,
-  cosineSimilarity,
   embedKnowledgeTexts,
   isKnowledgeEmbeddingConfigured,
 } from "~/lib/knowledge-embedding.server";
 
+function jsonParam(value: unknown, fallback: unknown): string {
+  return JSON.stringify(value && typeof value === "object" ? value : fallback);
+}
+
 // --- Collections ---
 
-export async function listCollections(
-  projectId: string
-): Promise<Collection[]> {
-  return db
-    .select()
-    .from(collections)
-    .where(eq(collections.projectId, projectId))
-    .orderBy(desc(collections.updatedAt));
+export async function listCollections(projectId: string): Promise<Collection[]> {
+  return queryRows<Collection>(
+    `
+      SELECT *
+      FROM collections
+      WHERE project_id = $1
+      ORDER BY updated_at DESC
+    `,
+    [projectId],
+  );
 }
 
 export async function createCollection(
   projectId: string,
   input: { name?: string; description?: string }
 ): Promise<Collection> {
-  const [collection] = await db
-    .insert(collections)
-    .values({
+  const collection = await queryRow<Collection>(
+    `
+      INSERT INTO collections (project_id, name, description)
+      VALUES ($1, $2, $3)
+      RETURNING *
+    `,
+    [
       projectId,
-      name: String(input.name || "Untitled Collection").trim(),
-      description: String(input.description || "").trim(),
-    })
-    .returning();
+      String(input.name || "Untitled Collection").trim(),
+      String(input.description || "").trim(),
+    ],
+  );
+  if (!collection) throw new Error("Collection insert failed");
   return collection;
 }
 
@@ -44,17 +48,15 @@ export async function getCollection(
   projectId: string,
   collectionId: string
 ): Promise<Collection | undefined> {
-  const [collection] = await db
-    .select()
-    .from(collections)
-    .where(
-      and(
-        eq(collections.projectId, projectId),
-        eq(collections.id, collectionId)
-      )
-    )
-    .limit(1);
-  return collection;
+  return queryRow<Collection>(
+    `
+      SELECT *
+      FROM collections
+      WHERE project_id = $1 AND id = $2
+      LIMIT 1
+    `,
+    [projectId, collectionId],
+  );
 }
 
 export async function ensureCollection(
@@ -65,106 +67,105 @@ export async function ensureCollection(
   const trimmed = String(name || "").trim();
   if (!trimmed) throw new Error("Collection name is required");
 
-  // Try to find existing (case-insensitive)
-  const [existing] = await db
-    .select()
-    .from(collections)
-    .where(
-      and(
-        eq(collections.projectId, projectId),
-        sql`lower(${collections.name}) = lower(${trimmed})`
-      )
-    )
-    .limit(1);
-
+  const existing = await queryRow<Collection>(
+    `
+      SELECT *
+      FROM collections
+      WHERE project_id = $1 AND lower(name) = lower($2)
+      LIMIT 1
+    `,
+    [projectId, trimmed],
+  );
   if (existing) return existing;
 
-  const [collection] = await db
-    .insert(collections)
-    .values({
-      projectId,
-      name: trimmed,
-      description: String(description || "").trim(),
-    })
-    .returning();
-  return collection;
+  try {
+    const collection = await queryRow<Collection>(
+      `
+        INSERT INTO collections (project_id, name, description)
+        VALUES ($1, $2, $3)
+        RETURNING *
+      `,
+      [projectId, trimmed, String(description || "").trim()],
+    );
+    if (!collection) throw new Error("Collection insert failed");
+    return collection;
+  } catch (error) {
+    const raced = await queryRow<Collection>(
+      `
+        SELECT *
+        FROM collections
+        WHERE project_id = $1 AND lower(name) = lower($2)
+        LIMIT 1
+      `,
+      [projectId, trimmed],
+    );
+    if (raced) return raced;
+    throw error;
+  }
 }
 
-export async function getCollectionDocumentCounts(
-  projectId: string
-): Promise<Record<string, number>> {
-  const rows = await db
-    .select({
-      collectionId: documents.collectionId,
-      count: sql<number>`count(*)::int`,
-    })
-    .from(documents)
-    .where(eq(documents.projectId, projectId))
-    .groupBy(documents.collectionId);
-
+export async function getCollectionDocumentCounts(projectId: string): Promise<Record<string, number>> {
+  const rows = await queryRows<{ collectionId: string | null; count: number }>(
+    `
+      SELECT collection_id, count(*)::int AS count
+      FROM documents
+      WHERE project_id = $1
+      GROUP BY collection_id
+    `,
+    [projectId],
+  );
   const counts: Record<string, number> = {};
   for (const row of rows) {
-    if (row.collectionId) {
-      counts[row.collectionId] = row.count;
-    }
+    if (row.collectionId) counts[row.collectionId] = Number(row.count);
   }
   return counts;
 }
 
 // --- Documents ---
 
-export async function listDocuments(
-  projectId: string,
-  collectionId?: string
-): Promise<Document[]> {
-  if (collectionId) {
-    return db
-      .select()
-      .from(documents)
-      .where(
-        and(
-          eq(documents.projectId, projectId),
-          eq(documents.collectionId, collectionId)
-        )
-      )
-      .orderBy(desc(documents.updatedAt));
-  }
-  return db
-    .select()
-    .from(documents)
-    .where(eq(documents.projectId, projectId))
-    .orderBy(desc(documents.updatedAt));
+export async function listDocuments(projectId: string, collectionId?: string): Promise<Document[]> {
+  return queryRows<Document>(
+    `
+      SELECT *
+      FROM documents
+      WHERE project_id = $1
+        AND ($2::uuid IS NULL OR collection_id = $2::uuid)
+      ORDER BY updated_at DESC
+    `,
+    [projectId, collectionId ?? null],
+  );
 }
 
-export async function getDocument(
-  projectId: string,
-  documentId: string
-): Promise<Document | undefined> {
-  const [doc] = await db
-    .select()
-    .from(documents)
-    .where(
-      and(eq(documents.projectId, projectId), eq(documents.id, documentId))
-    )
-    .limit(1);
-  return doc;
+export async function getDocument(projectId: string, documentId: string): Promise<Document | undefined> {
+  return queryRow<Document>(
+    `
+      SELECT *
+      FROM documents
+      WHERE project_id = $1 AND id = $2
+      LIMIT 1
+    `,
+    [projectId, documentId],
+  );
 }
 
 export async function getDocumentBySourceUri(
   projectId: string,
-  sourceUri: string
+  sourceUri: string,
+  sourceType?: string | null,
 ): Promise<Document | undefined> {
   const trimmed = String(sourceUri || "").trim();
   if (!trimmed) return undefined;
-
-  const [doc] = await db
-    .select()
-    .from(documents)
-    .where(
-      and(eq(documents.projectId, projectId), eq(documents.sourceUri, trimmed))
-    )
-    .limit(1);
-  return doc;
+  return queryRow<Document>(
+    `
+      SELECT *
+      FROM documents
+      WHERE project_id = $1
+        AND source_uri = $2
+        AND ($3::text IS NULL OR source_type = $3::text)
+      LIMIT 1
+    `,
+    [projectId, trimmed, String(sourceType || "").trim() || null],
+  );
 }
 
 export async function createDocument(
@@ -179,22 +180,33 @@ export async function createDocument(
     metadata?: Record<string, unknown>;
   }
 ): Promise<Document> {
-  const [doc] = await db
-    .insert(documents)
-    .values({
+  const doc = await queryRow<Document>(
+    `
+      INSERT INTO documents (
+        project_id,
+        collection_id,
+        title,
+        source_type,
+        source_uri,
+        storage_uri,
+        content,
+        metadata
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+      RETURNING *
+    `,
+    [
       projectId,
-      collectionId: input.collectionId || null,
-      title: String(input.title || "Untitled Source").trim(),
-      sourceType: String(input.sourceType || "manual"),
-      sourceUri: String(input.sourceUri || ""),
-      storageUri: input.storageUri || null,
-      content: String(input.content || ""),
-      metadata:
-        input.metadata && typeof input.metadata === "object"
-          ? input.metadata
-          : {},
-    })
-    .returning();
+      input.collectionId || null,
+      String(input.title || "Untitled Source").trim(),
+      String(input.sourceType || "manual"),
+      String(input.sourceUri || ""),
+      input.storageUri || null,
+      String(input.content || ""),
+      jsonParam(input.metadata, {}),
+    ],
+  );
+  if (!doc) throw new Error("Document insert failed");
   return doc;
 }
 
@@ -211,37 +223,46 @@ export async function updateDocument(
     metadata?: Record<string, unknown>;
   }
 ): Promise<Document> {
-  const [doc] = await db
-    .update(documents)
-    .set({
-      collectionId:
-        input.collectionId !== undefined ? input.collectionId || null : undefined,
-      title:
-        input.title !== undefined
-          ? String(input.title || "Untitled Source").trim()
-          : undefined,
-      sourceType:
-        input.sourceType !== undefined
-          ? String(input.sourceType || "manual")
-          : undefined,
-      sourceUri:
-        input.sourceUri !== undefined ? String(input.sourceUri || "") : undefined,
-      storageUri:
-        input.storageUri !== undefined ? input.storageUri || null : undefined,
-      content:
-        input.content !== undefined ? String(input.content || "") : undefined,
-      metadata:
-        input.metadata && typeof input.metadata === "object"
-          ? input.metadata
-          : input.metadata === undefined
-            ? undefined
-            : {},
-      updatedAt: new Date(),
-    })
-    .where(
-      and(eq(documents.projectId, projectId), eq(documents.id, documentId))
-    )
-    .returning();
+  const clauses: string[] = ["updated_at = NOW()"];
+  const params: unknown[] = [];
+  if (input.collectionId !== undefined) {
+    params.push(input.collectionId || null);
+    clauses.push(`collection_id = $${params.length}`);
+  }
+  if (input.title !== undefined) {
+    params.push(String(input.title || "Untitled Source").trim());
+    clauses.push(`title = $${params.length}`);
+  }
+  if (input.sourceType !== undefined) {
+    params.push(String(input.sourceType || "manual"));
+    clauses.push(`source_type = $${params.length}`);
+  }
+  if (input.sourceUri !== undefined) {
+    params.push(String(input.sourceUri || ""));
+    clauses.push(`source_uri = $${params.length}`);
+  }
+  if (input.storageUri !== undefined) {
+    params.push(input.storageUri || null);
+    clauses.push(`storage_uri = $${params.length}`);
+  }
+  if (input.content !== undefined) {
+    params.push(String(input.content || ""));
+    clauses.push(`content = $${params.length}`);
+  }
+  if (input.metadata !== undefined) {
+    params.push(jsonParam(input.metadata, {}));
+    clauses.push(`metadata = $${params.length}::jsonb`);
+  }
+  params.push(projectId, documentId);
+  const doc = await queryRow<Document>(
+    `
+      UPDATE documents
+      SET ${clauses.join(", ")}
+      WHERE project_id = $${params.length - 1} AND id = $${params.length}
+      RETURNING *
+    `,
+    params,
+  );
   if (!doc) throw new Error(`Document not found: ${documentId}`);
   return doc;
 }
@@ -251,16 +272,15 @@ export async function updateDocumentMetadata(
   documentId: string,
   metadata: Record<string, unknown>
 ): Promise<Document> {
-  const [doc] = await db
-    .update(documents)
-    .set({
-      metadata,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(eq(documents.projectId, projectId), eq(documents.id, documentId))
-    )
-    .returning();
+  const doc = await queryRow<Document>(
+    `
+      UPDATE documents
+      SET metadata = $1::jsonb, updated_at = NOW()
+      WHERE project_id = $2 AND id = $3
+      RETURNING *
+    `,
+    [jsonParam(metadata, {}), projectId, documentId],
+  );
   if (!doc) throw new Error(`Document not found: ${documentId}`);
   return doc;
 }
@@ -270,21 +290,56 @@ export async function updateDocumentEmbedding(
   documentId: string,
   embedding: number[] | null
 ): Promise<Document> {
-  const [doc] = await db
-    .update(documents)
-    .set({
-      embedding,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(eq(documents.projectId, projectId), eq(documents.id, documentId))
-    )
-    .returning();
+  const vectorLiteral = embedding?.length ? toVectorLiteral(embedding) : null;
+  const doc = await queryRow<Document>(
+    `
+      UPDATE documents
+      SET
+        embedding = $1::jsonb,
+        embedding_vector = CASE WHEN $2::text IS NULL THEN NULL ELSE $2::vector END,
+        updated_at = NOW()
+      WHERE project_id = $3 AND id = $4
+      RETURNING *
+    `,
+    [JSON.stringify(embedding), vectorLiteral, projectId, documentId],
+  );
   if (!doc) throw new Error(`Document not found: ${documentId}`);
   return doc;
 }
 
-// --- RAG query (in-memory TF-IDF, same as before) ---
+export async function updateDocumentEmbeddingVector(
+  projectId: string,
+  documentId: string,
+  embeddingVector: number[] | null
+): Promise<Document> {
+  const vectorLiteral = embeddingVector?.length ? toVectorLiteral(embeddingVector) : null;
+  const doc = await queryRow<Document>(
+    `
+      UPDATE documents
+      SET
+        embedding_vector = CASE WHEN $1::text IS NULL THEN NULL ELSE $1::vector END,
+        updated_at = NOW()
+      WHERE project_id = $2 AND id = $3
+      RETURNING *
+    `,
+    [vectorLiteral, projectId, documentId],
+  );
+  if (!doc) throw new Error(`Document not found: ${documentId}`);
+  return doc;
+}
+
+export async function deleteDocument(projectId: string, documentId: string): Promise<Document | undefined> {
+  return queryRow<Document>(
+    `
+      DELETE FROM documents
+      WHERE project_id = $1 AND id = $2
+      RETURNING *
+    `,
+    [projectId, documentId],
+  );
+}
+
+// --- RAG query (semantic first, text fallback) ---
 
 export interface RagResult {
   id: string;
@@ -300,6 +355,8 @@ export interface RagQueryResult {
   queryVariants: string[];
   totalCandidates: number;
   results: RagResult[];
+  status?: "ok" | "degraded" | "error";
+  error?: string | null;
 }
 
 const STOPWORDS = new Set([
@@ -365,100 +422,213 @@ export async function queryDocuments(
   options: { limit?: number; collectionId?: string } = {}
 ): Promise<RagQueryResult> {
   const limit = Math.min(20, Math.max(1, Number(options.limit || 8)));
-  const docs = await listDocuments(projectId, options.collectionId);
   const variants = buildQueryVariants(query);
+  const totalCandidates = await countDocuments(projectId, options.collectionId);
   const semanticQueryText = buildKnowledgeEmbeddingText({
     title: query,
     content: query,
   });
-  let queryEmbedding: number[] | null = null;
+
   if (semanticQueryText && isKnowledgeEmbeddingConfigured()) {
     try {
       const [embedding] = await embedKnowledgeTexts([semanticQueryText]);
-      queryEmbedding = embedding || null;
-    } catch {
-      queryEmbedding = null;
+      const queryEmbedding = embedding || null;
+      if (!queryEmbedding?.length) {
+        return {
+          query,
+          queryVariants: variants,
+          totalCandidates,
+          results: [],
+          status: "error",
+          error: "Embedding service returned no query vector.",
+        };
+      }
+      const vectorRows = await queryDocumentsByVector(projectId, queryEmbedding, {
+        limit,
+        collectionId: options.collectionId,
+      });
+      return {
+        query,
+        queryVariants: variants,
+        totalCandidates,
+        results: vectorRows.map((row) => ({
+          id: row.id,
+          title: row.title,
+          sourceUri: row.sourceUri,
+          score: Number(row.score.toFixed(3)),
+          snippet: extractSnippet(row.content || "", tokenizeQuery(query)),
+          metadata: row.metadata || {},
+        })),
+        status: "ok",
+        error: null,
+      };
+    } catch (error) {
+      return {
+        query,
+        queryVariants: variants,
+        totalCandidates,
+        results: [],
+        status: "error",
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
   }
 
-  // Build doc stats
-  const df = new Map<string, number>();
-  const tokenizedDocs = docs.map((doc) => {
-    const tokens = tokenize(`${doc.title || ""} ${doc.content || ""}`)
-      .map(normalizeToken)
-      .filter(Boolean);
-    const unique = new Set(tokens);
-    for (const token of unique) {
-      df.set(token, (df.get(token) || 0) + 1);
-    }
-    return { doc, tokens, text: `${doc.title || ""} ${doc.content || ""}`.toLowerCase() };
+  const fallbackRows = await queryDocumentsByTextFallback(projectId, variants, {
+    limit,
+    collectionId: options.collectionId,
   });
-
-  const aggregated = new Map<string, { doc: Document; score: number; snippetTokens: string[] }>();
-
-  for (const variant of variants) {
-    const queryTokens = tokenizeQuery(variant);
-    for (const entry of tokenizedDocs) {
-      const tf = new Map<string, number>();
-      for (const token of entry.tokens) {
-        tf.set(token, (tf.get(token) || 0) + 1);
-      }
-      let score = 0;
-      for (const token of queryTokens) {
-        const termFreq = tf.get(token) || 0;
-        if (!termFreq) continue;
-        const docFreq = df.get(token) || 1;
-        const idf = Math.log(1 + docs.length / docFreq);
-        score += termFreq * idf;
-      }
-      const loweredQuery = variant.toLowerCase();
-      if (loweredQuery && entry.text.includes(loweredQuery)) score += 3;
-      if (score <= 0) continue;
-
-      const existing = aggregated.get(entry.doc.id) || {
-        doc: entry.doc,
-        score: 0,
-        snippetTokens: [],
-      };
-      existing.score = Math.max(existing.score, score);
-      existing.snippetTokens = queryTokens;
-      aggregated.set(entry.doc.id, existing);
-    }
-  }
-
-  if (queryEmbedding) {
-    for (const doc of docs) {
-      const embedding = Array.isArray(doc.embedding) ? doc.embedding : null;
-      if (!embedding?.length) continue;
-      const semanticScore = cosineSimilarity(queryEmbedding, embedding);
-      if (semanticScore <= 0) continue;
-
-      const existing = aggregated.get(doc.id) || {
-        doc,
-        score: 0,
-        snippetTokens: tokenizeQuery(query),
-      };
-      existing.score = Math.max(existing.score, semanticScore * 8);
-      aggregated.set(doc.id, existing);
-    }
-  }
-
-  const scored: RagResult[] = Array.from(aggregated.values())
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit)
-    .map(({ doc, score, snippetTokens }) => ({
-      id: doc.id,
-      title: doc.title,
-      sourceUri: doc.sourceUri,
-      score: Number(score.toFixed(3)),
-      snippet: extractSnippet(doc.content || "", snippetTokens),
-      metadata: doc.metadata || {},
-    }));
 
   return {
     query,
     queryVariants: variants,
-    totalCandidates: docs.length,
-    results: scored,
+    totalCandidates,
+    results: fallbackRows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      sourceUri: row.sourceUri,
+      score: Number(row.score.toFixed(3)),
+      snippet: extractSnippet(row.content || "", tokenizeQuery(query)),
+      metadata: row.metadata || {},
+    })),
+    status: "degraded",
+    error: null,
   };
+}
+
+async function queryDocumentsByVector(
+  projectId: string,
+  embedding: number[],
+  options: { limit?: number; collectionId?: string } = {}
+): Promise<Array<{
+  id: string;
+  title: string | null;
+  sourceUri: string | null;
+  content: string;
+  metadata: unknown;
+  score: number;
+}>> {
+  const normalized = normalizeEmbedding(embedding);
+  if (!normalized.length) return [];
+  const limit = Math.min(50, Math.max(1, Number(options.limit || 8)));
+  const vectorLiteral = toVectorLiteral(normalized);
+  const rows = await queryRows<{
+    id: string;
+    title: string | null;
+    sourceUri: string | null;
+    content: string;
+    metadata: unknown;
+    score: number;
+  }>(
+    `
+      SELECT
+        id,
+        title,
+        source_uri,
+        content,
+        metadata,
+        greatest(0, (1 - (embedding_vector <=> $2::vector)) * 8) AS score
+      FROM documents
+      WHERE project_id = $1
+        AND embedding_vector IS NOT NULL
+        AND ($3::uuid IS NULL OR collection_id = $3::uuid)
+      ORDER BY embedding_vector <=> $2::vector
+      LIMIT $4
+    `,
+    [projectId, vectorLiteral, options.collectionId ?? null, limit],
+  );
+  return rows.filter((row) => Number.isFinite(row.score) && row.score > 0);
+}
+
+async function queryDocumentsByTextFallback(
+  projectId: string,
+  variants: string[],
+  options: { limit?: number; collectionId?: string } = {},
+): Promise<Array<{
+  id: string;
+  title: string | null;
+  sourceUri: string | null;
+  content: string;
+  metadata: unknown;
+  score: number;
+}>> {
+  const limit = Math.min(50, Math.max(1, Number(options.limit || 8)));
+  const terms = variants.map((variant) => variant.trim()).filter(Boolean).slice(0, 6);
+  if (!terms.length) return [];
+
+  const params: unknown[] = [projectId, options.collectionId ?? null];
+  const searchPredicates = terms.map((term) => {
+    params.push(`%${term}%`, `%${term}%`);
+    const start = params.length - 1;
+    return `(title ILIKE $${start} OR content ILIKE $${start + 1})`;
+  });
+  params.push(Math.max(limit * 3, 18));
+
+  const rows = await queryRows<{
+    id: string;
+    title: string | null;
+    sourceUri: string | null;
+    content: string;
+    metadata: unknown;
+    updatedAt: Date | null;
+  }>(
+    `
+      SELECT
+        id,
+        title,
+        source_uri,
+        content,
+        metadata,
+        updated_at
+      FROM documents
+      WHERE project_id = $1
+        AND ($2::uuid IS NULL OR collection_id = $2::uuid)
+        AND (${searchPredicates.join(" OR ")})
+      ORDER BY updated_at DESC
+      LIMIT $${params.length}
+    `,
+    params,
+  );
+
+  return rows
+    .map((row) => {
+      const lowered = `${row.title || ""} ${row.content || ""}`.toLowerCase();
+      const score = terms.reduce((current, term) => {
+        const normalized = term.toLowerCase();
+        if (!normalized) return current;
+        if (lowered.includes(normalized)) return current + 2.5;
+        const tokens = tokenizeQuery(normalized);
+        return current + tokens.reduce(
+          (tokenScore, token) => (lowered.includes(token) ? tokenScore + 0.35 : tokenScore),
+          0,
+        );
+      }, 0);
+      return { ...row, score };
+    })
+    .filter((row) => row.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+
+async function countDocuments(projectId: string, collectionId?: string): Promise<number> {
+  const row = await queryRow<{ count: number }>(
+    `
+      SELECT count(*)::int AS count
+      FROM documents
+      WHERE project_id = $1
+        AND ($2::uuid IS NULL OR collection_id = $2::uuid)
+    `,
+    [projectId, collectionId ?? null],
+  );
+  return Number(row?.count || 0);
+}
+
+function normalizeEmbedding(values: number[]): number[] {
+  return values
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+}
+
+function toVectorLiteral(values: number[]): string {
+  return `[${normalizeEmbedding(values).join(",")}]`;
 }

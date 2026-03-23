@@ -1,194 +1,117 @@
-# Open Analyst Architecture
+# Architecture
 
-Last updated: 2026-03-13
+## System Shape
 
-## Overview
+Open Analyst has three active services:
 
-Open Analyst has three runtime services:
+- `web`: React Router application and product API layer
+- `langgraph-runtime`: LangGraph Agent Server + Deep Agents orchestration runtime
+- `analyst-mcp`: external acquisition and literature workflow service
 
-- a React Router 7 application that serves both the UI and the HTTP API
-- a Python Strands agent service that performs model orchestration and tool execution
-- a Python Analyst MCP service that handles literature search, collection, and artifact workflows
+The runtime is the core agent system. The browser now connects directly to the Agent Server for threads, runs, streaming, interrupts, and resume. The web app still owns product APIs such as project CRUD, artifact routes, source-ingest routes, canvas routes, and memory management. Analyst MCP remains the specialized external acquisition service used for literature search, collection, and artifact download.
 
-The React Router app is the system of record for projects, tasks, documents, settings, skills, and MCP configuration. The Strands service is a worker-style dependency used by chat routes. Analyst MCP is an internal tool service used by the agent and the mirrored artifact flows.
+The supported architecture is explicitly Agent Server-first and Deep Agents-first:
 
-## Runtime Topology
+- Agent Server owns durable execution, runs, threads, checkpoints, interrupts, and store-backed persistence.
+- Deep Agents owns planning, delegation, subagent coordination, and tool-driven work.
+- The browser is a product shell and direct Agent Server client, not a parallel assistant runtime.
 
-```text
-Browser
-  -> React Router UI routes
-  -> React Router API routes (/api/*)
-     -> Postgres via Drizzle
-     -> local config/workspace files
-     -> Strands agent service
-        -> file/web/research/project tools
-        -> Analyst MCP
-        -> LiteLLM gateway
-```
+## Request Flow
 
-## Major Layers
+1. The browser creates or opens an Agent Server thread directly.
+2. The browser sends only lightweight thread metadata: `project_id`, optional `collection_id`, and `analysis_mode`.
+3. Agent Server middleware in `services/langgraph-runtime/src/webapp.py` normalizes that metadata, adds CORS handling, and builds the typed runtime context.
+4. Server-side context assembly in `services/langgraph-runtime/src/runtime_context.py` loads project/profile data from Postgres and active skills/connectors from Open Analyst config files.
+5. The runtime supervisor plans via `write_todos` and delegates to subagents via `task()`.
+6. Agent Server streams events back to the browser with agent attribution:
+   - `status`
+   - `tool_call_start` / `tool_call_end`
+   - `text_delta`
+   - `interrupt`
+   - `error`
+7. If interrupted, the browser resumes execution directly against Agent Server using the same thread metadata.
 
-### 1. Web application and API
+Important distinction:
 
-The `app/` directory contains both rendered UI routes and JSON API routes.
+- thread state and thread metadata are persisted by Agent Server
+- runtime context is still a per-invocation contract
 
-- `app/root.tsx` defines the document shell.
-- `app/routes.ts` declares the route tree.
-- `app/routes/_app.tsx` is the main authenticated-style shell with the top nav, sidebar, modals, and nested outlet.
-- `app/routes/api.*.ts` contains the server endpoints used by the browser and, in some cases, the Python agent.
+So the server must derive full runtime context for every run entrypoint. Persisted metadata is a routing hint, not a substitute for required graph context.
 
-This is not a separate frontend plus separate Node API server anymore. The React Router dev/build pipeline handles both.
+## User-Facing Model
 
-### 2. Client state
+- `projects`: top-level workspace boundary
+- `threads`: Agent Server conversation boundary used by the UI
+- `messages`: Agent Server state history plus rendered UI message blocks
+- `project_memories`: approval and UI-facing durable memory records
+- `documents`: indexed project documents
+- `source_ingest_batches` and `source_ingest_items`: staged source collection awaiting approval or import
+- `artifacts` and `artifact_versions`: stored outputs
+- `canvas_documents`: editable markdown-first workspace documents
 
-Client-side ephemeral UI state lives in Zustand in `app/lib/store.ts`.
+The chat path is now thread-first and Agent Server-native. The older `api/runtime` proxy path and proxy-built runtime context are removed.
 
-This store is used for:
+## Persistence Layers
 
-- project list hydration
-- active project and collection selection
-- UI flags such as modal visibility
-- theme and sandbox sync UI state
+### Postgres
 
-Authoritative data still comes from route loaders and API routes.
+Used for:
 
-### 3. Database layer
+- application tables for project shell state and per-user settings via explicit SQL
+- pgvector document retrieval
+- LangGraph checkpointer state
+- LangGraph store-backed long-term memory
+- Analyst MCP schema and metadata
 
-Core domain data is stored in Postgres.
+### S3 Or Local Artifact Storage
 
-Schema:
+Shared large-file routing works like this:
 
-- `projects`
-- `collections`
-- `documents`
-- `tasks`
-- `messages`
-- `task_events`
-- `settings`
+- blank `ARTIFACT_STORAGE_BACKEND` -> local artifact storage
+- `ARTIFACT_STORAGE_BACKEND=s3` -> S3 artifact storage
+- project settings can override the backend per project
+- Deep Agents routes `/artifacts/` and `/memory-files/` into that shared storage layer
 
-The schema is defined in `app/lib/db/schema.ts`. Access is organized through small query modules under `app/lib/db/queries/`.
+### Workspace Files
 
-### 4. Agent boundary
+The runtime resolves workspace roots server-side. The supervisor delegates all file operations to subagents via `task()`. `SupervisorToolGuard` still blocks built-in filesystem tools on the supervisor.
 
-Chat does not call the model directly from the browser.
+### Source And Artifact Flow
 
-Instead:
+- Parallel literature retrieval branches collect candidate batches first.
+- The supervisor merges and deduplicates those batches, then asks the user for one consolidated approval.
+- Approved literature imports are executed in chunks so large source sets do not depend on one oversized resume payload.
+- Direct web-source staging still stages and approves individual source batches.
+- Approving a batch imports files or captures web content into the configured artifact backend.
+- Imported sources create `documents` rows for indexing and retrieval.
+- Generated workspace outputs captured through the app create `artifacts` plus `artifact_versions`.
+- Source/document previews and artifact previews are served through same-origin app routes, not direct S3 links.
 
-1. `ChatView` posts to `/api/chat/stream`
-2. `app/routes/api.chat.stream.ts` creates or resumes a task
-3. the route selects an agent provider from `app/lib/agent/index.server.ts`
-4. the current provider, `StrandsProvider`, forwards the request to the Python service
-5. the Python service emits structured status, tool, and text events
-6. streamed events are persisted as task events and folded into structured assistant message content over SSE
+## Runtime Model Resilience
 
-### 5. Python Strands service
+The runtime calls chat models through LiteLLM-backed `ChatOpenAI` instances, but it does not rely only on the provider client's built-in retries.
 
-The Python service lives in `services/strands-agent/`.
+- A shared LangChain rate limiter can throttle outgoing model calls before they hit LiteLLM.
+- A shared concurrency semaphore reduces bursty parallel fan-out, especially for Bedrock-backed models.
+- Runtime middleware retries transient `429`, timeout, network, and `5xx` failures with backoff.
+- Optional fallback models can be configured for model-level failover.
+- If transient model retries are exhausted, the runtime returns a non-crashing AI message so the run can degrade gracefully rather than failing the whole workflow.
 
-Key files:
+If `LITELLM_CHAT_MODEL` contains `bedrock`, the runtime applies conservative default admission control even without explicit rate-limit env settings.
 
-- `src/main.py`: service entrypoint and streaming handler
-- `src/agent_factory.py`: system prompt, model wiring, tool registration
-- `src/tools/`: tool implementations for file, command, web, research, and project operations
+## Retrieval
 
-The Node app sends the Python service:
+There are two primary retrieval paths:
 
-- chat messages
-- task session id and compact task summary
-- project id
-- workspace directory
-- collection context
-- LiteLLM connection details
+- project documents via pgvector-backed search
+- project long-term memories via the LangGraph store
 
-The current agent runtime uses native Strands session persistence backed by PostgreSQL plus a summarizing conversation manager. Artifact storage may use local disk or S3, but Strands chat/session state is decoupled from artifact storage and stays in Postgres.
+Research-heavy turns can additionally use Analyst MCP literature search through explicit runtime tools.
 
-### 5b. Analyst MCP service
+## UI Shell
 
-The Analyst MCP service lives in `services/analyst-mcp/`.
+- left panel: workspace navigation, settings, skills, connectors, memory
+- center: interactive chat thread
+- right panel: source preview, artifacts, canvas
 
-It provides:
-
-- literature search across academic providers
-- paper collection and download workflows
-- artifact metadata and access links
-- collection-oriented research workflows used by the primary agent
-
-In local dev it can run through `pnpm dev:analyst-mcp`. In Docker prod-like deployments it is part of the normal three-service stack.
-
-### 5a. Session and memory model
-
-Chat continuity currently has two layers:
-
-- Strands-native session state, keyed by the task id passed as `session_id`
-- app-side task summaries stored in `tasks.plan_snapshot.summary`
-
-The React Router chat route reads the previous task summary, sends it to the agent, and rewrites it when the turn completes. The Python agent uses a Postgres-backed Strands session manager and pairs it with `SummarizingConversationManager`, so recent turns remain available without replaying the full transcript every time.
-
-### 6. Retrieval and knowledge management
-
-Knowledge is stored as project documents linked to collections.
-
-Successful analyst MCP collection runs are mirrored into same-named Open Analyst collections and documents, so Knowledge and the file viewer remain Open Analyst-owned even when acquisition happened through MCP.
-
-The current retrieval path is hybrid in `app/lib/db/queries/documents.server.ts`: lexical ranking remains, and Open Analyst also maintains document embeddings for native semantic retrieval when `LITELLM_EMBEDDING_MODEL` is configured.
-
-### 7. Local filesystem state
-
-Not everything is stored in Postgres.
-
-Local JSON files under the Open Analyst config directory are still used for:
-
-- MCP server definitions
-- installed skills
-- some operational settings files
-
-Per-project working files are stored in workspace folders created by `app/lib/filesystem.server.ts`.
-
-Repository skill bundles under `skills/` are part of the runtime as well. The Node app discovers them from disk, matches them against the current request, and forwards the selected skill instructions plus resolved reference/script paths into the Strands prompt.
-
-This is also one of the main current quota tradeoffs: selected skills are injected directly into the Strands system prompt, so a short user message can still become a very large model request if several heavy skills match or if a skill includes long reference excerpts.
-
-## Main User Flows
-
-### Project dashboard flow
-
-1. User selects or creates a project in the top nav.
-2. The project route loader fetches tasks and collections.
-3. `QuickStartDashboard` lets the user start a task or jump to knowledge management.
-
-### Chat flow
-
-1. User opens a task route.
-2. The task loader fetches task metadata and stored messages.
-3. `ChatView` streams responses from `/api/chat/stream`.
-4. The browser renders structured status/tool progress blocks plus the final answer during the run.
-5. The server persists task events, the structured assistant message, and a compact task summary for continuity on later turns.
-
-One user turn is not necessarily one model call. Tool-heavy runs can trigger several sequential Sonnet completions as the agent plans, evaluates tool output, and continues the loop. That distinction matters for Bedrock token-throughput throttling.
-
-### Knowledge flow
-
-1. User opens `/projects/:projectId/knowledge`.
-2. `KnowledgeWorkspace` fetches collections and documents through API routes.
-3. Sources can be created manually or imported from URLs/files.
-4. The RAG query endpoint searches project documents.
-
-## Configuration and External Dependencies
-
-The main external systems are:
-
-- Postgres
-- LiteLLM
-- Strands service
-
-Environment variables are validated in `app/lib/env.server.ts` for the Node app and in `services/strands-agent/src/config.py` for the Python service.
-
-## Current Documentation Set
-
-The current source-of-truth docs are:
-
-- `README.md`
-- `docs/ARCHITECTURE.md`
-- `docs/REPOSITORY_MAP.md`
-
-Historical implementation plans remain under `docs/plans/`.
+The web app is no longer the assistant transport layer. It is the product shell around a direct Agent Server client.

@@ -1,10 +1,12 @@
 import type { HeadlessDocument } from "~/lib/headless-api";
+import { useArtifactObjectUrl } from "./file-renderers/useArtifactObjectUrl";
 
 interface DocumentPreviewProps {
   projectId: string;
   document: HeadlessDocument;
   maxTextLength?: number;
   className?: string;
+  showArtifactPreview?: boolean;
 }
 
 function getMetadataString(
@@ -20,34 +22,29 @@ export function DocumentPreview({
   document,
   maxTextLength,
   className = "",
+  showArtifactPreview = true,
 }: DocumentPreviewProps) {
   const mimeType = getMetadataString(document.metadata, "mimeType");
   const isPdf =
     mimeType.toLowerCase().includes("pdf") ||
     document.title.toLowerCase().endsWith(".pdf");
-  const metadata =
-    document.metadata && typeof document.metadata === "object"
-      ? (document.metadata as Record<string, unknown>)
-      : {};
-  const artifactUrl =
-    getMetadataString(metadata, "artifactUrl") ||
-    `/api/projects/${encodeURIComponent(
-      projectId
-    )}/documents/${encodeURIComponent(document.id)}/artifact`;
-  const downloadUrl =
-    getMetadataString(metadata, "downloadUrl") || `${artifactUrl}?download=1`;
+  const artifactUrl = `/api/projects/${encodeURIComponent(
+    projectId
+  )}/documents/${encodeURIComponent(document.id)}/artifact`;
+  const downloadUrl = `${artifactUrl}?download=1`;
   const previewText =
     typeof maxTextLength === "number" && maxTextLength > 0
       ? (document.content || "").slice(0, maxTextLength)
       : document.content || "";
-  const hasArtifact = Boolean(artifactUrl);
+  const hasArtifact = showArtifactPreview && Boolean(artifactUrl);
+  const pdfPreviewUrl = useArtifactObjectUrl(artifactUrl, showArtifactPreview && isPdf && hasArtifact);
 
   return (
     <div className={`space-y-3 ${className}`.trim()}>
       {isPdf && hasArtifact && (
         <div className="rounded-lg border border-border overflow-hidden bg-background-secondary">
           <object
-            data={artifactUrl}
+            data={pdfPreviewUrl || artifactUrl}
             type="application/pdf"
             className="w-full h-[480px]"
           >

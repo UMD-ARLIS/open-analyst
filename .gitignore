@@ -1,13 +1,21 @@
 # Dependencies
 node_modules/
 
+# React Router v7 generated types
+.react-router/
+
 # Build outputs
+build/
 dist/
 dist-electron/
 dist-wsl-agent/
 dist-lima-agent/
 dist-mcp/
 release/
+test-results/
+__pycache__/
+*.pyc
+*.egg-info/
 
 # Bundled Node.js binaries
 resources/node/
@@ -47,16 +55,26 @@ coverage/
 *.pem
 *.p12
 
-# Claude 
+# Claude
 .claude/*
-!.claude/skills/
 CLAUDE.md
 
 
 # codex
 .codex/*
+.agents/
+.cursor/
+AGENTS.md
 
 dist*
 resources/node
 resources/tools
 resources/python
+
+# Local analyst/runtime artifacts
+collections/
+workspace/
+world_models_*.md
+services/langgraph-runtime/.langgraph_api/
+services/langgraph-runtime/.venv/
+services/langgraph-runtime/.pytest_cache/

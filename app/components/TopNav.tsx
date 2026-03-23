@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { useFetcher, useLocation, useNavigate, useParams } from "react-router";
+import { useFetcher, useNavigate, useParams } from "react-router";
 import { useAppStore } from "~/lib/store";
 import {
   ChevronDown,
@@ -7,7 +7,6 @@ import {
   Moon,
   PackageOpen,
   Plus,
-  Settings,
   Sun,
   Menu,
 } from "lucide-react";
@@ -26,7 +25,6 @@ export function TopNav() {
     isConfigured,
   } = useAppStore();
   const navigate = useNavigate();
-  const location = useLocation();
   const params = useParams();
   const createFetcher = useFetcher();
   const projectMutationFetcher = useFetcher();
@@ -66,9 +64,11 @@ export function TopNav() {
     if (createFetcher.state === "idle" && createFetcher.data) {
       const data = createFetcher.data as any;
       if (data?.project?.id) {
-        navigate(`/projects/${data.project.id}`);
-        setDropdownOpen(false);
-        setNewProjectName("");
+        queueMicrotask(() => {
+          navigate(`/projects/${data.project.id}`);
+          setDropdownOpen(false);
+          setNewProjectName("");
+        });
       }
     }
   }, [createFetcher.state, createFetcher.data, navigate]);
@@ -79,8 +79,10 @@ export function TopNav() {
     }
     const data = projectMutationFetcher.data as any;
     if (data?.project?.id) {
-      upsertProject(data.project);
-      setProjectSettingsOpen(false);
+      queueMicrotask(() => {
+        upsertProject(data.project);
+        setProjectSettingsOpen(false);
+      });
     }
   }, [projectMutationFetcher.state, projectMutationFetcher.data, upsertProject]);
 
@@ -151,10 +153,6 @@ export function TopNav() {
       encType: "application/json",
     });
   };
-
-  // Determine which section tab is active
-  const isKnowledge = location.pathname.endsWith("/knowledge");
-  const isDashboard = activeProjectId && !isKnowledge;
 
   return (
     <>
@@ -277,37 +275,6 @@ export function TopNav() {
           )}
         </div>
 
-        {/* Section tabs */}
-        {activeProjectId && (
-          <>
-            <div className="w-px h-5 bg-border" />
-            <div className="flex items-center gap-0.5">
-              <button
-                onClick={() => navigate(`/projects/${activeProjectId}`)}
-                className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
-                  isDashboard
-                    ? "text-accent font-medium bg-accent-muted"
-                    : "text-text-secondary hover:text-text-primary hover:bg-surface-hover"
-                }`}
-              >
-                Dashboard
-              </button>
-              <button
-                onClick={() =>
-                  navigate(`/projects/${activeProjectId}/knowledge`)
-                }
-                className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
-                  isKnowledge
-                    ? "text-accent font-medium bg-accent-muted"
-                    : "text-text-secondary hover:text-text-primary hover:bg-surface-hover"
-                }`}
-              >
-                Knowledge
-              </button>
-            </div>
-          </>
-        )}
-
         {/* Spacer */}
         <div className="flex-1" />
 
@@ -344,13 +311,6 @@ export function TopNav() {
               <Moon className="w-4 h-4" />
             )}
           </button>
-          <button
-            onClick={() => navigate("/settings")}
-            className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-surface-hover text-text-secondary"
-            aria-label="Settings"
-          >
-            <Settings className="w-4 h-4" />
-          </button>
         </div>
       </nav>
 
@@ -374,6 +334,7 @@ export function TopNav() {
         onCancel={() => setDeleteDialog(null)}
       />
       <ProjectSettingsDialog
+        key={`${activeProject?.id ?? "none"}:${projectSettingsOpen ? "open" : "closed"}`}
         open={projectSettingsOpen}
         project={activeProject || null}
         isSaving={projectMutationFetcher.state !== "idle"}

@@ -12,7 +12,7 @@ fi
 
 usage() {
   cat <<'EOF'
-Usage: scripts/python-service.sh <setup|run|test> <agent|analyst-mcp>
+Usage: scripts/python-service.sh <setup|run> <runtime|analyst-mcp>
 EOF
 }
 
@@ -25,17 +25,15 @@ if [[ -z "$command_name" || -z "$service_name" ]]; then
 fi
 
 case "$service_name" in
-  agent)
-    service_dir="$repo_root/services/strands-agent"
-    venv_dir="${OPEN_ANALYST_AGENT_VENV:-$HOME/.venvs/open-analyst-strands-agent}"
-    run_args=("python" "src/main.py")
-    test_args=("pytest" "tests/" "-v")
+  runtime)
+    service_dir="$repo_root/services/langgraph-runtime"
+    venv_dir="${OPEN_ANALYST_RUNTIME_VENV:-$HOME/.venvs/open-analyst-langgraph-runtime}"
+    run_args=("langgraph" "dev" "--config" "langgraph.json" "--port" "8081" "--no-browser")
     ;;
   analyst-mcp)
     service_dir="$repo_root/services/analyst-mcp"
     venv_dir="${OPEN_ANALYST_ANALYST_MCP_VENV:-$HOME/.venvs/open-analyst-analyst-mcp}"
     run_args=("analyst-mcp" "serve")
-    test_args=("pytest" "tests/" "-v")
     ;;
   *)
     echo "Unknown service: $service_name" >&2
@@ -69,13 +67,6 @@ case "$command_name" in
     (
       cd "$service_dir"
       exec "$venv_dir/bin/${run_args[0]}" "${run_args[@]:1}"
-    )
-    ;;
-  test)
-    ensure_executable "${test_args[0]}"
-    (
-      cd "$service_dir"
-      exec "$venv_dir/bin/${test_args[0]}" "${test_args[@]:1}"
     )
     ;;
   *)

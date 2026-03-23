@@ -1,99 +1,133 @@
 # Deployment
 
-Open Analyst production runtime is split into three services plus PostgreSQL:
+## Production Topology
 
-- `web`: React Router UI and API routes
-- `strands-agent`: internal model orchestration and tool execution
-- `analyst-mcp`: internal paper acquisition and artifact service
-- `postgres`: shared state for app data and agent session persistence
+Run three processes or containers:
 
-See also [`docs/AGENT_ARCHITECTURE.md`](./AGENT_ARCHITECTURE.md) for the current manager-plus-research-worker runtime shape.
+- web app
+- Deep Agents runtime
+- Analyst MCP
 
-## Docker-first baseline
+All three should share access to:
 
-Use the Docker wrapper for a local or production-like smoke test:
+- the target PostgreSQL database
+- the configured LiteLLM endpoint
+- the configured artifact storage backend
+
+## Required Environment
+
+Minimum:
+
+- `DATABASE_URL`
+- `LITELLM_BASE_URL`
+- `LITELLM_API_KEY`
+- `LITELLM_CHAT_MODEL`
+- `LITELLM_EMBEDDING_MODEL`
+- `ANALYST_MCP_API_KEY`
+- `LANGGRAPH_RUNTIME_URL`
+
+Common optional values:
+
+- `ANALYST_MCP_BASE_URL`
+- `OPEN_ANALYST_WEB_URL`
+- `OPEN_ANALYST_WEB_PORT`
+- `CORS_ALLOWED_ORIGINS`
+- `CORS_ALLOWED_ORIGIN_REGEX`
+- `ANALYST_MCP_POSTGRES_DSN`
+- `ARTIFACT_STORAGE_BACKEND`
+- `ARTIFACT_S3_BUCKET`
+- `ARTIFACT_S3_REGION`
+- `ARTIFACT_S3_PREFIX`
+- `ARTIFACT_S3_ENDPOINT`
+- `PROJECT_WORKSPACES_ROOT`
+- `ARTIFACT_LOCAL_DIR`
+- `LITELLM_FALLBACK_CHAT_MODELS`
+- `CHAT_RETRY_MAX_RETRIES`
+- `CHAT_RETRY_INITIAL_DELAY_SECONDS`
+- `CHAT_RETRY_BACKOFF_FACTOR`
+- `CHAT_RETRY_MAX_DELAY_SECONDS`
+- `CHAT_RATE_LIMIT_RPS`
+- `CHAT_RATE_LIMIT_CHECK_EVERY_SECONDS`
+- `CHAT_RATE_LIMIT_MAX_BUCKET_SIZE`
+- `CHAT_MAX_CONCURRENT_REQUESTS`
+
+## AWS Recommendation
+
+### Postgres
+
+- use a dedicated RDS database for this runtime
+- enable `pgvector`
+- allow the web app, runtime, and Analyst MCP to reach it
+
+### S3
+
+- use a dedicated prefix, for example `open-analyst-vnext/`
+- keep project artifacts, source files, and captured outputs under that prefix
+
+### LiteLLM
+
+- the runtime depends on a working chat endpoint and embedding endpoint
+- the runtime now adds shared admission control and transient retry/fallback handling around model calls
+- if `LITELLM_CHAT_MODEL` contains `bedrock`, the runtime applies conservative default request-rate and concurrency limits even if the optional `CHAT_*` knobs are unset
+- verify both before debugging runtime behavior:
 
 ```bash
-bash scripts/docker-prod.sh up --build
+curl "$LITELLM_BASE_URL/models" -H "Authorization: Bearer $LITELLM_API_KEY"
 ```
 
-The web app is exposed on `5173`. The Python services remain internal to the compose network.
+## Startup Order
 
-Behavior:
+1. Ensure the target database exists.
+2. Build Python environments:
 
-- if `DATABASE_URL` is set in `.env`, the stack uses that external database and does not start a local Postgres container
-- if `DATABASE_URL` is missing, the wrapper adds [`docker-compose.prod.local-db.yml`](../docker-compose.prod.local-db.yml) and starts the bundled `pgvector/pgvector:pg16` service
-
-## Shared workspace requirement
-
-Even when artifact storage is S3-backed in production, the web app and the Strands agent still need a shared workspace filesystem for task working directories and file-tool operations.
-
-The provided compose file mounts a shared named volume at:
-
-```text
-/var/open-analyst/workspaces
+```bash
+pnpm setup:python
 ```
 
-In Kubernetes or ECS, map this to a shared persistent filesystem such as EFS or an RWX-capable volume.
+3. Start services:
 
-The web app also persists its config state at:
-
-```text
-/var/open-analyst/config
+```bash
+pnpm start
+pnpm dev:runtime
+pnpm dev:analyst-mcp
 ```
 
-This stores MCP server definitions, enabled skills, and related app configuration across container restarts.
+Or use:
 
-## Health checks
+```bash
+pnpm dev:all
+```
 
-- Web app: `GET /api/health`
-- Strands agent: `GET /ping`
-- Analyst MCP: `GET /health`
+for a single local command.
 
-## Bedrock quota behavior
+## Health Checks
 
-Production incidents showing `429` from the Strands service have so far mapped to Bedrock token-throughput throttling on `bedrock-claude-sonnet-4`.
+```bash
+curl http://localhost:5173/api/health
+curl http://localhost:8081/health
+curl http://localhost:8000/health
+curl -H "x-api-key: $ANALYST_MCP_API_KEY" http://localhost:8000/api/health/details
+```
 
-Important nuance:
+## Direct Browser Runtime Access
 
-- this is not only about the raw user prompt size
-- the Strands request can grow substantially after skill instructions, reference excerpts, task summaries, research-worker output, and project retrieval context are injected into the system prompt
-- a single user turn may also trigger many sequential model completions as the agent plans and executes tool-heavy workflows
+The browser now talks directly to Agent Server for chat threads and streaming. That means:
 
-In practice, the highest-risk turns are long iterative tasks such as bulletin/report generation, repeated file-generation retries, and `deepResearch` runs with multiple matched skills.
+- `LANGGRAPH_RUNTIME_URL` must point the web app at the public Agent Server origin.
+- Agent Server must allow the web app origin through CORS.
+- `OPEN_ANALYST_WEB_URL` is the safest way to tell Agent Server which app origin to use when building `api_base_url` for app-owned product routes.
 
-Current operational guidance:
+For local development the default assumption is:
 
-- keep `deepResearch` disabled unless the turn really needs a separate research pass
-- treat document-generation and other multi-tool loops as high quota consumers
-- inspect `strands-agent` logs for `agent_request_shape ... system_prompt_chars=...` and repeated `LiteLLM completion()` lines when diagnosing a 429
-- do not assume container health issues when this happens; the common cause is per-turn model workload, not a frozen service
+- web app on `http://localhost:5173`
+- Agent Server on `http://localhost:8081`
+- Analyst MCP on `http://localhost:8000`
 
-This behavior is currently documented, not fully remediated.
+## Storage Behavior
 
-## Production storage defaults
+- blank `ARTIFACT_STORAGE_BACKEND` -> local persistence
+- `ARTIFACT_STORAGE_BACKEND=s3` -> S3 persistence
+- project-level overrides can still choose `local` or `s3`
+- Agent runtime project memories remain in LangGraph Store/Postgres; S3 is for shared large files and artifacts
 
-Recommended production layout:
-
-- PostgreSQL for application state and Strands session persistence
-- S3-backed artifact storage for captured/downloaded artifacts
-- shared persistent volume only for live workspaces and scratch files
-
-## Kubernetes and ECS guidance
-
-Use the container images as the canonical deployable unit.
-
-Recommended topology:
-
-- one deployment/service per runtime
-- expose only the web app publicly
-- keep Strands and Analyst MCP on private service URLs
-- inject secrets through platform secret managers
-- mount the same shared workspace path into both `web` and `strands-agent`
-
-## Current AWS backend check
-
-On this machine, `.env` currently points at an AWS RDS PostgreSQL backend rather than the bundled container. Verified locally:
-
-- AWS CLI reports `analyst-db-mcp` as RDS PostgreSQL `17.6`
-- direct database query reports `pgvector` available and installed at `0.8.0`
+This behavior is intentional and should be preserved across environments.

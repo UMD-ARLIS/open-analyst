@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     semantic_scholar_base_url: str = "https://api.semanticscholar.org/graph/v1"
 
     request_timeout_seconds: float = 30.0
+    provider_search_timeout_seconds: float = 45.0
     default_result_limit: int = 10
     chunk_size: int = 1400
     chunk_overlap: int = 200

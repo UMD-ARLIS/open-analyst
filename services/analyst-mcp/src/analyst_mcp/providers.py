@@ -5,7 +5,7 @@ import hashlib
 import re
 import tarfile
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -25,6 +25,23 @@ class ProviderRateLimit:
     requests: int
     period_seconds: float
     note: str
+
+
+@dataclass(slots=True)
+class ProviderSearchOutcome:
+    provider: str
+    records: list[PaperRecord] = field(default_factory=list)
+    status: str = "ok"
+    warning: str | None = None
+
+
+@dataclass(slots=True)
+class ProviderSearchSummary:
+    records: list[PaperRecord]
+    status: str
+    warnings: list[str]
+    provider_status: dict[str, str]
+    error: str | None = None
 
 
 class AsyncRateLimiter:
@@ -355,16 +372,54 @@ class ProviderRegistry:
         self.providers = {provider.source_name: provider for provider in providers}
 
     async def search_all(self, query: str, limit: int, sources: list[str] | None = None, date_from: str | None = None, date_to: str | None = None) -> list[PaperRecord]:
+        summary = await self.search_all_detailed(
+            query=query,
+            limit=limit,
+            sources=sources,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        return summary.records
+
+    async def search_all_detailed(
+        self,
+        query: str,
+        limit: int,
+        sources: list[str] | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> ProviderSearchSummary:
         selected = [self.providers[name] for name in (sources or list(self.providers.keys())) if name in self.providers]
-        batches = await asyncio.gather(
-            *(provider.search(query, limit, date_from=date_from, date_to=date_to) for provider in selected),
-            return_exceptions=True,
+        if not selected:
+            return ProviderSearchSummary(
+                records=[],
+                status="error",
+                warnings=["No supported literature providers were selected."],
+                provider_status={},
+                error="No supported literature providers were selected.",
+            )
+
+        outcomes = await asyncio.gather(
+            *(
+                self._search_provider(
+                    provider,
+                    query=query,
+                    limit=limit,
+                    date_from=date_from,
+                    date_to=date_to,
+                )
+                for provider in selected
+            )
         )
         deduped: dict[str, PaperRecord] = {}
-        for batch in batches:
-            if isinstance(batch, Exception):
-                continue
-            for record in batch:
+        provider_status: dict[str, str] = {}
+        warnings: list[str] = []
+
+        for outcome in outcomes:
+            provider_status[outcome.provider] = outcome.status
+            if outcome.warning:
+                warnings.append(outcome.warning)
+            for record in outcome.records:
                 current = deduped.get(record.canonical_id)
                 if current is None or (record.citation_count or 0) > (current.citation_count or 0):
                     deduped[record.canonical_id] = record
@@ -373,7 +428,24 @@ class ProviderRegistry:
             key=lambda record: self._ranking_key(record, query),
             reverse=True,
         )
-        return ranked[:limit]
+        results = ranked[:limit]
+        if results and warnings:
+            status = "partial"
+            error = None
+        elif warnings:
+            status = "error"
+            error = warnings[0]
+        else:
+            status = "ok"
+            error = None
+
+        return ProviderSearchSummary(
+            records=results,
+            status=status,
+            warnings=warnings,
+            provider_status=provider_status,
+            error=error,
+        )
 
     async def get_paper(self, identifier: str, provider_name: str | None = None) -> PaperRecord | None:
         if provider_name and provider_name in self.providers:
@@ -392,6 +464,46 @@ class ProviderRegistry:
 
     def provider_names(self) -> list[str]:
         return list(self.providers.keys())
+
+    async def _search_provider(
+        self,
+        provider: BaseProvider,
+        *,
+        query: str,
+        limit: int,
+        date_from: str | None,
+        date_to: str | None,
+    ) -> ProviderSearchOutcome:
+        timeout_seconds = max(1.0, float(getattr(provider.settings, "provider_search_timeout_seconds", 45.0)))
+        try:
+            records = await asyncio.wait_for(
+                provider.search(query, limit, date_from=date_from, date_to=date_to),
+                timeout=timeout_seconds,
+            )
+            return ProviderSearchOutcome(
+                provider=provider.source_name,
+                records=records,
+                status=f"ok ({len(records)} results)",
+            )
+        except asyncio.TimeoutError:
+            return ProviderSearchOutcome(
+                provider=provider.source_name,
+                status=f"timeout after {int(timeout_seconds)}s",
+                warning=(
+                    f"{provider.source_name} search timed out after {int(timeout_seconds)} seconds. "
+                    "Returning partial results from other providers."
+                ),
+            )
+        except Exception as exc:
+            detail = self._format_provider_error(exc)
+            return ProviderSearchOutcome(
+                provider=provider.source_name,
+                status=f"error: {detail}",
+                warning=(
+                    f"{provider.source_name} search failed: {detail}. "
+                    "Returning partial results from other providers."
+                ),
+            )
 
     @staticmethod
     def _ranking_key(record: PaperRecord, query: str) -> tuple[float, int, float]:
@@ -425,6 +537,12 @@ class ProviderRegistry:
     def _query_tokens(query: str) -> list[str]:
         stopwords = {"a", "an", "and", "for", "in", "of", "on", "or", "the", "to", "with"}
         return [token for token in re.findall(r"[a-z0-9]+", query.lower()) if len(token) > 1 and token not in stopwords]
+
+    @staticmethod
+    def _format_provider_error(exc: Exception) -> str:
+        text = str(exc).strip() or exc.__class__.__name__
+        text = re.sub(r"\s+", " ", text)
+        return text[:180]
 
 
 def extract_tar_member(archive_path: Path, member_name: str, destination: Path) -> Path:

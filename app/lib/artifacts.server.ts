@@ -1,23 +1,14 @@
 import fs from "fs/promises";
 import path from "path";
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { env } from "./env.server";
 import { getConfigDir } from "./helpers.server";
 import type { ArtifactRecord } from "./types";
 import type { Project } from "./db/schema";
 import { resolveProjectArtifactConfig } from "./project-storage.server";
+import { sanitizeFilename, inferMimeType } from "~/lib/file-utils";
 
 const DEFAULT_ARTIFACT_PREFIX = "open-analyst-artifacts";
-
-function sanitizeFilename(value: string): string {
-  return (
-    String(value || "artifact")
-      .replace(/[^a-zA-Z0-9._-]+/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 120) || "artifact"
-  );
-}
 
 function getS3Client(input: { region?: string; endpoint?: string }): S3Client {
   return new S3Client({
@@ -32,14 +23,9 @@ function parseS3Uri(uri: string): { bucket: string; key: string } {
   return { bucket: match[1], key: match[2] };
 }
 
-function inferMimeType(filename: string, fallback = "application/octet-stream"): string {
-  const lower = filename.toLowerCase();
-  if (lower.endsWith(".pdf")) return "application/pdf";
-  if (lower.endsWith(".json")) return "application/json";
-  if (lower.endsWith(".txt")) return "text/plain; charset=utf-8";
-  if (lower.endsWith(".md")) return "text/markdown; charset=utf-8";
-  if (lower.endsWith(".html") || lower.endsWith(".htm")) return "text/html; charset=utf-8";
-  return fallback;
+function isGenericMimeType(value: string | undefined): boolean {
+  const mimeType = String(value || "").trim().toLowerCase();
+  return !mimeType || mimeType === "application/octet-stream";
 }
 
 async function streamToBuffer(value: unknown): Promise<Buffer> {
@@ -123,7 +109,11 @@ export async function readArtifact(input: {
     );
     const body = await streamToBuffer(result.Body);
     const filename = input.filename || path.basename(key);
-    const mimeType = result.ContentType || input.mimeType || inferMimeType(filename);
+    const mimeType = !isGenericMimeType(result.ContentType)
+      ? String(result.ContentType)
+      : !isGenericMimeType(input.mimeType)
+        ? String(input.mimeType)
+        : inferMimeType(filename);
     return { body, filename, mimeType, size: body.length };
   }
 
@@ -132,6 +122,31 @@ export async function readArtifact(input: {
     : storageUri;
   const body = await fs.readFile(normalized);
   const filename = input.filename || path.basename(normalized);
-  const mimeType = input.mimeType || inferMimeType(filename);
+  const mimeType = !isGenericMimeType(input.mimeType)
+    ? String(input.mimeType)
+    : inferMimeType(filename);
   return { body, filename, mimeType, size: body.length };
+}
+
+export async function deleteArtifact(storageUri: string): Promise<void> {
+  const uri = String(storageUri || "").trim();
+  if (!uri) return;
+
+  if (uri.startsWith("s3://")) {
+    const { bucket, key } = parseS3Uri(uri);
+    const client = getS3Client({ region: env.ARTIFACT_S3_REGION, endpoint: env.ARTIFACT_S3_ENDPOINT });
+    await client.send(
+      new DeleteObjectCommand({ Bucket: bucket, Key: key })
+    );
+    return;
+  }
+
+  const normalized = uri.startsWith("file://")
+    ? uri.slice("file://".length)
+    : uri;
+  try {
+    await fs.unlink(normalized);
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
 }

@@ -11,6 +11,7 @@ import psycopg
 from psycopg.errors import DuplicateTable, UniqueViolation
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
+from psycopg_pool import AsyncConnectionPool
 
 from .config import Settings
 from .db import qualified_table, quoted_identifier
@@ -114,6 +115,7 @@ class PostgresCollectionStore:
         self.collections_table = qualified_table(self.schema_name, "collections")
         self.collection_papers_table = qualified_table(self.schema_name, "collection_papers")
         self.papers_table = qualified_table(self.schema_name, "papers")
+        self._pool: AsyncConnectionPool | None = None
 
     async def initialize(self) -> None:
         async with await self._connect() as conn:
@@ -244,12 +246,19 @@ class PostgresCollectionStore:
             updated_at=row["updated_at"],
         )
 
-    async def _connect(self) -> psycopg.AsyncConnection:
-        return await psycopg.AsyncConnection.connect(
-            self.settings.psycopg_postgres_dsn,
-            autocommit=True,
-            row_factory=dict_row,
-        )
+    def _get_pool(self) -> AsyncConnectionPool:
+        if self._pool is None:
+            self._pool = AsyncConnectionPool(
+                conninfo=self.settings.psycopg_postgres_dsn,
+                kwargs={"autocommit": True, "row_factory": dict_row},
+                min_size=1,
+                max_size=10,
+                open=True,
+            )
+        return self._pool
+
+    async def _connect(self):
+        return self._get_pool().connection()
 
     async def _create_index(self, conn: psycopg.AsyncConnection, statement: str) -> None:
         try:

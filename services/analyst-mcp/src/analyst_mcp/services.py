@@ -969,27 +969,7 @@ class DownloadService:
                 api_base_url=context.api_base_url.strip(),
             )
 
-        scopes = [primary]
-        legacy_backend = self.settings.storage_backend.lower()
-        if context.project_id or context.workspace_slug:
-            if legacy_backend == "s3":
-                scopes.append(
-                    StorageScope(
-                        backend="s3",
-                        bucket=(self.settings.s3_bucket or "").strip(),
-                        region=self.settings.aws_region,
-                        endpoint=self.settings.minio_endpoint or None,
-                        key_prefix="",
-                    )
-                )
-            else:
-                scopes.append(
-                    StorageScope(
-                        backend="local",
-                        local_root=self.settings.storage_root,
-                    )
-                )
-        return scopes
+        return [primary]
 
     def _object_store(self, scope: StorageScope) -> LocalObjectStore | S3ObjectStore:
         if scope.backend == "local":
@@ -1471,13 +1451,28 @@ class AnalystService:
         )
 
     async def search_literature(self, query: str, sources: list[str] | None, date_from: str | None, date_to: str | None, limit: int) -> SearchResponse:
-        papers = await self.providers.search_all(query=query, limit=limit, sources=sources, date_from=date_from, date_to=date_to)
-        await self.repository.save_papers(papers)
-        for paper in papers:
+        summary = await self.providers.search_all_detailed(
+            query=query,
+            limit=limit,
+            sources=sources,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        await self.repository.save_papers(summary.records)
+        for paper in summary.records:
             await self.graph_store.upsert_paper(paper)
             await self.graph_store.add_related(paper)
         current_date = datetime.now(self.settings.tzinfo).date().isoformat()
-        return SearchResponse(query=query, current_date=current_date, results=papers, sources_used=sources or self.providers.provider_names())
+        return SearchResponse(
+            query=query,
+            current_date=current_date,
+            results=summary.records,
+            sources_used=sources or self.providers.provider_names(),
+            status=summary.status,
+            warnings=summary.warnings,
+            provider_status=summary.provider_status,
+            error=summary.error,
+        )
 
     async def get_paper(self, identifier: str, provider: str | None = None) -> PaperRecord | None:
         cached = await self.repository.get_paper(identifier, provider=provider)

@@ -1,62 +1,38 @@
 import fs from "fs/promises";
 import path from "path";
 import { createDocument, ensureCollection, updateDocumentMetadata } from "~/lib/db/queries/documents.server";
+import { createArtifact, createArtifactVersion } from "~/lib/db/queries/workspace.server";
 import { getProject } from "~/lib/db/queries/projects.server";
 import { storeArtifact } from "~/lib/artifacts.server";
 import { resolveInWorkspace } from "~/lib/filesystem.server";
-import { buildProjectArtifactUrls } from "~/lib/project-storage.server";
+import {
+  buildProjectArtifactUrls,
+  buildProjectStandaloneArtifactUrls,
+} from "~/lib/project-storage.server";
 import { refreshDocumentKnowledgeIndex } from "~/lib/knowledge-index.server";
+import { sanitizeFilename, inferMimeType, inferExtension } from "~/lib/file-utils";
+import { parseJsonBody } from "~/lib/request-utils";
 import type { Route } from "./+types/api.projects.$projectId.artifacts.capture";
 
-function inferExtension(contentType: string): string {
-  const value = String(contentType || "").toLowerCase();
-  if (value.includes("pdf")) return ".pdf";
-  if (value.includes("json")) return ".json";
-  if (value.includes("html")) return ".html";
-  if (value.includes("xml")) return ".xml";
-  if (value.includes("markdown")) return ".md";
-  if (value.includes("plain")) return ".txt";
-  if (value.includes("wordprocessingml")) return ".docx";
-  return ".bin";
-}
-
-function inferMimeType(filename: string, fallback = "application/octet-stream"): string {
-  const lower = filename.toLowerCase();
-  if (lower.endsWith(".pdf")) return "application/pdf";
-  if (lower.endsWith(".docx")) {
-    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-  }
-  if (lower.endsWith(".json")) return "application/json";
-  if (lower.endsWith(".txt")) return "text/plain; charset=utf-8";
-  if (lower.endsWith(".md")) return "text/markdown; charset=utf-8";
-  if (lower.endsWith(".html") || lower.endsWith(".htm")) return "text/html; charset=utf-8";
-  return fallback;
-}
-
-function sanitizeFilename(value: string): string {
-  return (
-    String(value || "artifact")
-      .replace(/[^a-zA-Z0-9._-]+/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 80) || "artifact"
-  );
-}
-
-function inferTextFromBuffer(
+async function extractTextFromBuffer(
   buffer: Buffer,
   mimeType: string,
   filename: string
-): string {
+): Promise<string> {
   const type = String(mimeType || "").toLowerCase();
   const lowerName = String(filename || "").toLowerCase();
-  const isOfficeArchive =
-    type.includes("openxmlformats") ||
-    lowerName.endsWith(".docx") ||
-    lowerName.endsWith(".pptx") ||
-    lowerName.endsWith(".xlsx");
-  if (isOfficeArchive) {
-    return "";
+  if (
+    type.includes("wordprocessingml.document") ||
+    lowerName.endsWith(".docx")
+  ) {
+    try {
+      const mammothModule = await import("mammoth");
+      const mammoth = (mammothModule as any).default ?? mammothModule;
+      const extracted = await mammoth.extractRawText({ buffer });
+      return String(extracted?.value || "").replace(/\s+/g, " ").trim();
+    } catch {
+      return "";
+    }
   }
   if (
     type.includes("text/") ||
@@ -84,7 +60,8 @@ export async function action({ request, params }: Route.ActionArgs) {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
-  const body = await request.json();
+  const body = await parseJsonBody(request);
+  if (body instanceof Response) return body;
   const projectId = params.projectId;
   const project = await getProject(projectId);
   if (!project) {
@@ -121,25 +98,31 @@ export async function action({ request, params }: Route.ActionArgs) {
     buffer,
   });
 
-  const collectionName = String(body.collectionName || "Artifacts").trim();
-  const collectionId = String(body.collectionId || "").trim();
-  const collection = collectionId
-    ? { id: collectionId }
-    : await ensureCollection(projectId, collectionName, "Generated artifacts");
-
-  const title =
-    String(body.title || "").trim() ||
-    path.basename(requestedFilename || workspacePath);
-  const content = inferTextFromBuffer(buffer, mimeType, storedName);
-  const document = await createDocument(projectId, {
-    collectionId: collection.id,
-    title,
-    sourceType: String(body.sourceType || "generated"),
-    sourceUri: artifact.storageUri.startsWith("s3://")
-      ? artifact.storageUri
-      : `file://${artifact.storageUri}`,
+  const artifactRecord = await createArtifact(projectId, {
+    title:
+      String(body.title || "").trim() ||
+      path.basename(requestedFilename || workspacePath),
+    kind: String(body.kind || "generated-file").trim() || "generated-file",
+    mimeType: artifact.mimeType,
     storageUri: artifact.storageUri,
-    content: content || `[Generated artifact stored at ${artifact.storageUri}]`,
+    metadata: {
+      filename: artifact.filename,
+      mimeType: artifact.mimeType,
+      bytes: artifact.size,
+      storageBackend: artifact.backend,
+      workspacePath,
+      relativePath,
+      ...(body.metadata && typeof body.metadata === "object" ? body.metadata : {}),
+    },
+  });
+
+  const content = await extractTextFromBuffer(buffer, mimeType, storedName);
+  const version = await createArtifactVersion(projectId, artifactRecord.id, {
+    title: artifactRecord.title,
+    changeSummary:
+      String(body.changeSummary || "").trim() || "Initial captured version",
+    storageUri: artifact.storageUri,
+    contentText: content,
     metadata: {
       filename: artifact.filename,
       mimeType: artifact.mimeType,
@@ -151,13 +134,62 @@ export async function action({ request, params }: Route.ActionArgs) {
       ...(body.metadata && typeof body.metadata === "object" ? body.metadata : {}),
     },
   });
+
+  const artifactLinks = buildProjectStandaloneArtifactUrls(projectId, artifactRecord.id);
+  const artifactPayload = {
+    ...artifactRecord,
+    metadata: {
+      ...(artifactRecord.metadata && typeof artifactRecord.metadata === "object"
+        ? artifactRecord.metadata
+        : {}),
+      artifactUrl: artifactLinks.artifactUrl,
+      downloadUrl: artifactLinks.downloadUrl,
+      versionCount: 1,
+      latestVersionId: version.id,
+    },
+  };
+
+  const addToSources = body.addToSources === true || body.createDocument === true;
+  if (!addToSources) {
+    return Response.json({ artifact: artifactPayload, version }, { status: 201 });
+  }
+
+  const collectionName = String(body.collectionName || "Artifacts").trim();
+  const collectionId = String(body.collectionId || "").trim();
+  const collection = collectionId
+    ? { id: collectionId }
+    : await ensureCollection(projectId, collectionName, "Generated artifacts");
+
+  const document = await createDocument(projectId, {
+    collectionId: collection.id,
+    title: artifactRecord.title,
+    sourceType: String(body.sourceType || "generated"),
+    sourceUri: artifact.storageUri.startsWith("s3://")
+      ? artifact.storageUri
+      : `file://${artifact.storageUri}`,
+    storageUri: artifact.storageUri,
+    content: content || `[Generated artifact stored at ${artifact.storageUri}]`,
+    metadata: {
+      ...(artifactRecord.metadata && typeof artifactRecord.metadata === "object"
+        ? artifactRecord.metadata
+        : {}),
+      artifactId: artifactRecord.id,
+      latestVersionId: version.id,
+      extractedTextLength: content.length,
+    },
+  });
   const links = buildProjectArtifactUrls(projectId, document.id);
   const updated = await updateDocumentMetadata(projectId, document.id, {
     ...(document.metadata && typeof document.metadata === "object" ? document.metadata : {}),
+    artifactId: artifactRecord.id,
+    latestVersionId: version.id,
     artifactUrl: links.artifactUrl,
     downloadUrl: links.downloadUrl,
     workspaceSlug: project.workspaceSlug,
   });
   const indexed = await refreshDocumentKnowledgeIndex(projectId, document.id);
-  return Response.json({ document: indexed || updated }, { status: 201 });
+  return Response.json(
+    { artifact: artifactPayload, version, document: indexed || updated },
+    { status: 201 }
+  );
 }
