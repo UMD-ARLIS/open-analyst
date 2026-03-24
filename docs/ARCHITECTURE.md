@@ -6,9 +6,9 @@ Open Analyst runs as three cooperating services:
 
 - `web`: React Router application and product API layer
 - `langgraph-runtime`: LangGraph Agent Server plus Deep Agents orchestration
-- `analyst-mcp`: external literature search and acquisition service
+- `analyst-mcp`: external search API service (arxiv, openalex, semantic scholar)
 
-The runtime owns execution, threads, runs, checkpoints, interrupts, and resume. The web app owns project-facing APIs such as projects, documents, artifacts, source ingest, canvas documents, and user settings. Analyst MCP is the external acquisition surface for literature and downloadable source artifacts.
+The runtime owns execution, threads, runs, checkpoints, interrupts, and resume. The web app owns project-facing APIs such as projects, documents, artifacts, source ingest, canvas documents, and user settings. Analyst MCP is a focused external search service — it searches academic databases and returns paper metadata. Collection management and document storage are handled natively by the web app.
 
 ## UI Model
 
@@ -61,8 +61,8 @@ Key product records:
 
 Research and publication follow one path through the product:
 
-1. retriever branches gather candidate literature
-2. the supervisor presents a consolidated approval
+1. retriever branches gather candidate literature and web sources
+2. the supervisor presents one consolidated approval for all candidates
 3. approved sources are imported into project documents
 4. notes and plans are staged in canvas
 5. final outputs are packaged as artifacts
@@ -92,11 +92,12 @@ Sources, artifacts, and published reports are served through app-owned routes ra
 
 ## Retrieval
 
-Open Analyst uses three evidence channels:
+Open Analyst uses four evidence channels:
 
 - project documents via pgvector search
 - project memories via the LangGraph store
-- external literature and acquisition via Analyst MCP
+- academic literature via Analyst MCP (arxiv, openalex, semantic scholar)
+- web search and content extraction via Tavily (when `TAVILY_API_KEY` is configured)
 
 ## Design Rule
 

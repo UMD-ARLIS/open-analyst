@@ -69,9 +69,10 @@ The supervisor does not use broad filesystem tools directly. File and command wo
 
 ### retriever
 
-- gathers literature candidates
-- stages sources
-- inspects current project evidence
+- searches academic databases (arxiv, openalex, semantic scholar) via Analyst MCP
+- searches the web via Tavily (`web_search`, `web_fetch`) for non-academic topics
+- stages literature and web sources for consolidated approval
+- inspects current project evidence and memories before external retrieval
 
 ### researcher
 
@@ -106,9 +107,9 @@ The supervisor does not use broad filesystem tools directly. File and command wo
 
 ### Research workflow
 
-1. retrievers gather candidate sources
-2. the supervisor deduplicates and requests one approval decision
-3. approved sources are imported into the active collection
+1. retrievers gather candidate sources (academic literature and/or web sources)
+2. all candidates are batched — the supervisor presents one consolidated approval
+3. approved sources are imported into the active collection (with dedup enforcement)
 4. researchers synthesize the evidence
 
 ### Product workflow

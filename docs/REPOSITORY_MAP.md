@@ -32,12 +32,16 @@ Key workspace components:
 - [services/langgraph-runtime/src/runtime_context.py](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/runtime_context.py): server-built runtime context
 - [services/langgraph-runtime/src/models.py](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/models.py): request and event models
 - [services/langgraph-runtime/src/retrieval.py](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/retrieval.py): pgvector and memory retrieval
+- [services/langgraph-runtime/src/web_tools.py](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/web_tools.py): Tavily web search and content extraction
+- [services/langgraph-runtime/src/main.py](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/main.py): standalone Docker entrypoint (replaces langgraph CLI)
 - [services/langgraph-runtime/src/shared_storage_backend.py](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/shared_storage_backend.py): large-file routing for local or S3 storage
+- [services/langgraph-runtime/tests/](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/tests): pytest tests (retrieval, web tools)
 
 ## Analyst MCP
 
 - [services/analyst-mcp/README.md](/home/ubuntu/code/ARLIS/open-analyst/services/analyst-mcp/README.md): service overview and local usage
-- [services/analyst-mcp/src/analyst_mcp/](/home/ubuntu/code/ARLIS/open-analyst/services/analyst-mcp/src/analyst_mcp): Analyst MCP implementation
+- [services/analyst-mcp/src/analyst_mcp/](/home/ubuntu/code/ARLIS/open-analyst/services/analyst-mcp/src/analyst_mcp): focused search API (arxiv, openalex, semantic scholar, paper metadata)
+- [services/analyst-mcp/tests/](/home/ubuntu/code/ARLIS/open-analyst/services/analyst-mcp/tests): pytest tests (providers, API endpoints)
 
 ## Product Skills
 

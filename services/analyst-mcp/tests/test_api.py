@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from analyst_mcp.models import (
+    CapabilityResponse,
     HealthComponent,
     HealthDetailsResponse,
     PaperDetailResponse,
@@ -114,6 +115,14 @@ def _build_test_app(mock_service) -> FastAPI:
         details = await app.state.service.health_details()
         return {"status": "ok" if details.ok else "degraded"}
 
+    @app.get("/api/health/details")
+    async def api_health_details():
+        return (await app.state.service.health_details()).model_dump(mode="json")
+
+    @app.get("/api/capabilities")
+    async def api_capabilities():
+        return (await app.state.service.describe_capabilities()).model_dump(mode="json")
+
     @app.get("/api/search")
     async def api_search_literature(
         query: str,
@@ -176,6 +185,52 @@ class TestHealthEndpoint:
         assert response.status_code == 200
         body = response.json()
         assert body["status"] == "degraded"
+
+
+# ---------------------------------------------------------------------------
+# Health details endpoint
+# ---------------------------------------------------------------------------
+
+class TestHealthDetailsEndpoint:
+    def test_health_details_requires_api_key(self, client):
+        response = client.get("/api/health/details")
+        assert response.status_code == 401
+
+    def test_health_details_returns_200(self, client, mock_service):
+        response = client.get("/api/health/details", headers=_auth_headers())
+        assert response.status_code == 200
+        body = response.json()
+        assert body["ok"] is True
+        assert body["service_name"] == "analyst-mcp"
+        assert len(body["components"]) == 2
+        assert body["search_available"] is True
+
+
+# ---------------------------------------------------------------------------
+# Capabilities endpoint
+# ---------------------------------------------------------------------------
+
+class TestCapabilitiesEndpoint:
+    def test_capabilities_requires_api_key(self, client):
+        response = client.get("/api/capabilities")
+        assert response.status_code == 401
+
+    def test_capabilities_returns_200(self, client, mock_service):
+        mock_service.describe_capabilities.return_value = CapabilityResponse(
+            service_name="analyst-mcp",
+            current_date="2024-01-01",
+            providers=["arxiv", "openalex", "semantic_scholar"],
+            mcp_tools=["search_literature", "get_paper"],
+            workflows=[],
+            artifact_storage_backend="local",
+            artifact_storage_detail="ok",
+        )
+        response = client.get("/api/capabilities", headers=_auth_headers())
+        assert response.status_code == 200
+        body = response.json()
+        assert body["service_name"] == "analyst-mcp"
+        assert "arxiv" in body["providers"]
+        assert body["artifact_storage_backend"] == "local"
 
 
 # ---------------------------------------------------------------------------

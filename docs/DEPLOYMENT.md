@@ -26,6 +26,11 @@ Minimum:
 - `ANALYST_MCP_API_KEY`
 - `LANGGRAPH_RUNTIME_URL`
 
+Optional but recommended:
+
+- `TAVILY_API_KEY` (enables web search and Tavily Extract for clean web content extraction)
+- `ANALYST_MCP_SEMANTIC_SCHOLAR_API_KEY` (improves Semantic Scholar search results)
+
 Common optional values:
 
 - `ANALYST_MCP_BASE_URL`
@@ -86,6 +91,15 @@ pnpm setup:python
 pnpm dev:all
 ```
 
+### Docker Compose
+
+```bash
+cp .env.example .env   # edit with your config
+docker compose up -d
+```
+
+All services read `.env` directly. Set `DATABASE_URL`, `LANGGRAPH_RUNTIME_URL`, and `ANALYST_MCP_BASE_URL` to match your environment. The postgres service in `docker-compose.yml` is optional — omit it if using an external database.
+
 ### Production-style web app
 
 ```bash
@@ -95,6 +109,14 @@ pnpm build
 pnpm start
 pnpm dev:runtime
 pnpm dev:analyst-mcp
+```
+
+### Testing
+
+```bash
+pnpm test                                              # TypeScript (Vitest)
+cd services/analyst-mcp && uv run pytest               # Analyst MCP (pytest)
+cd services/langgraph-runtime && uv run pytest          # Runtime (pytest)
 ```
 
 ## Health Checks
