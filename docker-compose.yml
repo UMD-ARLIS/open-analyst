@@ -3,10 +3,12 @@
 # 1. Copy .env.example to .env and fill in required values.
 # 2. Run: docker compose up -d
 #
-# The Postgres service creates the database.  Application services read
-# .env for secrets/config and .env.docker for container-aware host
-# overrides (localhost → container names).  The .env.docker file is
-# loaded AFTER .env, so its values win for keys that appear in both.
+# All services read .env for configuration.  Set DATABASE_URL,
+# LANGGRAPH_RUNTIME_URL, ANALYST_MCP_BASE_URL, and storage paths
+# in .env to match your environment (local, external Postgres, S3, etc.).
+#
+# The postgres service below is optional — omit it if you use an
+# external database and just set DATABASE_URL accordingly.
 
 services:
   postgres:
@@ -38,9 +40,7 @@ services:
         condition: service_started
       analyst-mcp:
         condition: service_started
-    env_file:
-      - .env
-      - .env.docker
+    env_file: .env
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:5173/api/health || exit 1"]
       interval: 10s
@@ -54,12 +54,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    env_file:
-      - .env
-      - .env.docker
-    volumes:
-      - workspaces:/home/appuser/.config/open-analyst/workspaces
-      - captures:/home/appuser/.config/open-analyst/captures
+    env_file: .env
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8081/health || exit 1"]
       interval: 10s
@@ -73,11 +68,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    env_file:
-      - .env
-      - .env.docker
-    volumes:
-      - analyst-mcp-data:/var/open-analyst/analyst-mcp/data
+    env_file: .env
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
       interval: 10s
@@ -86,6 +77,3 @@ services:
 
 volumes:
   pgdata:
-  workspaces:
-  captures:
-  analyst-mcp-data:
