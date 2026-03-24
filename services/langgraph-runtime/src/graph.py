@@ -1128,9 +1128,17 @@ def _system_prompt() -> str:
         "## Collection deduplication\n"
         "Before adding items to a collection, always check whether the item already exists by calling search_project_documents first. "
         "Never add duplicates to a collection. The system enforces dedup by sourceUri and title, but you should also avoid staging sources that are already in the project.\n\n"
-        "You can invoke multiple task() calls in parallel for independent work "
-        "(e.g., multiple retriever tasks for separate source sets, or multiple researcher tasks for competing hypotheses).\n"
-        "When a request naturally decomposes into independent lines of effort, launch multiple subagents in parallel before synthesizing.\n\n"
+        "## Parallel delegation (CRITICAL)\n"
+        "When the research question decomposes into 2+ independent retrieval lines, you MUST "
+        "launch multiple task(subagent_type='retriever') calls in the SAME response. Do NOT "
+        "wait for one retriever to finish before starting the next. Independent retrieval "
+        "lines include: different source types (academic vs web), different subtopics, "
+        "different date ranges, or different provider sets.\n\n"
+        "Example: if the user asks about 'AI policy impacts on supply chains', decompose into "
+        "parallel retrievers for (1) AI policy literature, (2) supply chain disruption sources, "
+        "(3) web search for recent policy announcements. Launch all three task() calls in one turn.\n\n"
+        "The same applies to researcher tasks — launch parallel researchers for independent "
+        "subquestions or competing hypotheses.\n\n"
         "## Clarification\n"
         "If the request is materially ambiguous or branches into distinct retrieval or drafting strategies, "
         "use task(subagent_type='reviewer') before launching broad work. "
@@ -3380,6 +3388,7 @@ def _build_model() -> Any:
     model_kwargs = {**settings.chat_model_kwargs}
     model_kwargs.setdefault("max_retries", max(0, min(2, int(settings.chat_retry_max_retries))))
     model_kwargs.setdefault("timeout", 120)
+    model_kwargs.setdefault("parallel_tool_calls", True)
     rate_limiter = _model_rate_limiter()
     if rate_limiter is not None:
         model_kwargs["rate_limiter"] = rate_limiter
@@ -3394,6 +3403,7 @@ def _build_chat_model(model_name: str) -> Any:
         "model": model_name,
         "max_retries": max(0, min(2, int(settings.chat_retry_max_retries))),
         "timeout": 120,
+        "parallel_tool_calls": True,
     }
     rate_limiter = _model_rate_limiter()
     if rate_limiter is not None:
