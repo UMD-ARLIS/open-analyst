@@ -383,10 +383,20 @@ def _normalize_analysis_mode(value: Any) -> str:
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    env_root = os.environ.get("REPO_ROOT", "")
+    if env_root:
+        return Path(env_root)
+    try:
+        return Path(__file__).resolve().parents[3]
+    except IndexError:
+        # Inside Docker the path hierarchy is shorter; fall back to /app
+        return Path(__file__).resolve().parent.parent
 
 
 def _skills_root() -> Path:
+    env_skills = os.environ.get("SKILLS_DIR", "")
+    if env_skills:
+        return Path(env_skills)
     return _repo_root() / "skills"
 
 

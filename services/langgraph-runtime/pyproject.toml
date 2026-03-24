@@ -26,11 +26,11 @@ dependencies = [
     "sse-starlette>=3.0.0",
     "tavily-python>=0.5.0",
     "uvicorn>=0.35.0",
+    "langgraph-cli[inmem]>=0.1.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "langgraph-cli[inmem]>=0.1.0",
     "pytest>=8.0",
     "pytest-asyncio>=0.25",
     "respx>=0.22.0",

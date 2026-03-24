@@ -13,6 +13,7 @@ export const env = createEnv({
     LITELLM_API_KEY: z.string().default(''),
     LITELLM_EMBEDDING_MODEL: z.string().default(''),
     LANGGRAPH_RUNTIME_URL: z.string().url().default('http://localhost:8081'),
+    LANGGRAPH_RUNTIME_PUBLIC_URL: z.string().url().optional(),
     DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
     PROJECT_WORKSPACES_ROOT: z.string().default(''),
     ARTIFACT_STORAGE_BACKEND: z.preprocess(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -318,7 +319,16 @@ def _merge_skill(skill: dict[str, Any], stored_by_id: dict[str, dict[str, Any]])
 
 
 def _discover_repository_skills(stored_by_id: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    skills_root = Path(__file__).resolve().parents[3] / "skills"
+    # In the repo layout the skills directory is three levels up from this file
+    # (services/langgraph-runtime/src/runtime_context.py → repo/skills/).
+    # In Docker the path is shorter (/app/src/runtime_context.py), so fall
+    # back to an env var or silently skip when the directory doesn't exist.
+    skills_root = Path(os.environ.get("SKILLS_DIR", ""))
+    if not skills_root.is_dir():
+        try:
+            skills_root = Path(__file__).resolve().parents[3] / "skills"
+        except IndexError:
+            return []
     if not skills_root.exists():
         return []
     discovered: list[dict[str, Any]] = []

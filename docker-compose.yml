@@ -41,6 +41,12 @@ services:
       analyst-mcp:
         condition: service_started
     env_file: .env
+    environment:
+      # Server-side: use Docker service names for inter-container comms
+      LANGGRAPH_RUNTIME_URL: http://runtime:8081
+      ANALYST_MCP_BASE_URL: http://analyst-mcp:8000
+      # Client-side: browser connects via host-mapped ports
+      LANGGRAPH_RUNTIME_PUBLIC_URL: http://localhost:8081
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:5173/api/health || exit 1"]
       interval: 10s
