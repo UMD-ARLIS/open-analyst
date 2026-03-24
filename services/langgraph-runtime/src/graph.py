@@ -2762,110 +2762,66 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         collection_name: str = "",
         runtime: ToolRuntime = None,
     ) -> str:
-        """Capture a web page as a project source after user confirms in chat."""
+        """Stage a web page for later consolidated approval. Does NOT interrupt.
+
+        The retriever calls this to queue web sources. After all retriever
+        branches finish, the supervisor calls approve_collected_literature
+        to present one consolidated approval for all staged sources
+        (both literature and web).
+        """
         cfg = _get_project_config(runtime)
-        api_base_url = cfg.get("api_base_url", "")
         project_id = cfg.get("project_id", "")
         if not project_id:
             return "{}"
 
-        # Interrupt for user confirmation
-        if interrupt is not None:
-            approval = interrupt({
-                "type": "web_source_approval",
-                "url": url,
-                "title": title or url,
-                "message": f"Add web source to project?\n\nURL: {url}\nTitle: {title or '(auto-detect)'}",
-            })
-        else:
-            return _approval_unavailable("stage_web_source")
+        # Store as a literature_candidate_batch so approve_collected_literature
+        # picks it up alongside academic candidates in one consolidated approval.
+        # The actual staging + import happens later in _import_approved_literature_items.
+        store = getattr(runtime, "store", None) if runtime is not None else None
+        if store is None:
+            return json.dumps({"status": "error", "url": url, "error": "Store unavailable for staging"})
 
-        if not isinstance(approval, dict) or not approval.get("approved"):
-            return json.dumps({"status": "rejected", "message": "Web source capture was declined."})
-
-        payload = await _stage_source_ingest_api(
-            api_base_url,
-            project_id,
+        candidate_key = f"web-{hashlib.sha1(url.encode()).hexdigest()[:12]}"
+        namespace = _retrieval_candidate_namespace(project_id, runtime)
+        await store.aput(
+            namespace,
+            candidate_key,
             {
-                "origin": "web",
-                "url": url,
-                "title": title or None,
-                "collectionId": cfg.get("collection_id"),
-                "collectionName": collection_name or None,
+                "type": "literature_candidate_batch",
+                "batchId": candidate_key,
+                "query": f"Web source: {title or url}",
+                "branchLabel": "web",
+                "candidates": [
+                    {
+                        "key": f"web:{url}",
+                        "title": title or url,
+                        "url": url,
+                        "authors": [],
+                        "venue": "",
+                        "year": "",
+                        "abstract": f"Web source: {url}",
+                        "citation_count": 0,
+                        "ingest_item": {
+                            "origin": "web",
+                            "url": url,
+                            "title": title or None,
+                            "collectionId": cfg.get("collection_id"),
+                            "collectionName": collection_name or None,
+                        },
+                    }
+                ],
+                "warnings": [],
+                "providerStatus": {},
+                "createdAt": datetime.now(timezone.utc).isoformat(),
             },
         )
-        batch = payload.get("batch") if isinstance(payload, dict) else None
-        batch_id = str((batch or {}).get("id") or "").strip()
-        if not batch_id:
-            logger.error(
-                "stage_web_source: batch_id empty after staging (payload keys=%s, batch=%r)",
-                list(payload.keys()) if isinstance(payload, dict) else None,
-                batch,
-            )
-            return json.dumps({"status": "error", "url": url, "error": "Failed to stage web source batch"})
 
-        approval_payload = await _approve_source_batch_api(api_base_url, project_id, batch_id)
-        approved_batch = approval_payload.get("batch") if isinstance(approval_payload, dict) else None
-        if not isinstance(approved_batch, dict):
-            return json.dumps(
-                {
-                    "status": "error",
-                    "url": url,
-                    "batch_id": batch_id,
-                    "error": "Web source approval failed before import results were returned.",
-                }
-            )
-
-        items_payload = approved_batch.get("items") if isinstance(approved_batch.get("items"), list) else []
-        failed_items = [
-            {
-                "title": _clean_text(item.get("title"), limit=180),
-                "error": _clean_text(item.get("error"), limit=240),
-            }
-            for item in items_payload
-            if isinstance(item, dict) and item.get("status") == "failed"
-        ]
-        completed_items = [item for item in items_payload if isinstance(item, dict) and item.get("status") == "completed"]
-        batch_status = str(approved_batch.get("status") or "").strip()
-        if completed_items:
-            normalized_title = _clean_text(title or url, limit=140)
-            await _persist_project_memory(
-                runtime=runtime,
-                title=f"Web source captured: {normalized_title}",
-                summary=f"Added web source '{normalized_title}' to the project.",
-                content="\n".join(
-                    [
-                        f"Source URL: {url}",
-                        f"Title: {normalized_title}",
-                        f"Batch ID: {batch_id}",
-                        f"Imported items: {len(completed_items)}",
-                    ]
-                ),
-                memory_type="retrieval_finding",
-                metadata={
-                    "kind": "web_source_capture",
-                    "url": url,
-                    "title": normalized_title,
-                    "batchId": batch_id,
-                    "completedCount": len(completed_items),
-                    "failedCount": len(failed_items),
-                },
-                provenance={
-                    "tool": "stage_web_source",
-                    "url": url,
-                    "collectionId": cfg.get("collection_id"),
-                    "collectionName": collection_name or None,
-                    "batchId": batch_id,
-                    "importedItems": [
-                        {
-                            "title": _clean_text(item.get("title"), limit=180),
-                            "documentId": str(item.get("document_id") or item.get("documentId") or "").strip() or None,
-                            "artifactId": str(item.get("artifact_id") or item.get("artifactId") or "").strip() or None,
-                        }
-                        for item in completed_items
-                    ],
-                },
-            )
+        return json.dumps({
+            "status": "staged",
+            "url": url,
+            "title": title or url,
+            "message": "Web source staged for consolidated approval. The supervisor will present approval after all retriever branches finish.",
+        })
         return json.dumps({
             "status": "approved" if batch_status == "completed" and not failed_items else "error",
             "url": url,
