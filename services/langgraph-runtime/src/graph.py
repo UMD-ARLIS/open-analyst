@@ -120,7 +120,10 @@ def _extract_error_status_code(exc: Exception) -> int | None:
 
 
 def _is_retryable_model_error(exc: Exception) -> bool:
-    if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError)):
+    if any(
+        isinstance(current, (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError))
+        for current in _iter_exception_chain(exc)
+    ):
         return True
     status_code = _extract_error_status_code(exc)
     if status_code in {408, 409, 429}:
@@ -140,6 +143,8 @@ def _is_retryable_model_error(exc: Exception) -> bool:
             "timed out",
             "timeout",
             "connection reset",
+            "remoteprotocolerror",
+            "internal error occurred",
         )
     )
 
