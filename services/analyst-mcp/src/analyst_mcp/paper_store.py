@@ -254,19 +254,21 @@ class PostgresPaperStore:
             raw=row["raw"] or {},
         )
 
-    def _get_pool(self) -> AsyncConnectionPool:
+    async def _get_pool(self) -> AsyncConnectionPool:
         if self._pool is None:
             self._pool = AsyncConnectionPool(
                 conninfo=self.settings.psycopg_postgres_dsn,
                 kwargs={"autocommit": True, "row_factory": dict_row},
                 min_size=1,
                 max_size=10,
-                open=True,
+                open=False,
             )
+            await self._pool.open()
         return self._pool
 
     async def _connect(self):
-        return self._get_pool().connection()
+        pool = await self._get_pool()
+        return pool.connection()
 
     async def _create_index(self, conn: psycopg.AsyncConnection, statement: str) -> None:
         try:
