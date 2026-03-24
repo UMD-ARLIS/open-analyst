@@ -3388,7 +3388,6 @@ def _build_model() -> Any:
     model_kwargs = {**settings.chat_model_kwargs}
     model_kwargs.setdefault("max_retries", max(0, min(2, int(settings.chat_retry_max_retries))))
     model_kwargs.setdefault("timeout", 120)
-    model_kwargs.setdefault("parallel_tool_calls", True)
     rate_limiter = _model_rate_limiter()
     if rate_limiter is not None:
         model_kwargs["rate_limiter"] = rate_limiter
@@ -3403,7 +3402,6 @@ def _build_chat_model(model_name: str) -> Any:
         "model": model_name,
         "max_retries": max(0, min(2, int(settings.chat_retry_max_retries))),
         "timeout": 120,
-        "parallel_tool_calls": True,
     }
     rate_limiter = _model_rate_limiter()
     if rate_limiter is not None:
