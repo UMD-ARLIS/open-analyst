@@ -17,5 +17,10 @@ export async function loader({ params, request }: Route.LoaderArgs) {
       statuses: ['staged', 'importing', 'failed'],
     }),
   ]);
-  return { collections, documents, documentCounts, sourceIngestBatches };
+  // Filter out batches created by the runtime's consolidated approval flow —
+  // those are managed via chat interrupts, not the KnowledgePanel.
+  const userBatches = sourceIngestBatches.filter(
+    (batch) => !(batch.metadata as Record<string, unknown>)?.source?.toString().startsWith('runtime')
+  );
+  return { collections, documents, documentCounts, sourceIngestBatches: userBatches };
 }

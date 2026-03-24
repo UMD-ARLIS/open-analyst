@@ -1998,17 +1998,67 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         if not approved_items:
             return {"status": "error", "error": "No approved literature items were provided."}
 
+        # Split web sources from literature — they need different import paths
+        literature_items = [item for item in approved_items if item.get("origin") != "web"]
+        web_items = [item for item in approved_items if item.get("origin") == "web"]
+
+        # Import web sources individually via the web origin path
+        web_completed: list[dict[str, Any]] = []
+        web_failed: list[dict[str, Any]] = []
+        web_batch_ids: list[str] = []
+        for web_item in web_items:
+            try:
+                web_url = web_item.get("sourceUrl") or web_item.get("url") or ""
+                web_payload = await _stage_source_ingest_api(
+                    api_base_url,
+                    project_id,
+                    {
+                        "origin": "web",
+                        "url": web_url,
+                        "title": web_item.get("title") or web_url,
+                        "collectionId": web_item.get("collectionId") or collection_id,
+                        "collectionName": web_item.get("collectionName") or collection_name or None,
+                    },
+                )
+                web_batch = web_payload.get("batch") if isinstance(web_payload, dict) else None
+                web_batch_id = str((web_batch or {}).get("id") or "").strip()
+                if web_batch_id:
+                    web_batch_ids.append(web_batch_id)
+                    approval_result = await _approve_source_batch_api(api_base_url, project_id, web_batch_id)
+                    approved_batch = approval_result.get("batch") if isinstance(approval_result, dict) else None
+                    if isinstance(approved_batch, dict) and approved_batch.get("status") == "completed":
+                        web_completed.append({"title": web_item.get("title"), "url": web_url})
+                    else:
+                        web_failed.append({"title": web_item.get("title"), "error": "Import failed"})
+                else:
+                    web_failed.append({"title": web_item.get("title"), "error": "Staging failed"})
+            except Exception as exc:
+                web_failed.append({"title": web_item.get("title"), "error": str(exc)})
+
+        # If no literature items, return web results only
+        if not literature_items:
+            return {
+                "status": "approved" if web_completed and not web_failed else "error",
+                "count": len(web_completed),
+                "requested_count": len(approved_items),
+                "batch_ids": web_batch_ids,
+                "chunk_count": 1,
+                "completed_items": web_completed,
+                "failed_items": web_failed,
+                "error": None if not web_failed else "One or more web sources failed to import.",
+            }
+
         stage_payload = await _stage_source_ingest_api(
             api_base_url,
             project_id,
             {
                 "origin": "literature",
                 "query": query_label,
-                "summary": f"Approved {len(approved_items)} literature source(s) from analyst retrieval.",
-                "metadata": metadata,
+                "summary": f"Approved {len(literature_items)} literature source(s) from analyst retrieval.",
+                "metadata": {**metadata, "source": "runtime-consolidated"},
                 "collectionId": collection_id,
                 "collectionName": collection_name or None,
-                "items": approved_items,
+                "items": literature_items,
             },
         )
         batch = stage_payload.get("batch") if isinstance(stage_payload, dict) else None
@@ -2042,16 +2092,20 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
             if isinstance(item, dict) and item.get("status") == "failed"
         ]
         batch_status = str(approved_batch.get("status") or "").strip()
+        all_completed = completed_items + web_completed
+        all_failed = failed_items + web_failed
+        all_batch_ids = ([batch_id] if batch_id else []) + web_batch_ids
         return {
-            "status": "approved" if batch_status == "completed" and not failed_items else "error",
-            "count": len(completed_items),
+            "status": "approved" if batch_status == "completed" and not all_failed else "error",
+            "count": len(all_completed),
             "requested_count": len(approved_items),
             "batch_id": batch_id,
+            "batch_ids": all_batch_ids,
             "batch_status": batch_status or None,
-            "failed_items": failed_items,
-            "completed_items": completed_items,
+            "failed_items": all_failed,
+            "completed_items": all_completed,
             "approved_batch": approved_batch,
-            "error": None if batch_status == "completed" and not failed_items else "One or more approved sources failed to import.",
+            "error": None if batch_status == "completed" and not all_failed else "One or more approved sources failed to import.",
         }
 
     async def _import_literature_in_chunks(
@@ -2817,8 +2871,9 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
                         "citation_count": 0,
                         "ingest_item": {
                             "origin": "web",
+                            "sourceUrl": url,
                             "url": url,
-                            "title": title or None,
+                            "title": title or url,
                             "collectionId": cfg.get("collection_id"),
                             "collectionName": collection_name or None,
                         },
