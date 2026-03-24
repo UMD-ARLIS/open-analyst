@@ -6,7 +6,12 @@ import typer
 
 from .config import Settings
 
-app = typer.Typer(no_args_is_help=True)
+app = typer.Typer(invoke_without_command=True)
+
+
+@app.callback()
+def main() -> None:
+    """Analyst MCP — academic search and paper acquisition service."""
 
 
 @app.command()
