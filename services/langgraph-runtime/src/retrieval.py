@@ -264,7 +264,7 @@ class RuntimeRetrievalService:
         if not settings.database_url_psycopg:
             raise RuntimeRetrievalError("Runtime retrieval database is not configured.")
         try:
-            pool = self._get_pool()
+            pool = await self._get_pool()
             async with pool.connection() as conn:
                 async with conn.cursor() as cursor:
                     await cursor.execute(query, params)
@@ -342,15 +342,16 @@ class RuntimeRetrievalService:
     def _memory_namespace(self, project_id: str) -> tuple[str, ...]:
         return ("open-analyst", "projects", project_id, "memories")
 
-    def _get_pool(self) -> AsyncConnectionPool:
+    async def _get_pool(self) -> AsyncConnectionPool:
         if self._pool is None:
             self._pool = AsyncConnectionPool(
                 conninfo=settings.database_url_psycopg,
                 kwargs={"row_factory": dict_row},
                 min_size=1,
                 max_size=10,
-                open=True,
+                open=False,
             )
+            await self._pool.open()
         return self._pool
 
 

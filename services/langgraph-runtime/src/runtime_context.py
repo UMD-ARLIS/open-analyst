@@ -592,22 +592,23 @@ class RuntimeContextService:
     async def _fetch(self, query: str, params: list[Any]) -> list[dict[str, Any]]:
         if not settings.database_url_psycopg:
             raise RuntimeError("Runtime database is not configured.")
-        pool = self._get_pool()
+        pool = await self._get_pool()
         async with pool.connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute(query, params)
                 rows = await cursor.fetchall()
         return list(rows)
 
-    def _get_pool(self) -> AsyncConnectionPool:
+    async def _get_pool(self) -> AsyncConnectionPool:
         if self._pool is None:
             self._pool = AsyncConnectionPool(
                 conninfo=settings.database_url_psycopg,
                 kwargs={"row_factory": dict_row},
                 min_size=1,
                 max_size=5,
-                open=True,
+                open=False,
             )
+            await self._pool.open()
         return self._pool
 
 
