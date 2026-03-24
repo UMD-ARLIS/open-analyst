@@ -5,8 +5,6 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, Field
-
 from .config import Settings
 from .errors import AnalystMcpUnavailableError
 from .mcp_server import build_mcp_server
@@ -19,10 +17,6 @@ def _extract_api_key(request: Request) -> str | None:
     if bearer.lower().startswith("bearer "):
         return bearer.split(" ", 1)[1].strip()
     return request.headers.get("x-api-key")
-
-
-class DownloadRequest(BaseModel):
-    preferred_formats: list[str] = Field(default_factory=lambda: ["pdf"])
 
 
 def create_app() -> FastAPI:
@@ -156,19 +150,6 @@ def create_app() -> FastAPI:
             if paper is None:
                 raise HTTPException(status_code=404, detail="paper_not_found")
         return {"artifacts": [artifact.model_dump(mode="json") for artifact in artifacts]}
-
-    @app.post("/api/papers/{identifier}/download")
-    async def api_download_paper(identifier: str, payload: DownloadRequest):
-        analyst_service: AnalystService = app.state.service
-        try:
-            results = await analyst_service.download_articles([identifier], payload.preferred_formats)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-        if not results:
-            raise HTTPException(status_code=404, detail="paper_not_found")
-        return {"downloads": [result.model_dump(mode="json") for result in results]}
 
     @app.get("/api/papers/{identifier}/artifact")
     async def api_paper_artifact(

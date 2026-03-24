@@ -4,7 +4,7 @@ import mimetypes
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 from urllib.parse import quote, urlencode, urlparse
 
 import aioboto3
@@ -15,7 +15,6 @@ from .config import Settings
 from .models import (
     ArtifactRecord,
     CapabilityResponse,
-    DownloadResult,
     HealthComponent,
     HealthDetailsResponse,
     PaperDetailResponse,
@@ -217,44 +216,6 @@ class DownloadService:
             bucket=scope.bucket,
             sample_uri=str(stored),
         )
-
-    async def download_paper(self, paper: PaperRecord, preferred_formats: Sequence[str]) -> DownloadResult:
-        urls = self._candidate_urls(paper, preferred_formats)
-        if not urls:
-            raise ValueError(f"No downloadable artifacts for {paper.canonical_id}")
-        last_error: Exception | None = None
-        scope = self._storage_scopes()[0]
-        object_store = self._object_store(scope)
-        for target_url in urls:
-            try:
-                response = await self.client.get(target_url, headers={"User-Agent": self.settings.user_agent()})
-                response.raise_for_status()
-                content_type = response.headers.get("content-type", "")
-                if not self._is_artifact_response(target_url, content_type):
-                    last_error = ValueError(f"Rejected non-artifact response from {target_url} ({content_type or 'unknown'})")
-                    continue
-                suffix = self._artifact_suffix(target_url, content_type)
-                relative_path = self._scoped_relative_path(scope, self._artifact_leaf_path(paper, suffix))
-                stored = await object_store.put_bytes(relative_path, response.content)
-                return DownloadResult(
-                    canonical_id=paper.canonical_id,
-                    provider=paper.provider,
-                    path=str(stored),
-                    mime_type=response.headers.get("content-type"),
-                    bytes_written=len(response.content),
-                )
-            except Exception as exc:
-                last_error = exc
-        raise ValueError(f"No downloadable artifacts for {paper.canonical_id}") from last_error
-
-    def _candidate_urls(self, paper: PaperRecord, preferred_formats: Sequence[str]) -> list[str]:
-        urls: list[str] = []
-        preferred = {value.lower() for value in preferred_formats}
-        if "pdf" in preferred and paper.pdf_url:
-            urls.append(paper.pdf_url)
-        if preferred.intersection({"source", "text", "html"}):
-            urls.extend(url for url in paper.source_urls if url and url not in urls and self._looks_like_artifact_url(url))
-        return urls
 
     def _artifact_suffix(self, target_url: str, content_type: str) -> str:
         if content_type.startswith("application/pdf"):
@@ -490,16 +451,6 @@ class AnalystService:
             await self.repository.save_paper(paper)
         return paper
 
-    async def download_articles(self, identifiers: Sequence[str], preferred_formats: Sequence[str]) -> list[DownloadResult]:
-        results: list[DownloadResult] = []
-        for identifier in identifiers:
-            paper = await self.get_paper(identifier)
-            if paper is None:
-                continue
-            download = await self.downloads.download_paper(paper, preferred_formats)
-            results.append(download)
-        return results
-
     async def list_artifacts(self, identifier: str, provider: str | None = None) -> list[ArtifactRecord]:
         paper = await self.get_paper(identifier, provider=provider)
         if paper is None:
@@ -554,7 +505,6 @@ class AnalystService:
             mcp_tools=[
                 "search_literature",
                 "get_paper",
-                "download_articles",
                 "describe_capabilities",
                 "storage_health",
             ],

@@ -12,12 +12,6 @@ class Author(BaseModel):
     affiliation: str | None = None
 
 
-class DownloadCandidate(BaseModel):
-    url: str
-    label: str
-    mime_type: str | None = None
-
-
 class PaperRecord(BaseModel):
     canonical_id: str
     provider: str
@@ -47,14 +41,6 @@ class SearchResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     provider_status: dict[str, str] = Field(default_factory=dict)
     error: str | None = None
-
-
-class DownloadResult(BaseModel):
-    canonical_id: str
-    provider: str
-    path: str
-    mime_type: str | None = None
-    bytes_written: int
 
 
 class CapabilityResponse(BaseModel):

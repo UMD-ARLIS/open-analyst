@@ -19,6 +19,7 @@ import {
 import { refreshDocumentKnowledgeIndex } from '~/lib/knowledge-index.server';
 import { buildProjectArtifactUrls } from '~/lib/project-storage.server';
 import { sanitizeFilename, inferExtension } from '~/lib/file-utils';
+import { tavilyExtract } from '~/lib/tavily.server';
 import { normalizeUuid } from '~/lib/uuid';
 
 function normalizeWhitespace(value: string): string {
@@ -419,22 +420,38 @@ async function importWebItem(
   if (!project) throw new Error('Project not found');
   const url = String(item.sourceUrl || '').trim();
   if (!url) throw new Error('Web source is missing a URL');
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30_000);
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      headers: { 'User-Agent': 'open-analyst-headless' },
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timeout);
-  }
-  const contentType = response.headers.get('content-type') || 'text/html';
-  const raw = await response.text();
   const fetchedAt = new Date().toISOString();
-  const extractedText = contentType.includes('html') ? stripHtml(raw) : normalizeWhitespace(raw);
-  const title = item.title || extractHtmlTitle(raw) || new URL(url).hostname;
+
+  // Try Tavily Extract first for clean content extraction
+  let extractedText: string;
+  let title: string;
+  let extractionMethod: string;
+
+  const extracted = await tavilyExtract(url);
+  if (extracted && extracted.content) {
+    extractedText = extracted.content;
+    title = item.title || extracted.title || new URL(url).hostname;
+    extractionMethod = 'tavily';
+  } else {
+    // Fallback: raw fetch + HTML strip
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers: { 'User-Agent': 'open-analyst-headless' },
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+    const contentType = response.headers.get('content-type') || 'text/html';
+    const raw = await response.text();
+    extractedText = contentType.includes('html') ? stripHtml(raw) : normalizeWhitespace(raw);
+    title = item.title || extractHtmlTitle(raw) || new URL(url).hostname;
+    extractionMethod = 'fallback';
+  }
+
   const markdown = buildWebMarkdown({
     title,
     url,
@@ -464,7 +481,7 @@ async function importWebItem(
       bytes: stored.size,
       filename: stored.filename,
       storageBackend: stored.backend,
-      originalContentType: contentType,
+      extractionMethod,
       fetchedAt,
       batchId: batch.id,
       sourceUrl: url,

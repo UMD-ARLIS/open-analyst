@@ -24,6 +24,7 @@ export const env = createEnv({
     ARTIFACT_S3_REGION: z.string().default('us-east-1'),
     ARTIFACT_S3_PREFIX: z.string().default('open-analyst-vnext'),
     ARTIFACT_S3_ENDPOINT: z.string().default(''),
+    TAVILY_API_KEY: z.string().default(''),
   },
   runtimeEnv: process.env,
 });
