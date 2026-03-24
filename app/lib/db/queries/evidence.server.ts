@@ -1,6 +1,6 @@
-import { queryRow, queryRows } from "../index.server";
-import { type EvidenceItem } from "../schema";
-import { normalizeUuid } from "~/lib/uuid";
+import { queryRow, queryRows } from '../index.server';
+import { type EvidenceItem } from '../schema';
+import { normalizeUuid } from '~/lib/uuid';
 
 function jsonParam(value: unknown, fallback: unknown): string {
   return JSON.stringify(value !== undefined ? value : fallback);
@@ -19,7 +19,7 @@ export async function listEvidenceItems(
         AND ($2::uuid IS NULL OR collection_id = $2::uuid)
       ORDER BY updated_at DESC
     `,
-    [projectId, normalizedCollectionId],
+    [projectId, normalizedCollectionId]
   );
 }
 
@@ -64,17 +64,17 @@ export async function createEvidenceItem(
       normalizedCollectionId,
       input.documentId || null,
       input.artifactId || null,
-      String(input.title || "Untitled Evidence").trim(),
-      String(input.evidenceType || "note"),
+      String(input.title || 'Untitled Evidence').trim(),
+      String(input.evidenceType || 'note'),
       input.sourceUri || null,
-      String(input.citationText || ""),
-      String(input.extractedText || ""),
-      String(input.confidence || "medium"),
+      String(input.citationText || ''),
+      String(input.extractedText || ''),
+      String(input.confidence || 'medium'),
       jsonParam(input.provenance, {}),
       jsonParam(input.metadata, {}),
-    ],
+    ]
   );
-  if (!item) throw new Error("Evidence insert failed");
+  if (!item) throw new Error('Evidence insert failed');
   return item;
 }
 
@@ -89,7 +89,7 @@ export async function getEvidenceItem(
       WHERE project_id = $1 AND id = $2
       LIMIT 1
     `,
-    [projectId, evidenceId],
+    [projectId, evidenceId]
   );
 }
 
@@ -106,21 +106,21 @@ export async function updateEvidenceItem(
     artifactId?: string | null;
   }
 ): Promise<EvidenceItem> {
-  const clauses: string[] = ["updated_at = NOW()"];
+  const clauses: string[] = ['updated_at = NOW()'];
   const params: unknown[] = [];
-  if (typeof updates.title === "string") {
+  if (typeof updates.title === 'string') {
     params.push(updates.title.trim());
     clauses.push(`title = $${params.length}`);
   }
-  if (typeof updates.citationText === "string") {
+  if (typeof updates.citationText === 'string') {
     params.push(updates.citationText);
     clauses.push(`citation_text = $${params.length}`);
   }
-  if (typeof updates.extractedText === "string") {
+  if (typeof updates.extractedText === 'string') {
     params.push(updates.extractedText);
     clauses.push(`extracted_text = $${params.length}`);
   }
-  if (typeof updates.confidence === "string") {
+  if (typeof updates.confidence === 'string') {
     params.push(updates.confidence);
     clauses.push(`confidence = $${params.length}`);
   }
@@ -140,11 +140,11 @@ export async function updateEvidenceItem(
   const item = await queryRow<EvidenceItem>(
     `
       UPDATE evidence_items
-      SET ${clauses.join(", ")}
+      SET ${clauses.join(', ')}
       WHERE project_id = $${params.length - 1} AND id = $${params.length}
       RETURNING *
     `,
-    params,
+    params
   );
   if (!item) throw new Error(`Evidence not found: ${evidenceId}`);
   return item;

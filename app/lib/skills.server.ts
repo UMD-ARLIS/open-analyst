@@ -22,12 +22,7 @@ function defaultSkillRecords(): SkillConfig[] {
       type: 'builtin',
       enabled: true,
       config: {
-        tools: [
-          'web_search',
-          'web_fetch',
-          'hf_daily_papers',
-          'hf_paper',
-        ],
+        tools: ['web_search', 'web_fetch', 'hf_daily_papers', 'hf_paper'],
       },
       createdAt: ts,
     },
@@ -77,12 +72,7 @@ function builtinRuntimeSkills(): Skill[] {
       type: 'builtin',
       enabled: true,
       createdAt: ts,
-      tools: [
-        'web_search',
-        'web_fetch',
-        'hf_daily_papers',
-        'hf_paper',
-      ],
+      tools: ['web_search', 'web_fetch', 'hf_daily_papers', 'hf_paper'],
       instructions:
         'Use this skill when the task requires external research, source discovery, web retrieval, or Hugging Face paper capture. Prefer cited, source-grounded answers.',
       source: { kind: 'builtin' },
@@ -106,9 +96,9 @@ function builtinRuntimeSkills(): Skill[] {
         'generate_file',
       ],
       instructions:
-        'Use this skill when the task requires inspecting, editing, or executing code and workspace files. '
-        + 'Use generate_file (not execute_command) to create binary files like DOCX, PDF, XLSX, or images. '
-        + 'Stay within the project workspace and prefer direct file inspection before editing.',
+        'Use this skill when the task requires inspecting, editing, or executing code and workspace files. ' +
+        'Use generate_file (not execute_command) to create binary files like DOCX, PDF, XLSX, or images. ' +
+        'Stay within the project workspace and prefer direct file inspection before editing.',
       source: { kind: 'builtin' },
       config: {},
     },
@@ -276,7 +266,12 @@ function getSkillAliases(skill: Skill): string[] {
   };
 
   add(skill.name);
-  add(skill.id.replace(/^repo-skill-/, '').replace(/^builtin-/, '').replace(/[-_]+/g, ' '));
+  add(
+    skill.id
+      .replace(/^repo-skill-/, '')
+      .replace(/^builtin-/, '')
+      .replace(/[-_]+/g, ' ')
+  );
   add(skill.source?.path ? path.basename(skill.source.path).replace(/\.[^.]+$/, '') : '');
 
   return Array.from(aliases);
@@ -336,7 +331,11 @@ export function selectMatchedSkills(
         .reverse()
         .find((message) => message?.role === 'user' && String(message?.content || '').trim())
     : null;
-  const fullText = prompt || String(latestUserText?.content || '').trim().toLowerCase();
+  const fullText =
+    prompt ||
+    String(latestUserText?.content || '')
+      .trim()
+      .toLowerCase();
   const normalizedPrompt = normalizeText(prompt);
   const normalizedFullText = normalizeText(fullText);
 

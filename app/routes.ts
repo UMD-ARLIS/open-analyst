@@ -1,63 +1,99 @@
-import { type RouteConfig, index, route, layout, prefix } from "@react-router/dev/routes";
+import { type RouteConfig, index, route, layout, prefix } from '@react-router/dev/routes';
 
 export default [
-  layout("routes/_app.tsx", [
-    index("routes/_app._index.tsx"),
-    route("projects/:projectId", "routes/_app.projects.$projectId.tsx"),
-    route("projects/:projectId/threads/:threadId", "routes/_app.projects.$projectId.threads.$threadId.tsx"),
-    route("projects/:projectId/evidence", "routes/_app.projects.$projectId.evidence.tsx"),
-    route("projects/:projectId/artifacts", "routes/_app.projects.$projectId.artifacts.tsx"),
-    route("settings", "routes/_app.settings.tsx"),
+  layout('routes/_app.tsx', [
+    index('routes/_app._index.tsx'),
+    route('projects/:projectId', 'routes/_app.projects.$projectId.tsx'),
+    route(
+      'projects/:projectId/threads/:threadId',
+      'routes/_app.projects.$projectId.threads.$threadId.tsx'
+    ),
+    route('projects/:projectId/evidence', 'routes/_app.projects.$projectId.evidence.tsx'),
+    route('projects/:projectId/artifacts', 'routes/_app.projects.$projectId.artifacts.tsx'),
+    route('settings', 'routes/_app.settings.tsx'),
   ]),
 
-  ...prefix("api", [
-    route("health", "routes/api.health.ts"),
-    route("config", "routes/api.config.ts"),
-    route("workdir", "routes/api.workdir.ts"),
-    route("tools", "routes/api.tools.ts"),
-    route("credentials", "routes/api.credentials.ts"),
-    route("credentials/:id", "routes/api.credentials.$id.ts"),
-    route("mcp/presets", "routes/api.mcp.presets.ts"),
-    route("mcp/servers", "routes/api.mcp.servers.ts"),
-    route("mcp/servers/:id", "routes/api.mcp.servers.$id.ts"),
-    route("mcp/status", "routes/api.mcp.status.ts"),
-    route("mcp/tools", "routes/api.mcp.tools.ts"),
-    route("skills", "routes/api.skills.ts"),
-    route("skills/validate", "routes/api.skills.validate.ts"),
-    route("skills/install", "routes/api.skills.install.ts"),
-    route("skills/:id", "routes/api.skills.$id.ts"),
-    route("skills/:id/enabled", "routes/api.skills.$id.enabled.ts"),
-    route("logs", "routes/api.logs.ts"),
-    route("logs/enabled", "routes/api.logs.enabled.ts"),
-    route("logs/export", "routes/api.logs.export.ts"),
-    route("logs/clear", "routes/api.logs.clear.ts"),
-    route("projects", "routes/api.projects.ts"),
-    route("projects/active", "routes/api.projects.active.ts"),
-    route("projects/:projectId", "routes/api.projects.$projectId.ts"),
-    route("projects/:projectId/knowledge", "routes/api.projects.$projectId.knowledge.ts"),
-    route("projects/:projectId/source-ingest", "routes/api.projects.$projectId.source-ingest.ts"),
-    route("projects/:projectId/source-ingest/:batchId/approve", "routes/api.projects.$projectId.source-ingest.$batchId.approve.ts"),
-    route("projects/:projectId/source-ingest/:batchId/reject", "routes/api.projects.$projectId.source-ingest.$batchId.reject.ts"),
-    route("projects/:projectId/evidence", "routes/api.projects.$projectId.evidence.ts"),
-    route("projects/:projectId/canvas-documents", "routes/api.projects.$projectId.canvas-documents.ts"),
-    route("projects/:projectId/canvas-documents/:documentId/publish", "routes/api.projects.$projectId.canvas-documents.$documentId.publish.ts"),
-    route("projects/:projectId/collections", "routes/api.projects.$projectId.collections.ts"),
-    route("projects/:projectId/collections/ensure", "routes/api.projects.$projectId.collections.ensure.ts"),
-    route("projects/:projectId/documents", "routes/api.projects.$projectId.documents.ts"),
-    route("projects/:projectId/artifacts", "routes/api.projects.$projectId.artifacts.ts"),
-    route("projects/:projectId/artifacts/:artifactId/content", "routes/api.projects.$projectId.artifacts.$artifactId.content.ts"),
-    route("projects/:projectId/artifacts/:artifactId/versions", "routes/api.projects.$projectId.artifacts.$artifactId.versions.ts"),
-    route("projects/:projectId/documents/:documentId/artifact", "routes/api.projects.$projectId.documents.$documentId.artifact.ts"),
-    route("projects/:projectId/analyst-mcp/papers/:identifier/artifact", "routes/api.projects.$projectId.analyst-mcp.papers.$identifier.artifact.ts"),
-    route("projects/:projectId/artifacts/capture", "routes/api.projects.$projectId.artifacts.capture.ts"),
-    route("projects/:projectId/import/url", "routes/api.projects.$projectId.import.url.ts"),
-    route("projects/:projectId/import/file", "routes/api.projects.$projectId.import.file.ts"),
-    route("projects/:projectId/rag/query", "routes/api.projects.$projectId.rag.query.ts"),
-    route("projects/:projectId/memory", "routes/api.projects.$projectId.memory.ts"),
-    route("projects/:projectId/memory/:memoryId", "routes/api.projects.$projectId.memory.$memoryId.ts"),
-    route("models", "routes/api.models.ts"),
-    route("debug/store", "routes/api.debug.store.ts"),
+  ...prefix('api', [
+    route('health', 'routes/api.health.ts'),
+    route('config', 'routes/api.config.ts'),
+    route('workdir', 'routes/api.workdir.ts'),
+    route('tools', 'routes/api.tools.ts'),
+    route('credentials', 'routes/api.credentials.ts'),
+    route('credentials/:id', 'routes/api.credentials.$id.ts'),
+    route('mcp/presets', 'routes/api.mcp.presets.ts'),
+    route('mcp/servers', 'routes/api.mcp.servers.ts'),
+    route('mcp/servers/:id', 'routes/api.mcp.servers.$id.ts'),
+    route('mcp/status', 'routes/api.mcp.status.ts'),
+    route('mcp/tools', 'routes/api.mcp.tools.ts'),
+    route('skills', 'routes/api.skills.ts'),
+    route('skills/validate', 'routes/api.skills.validate.ts'),
+    route('skills/install', 'routes/api.skills.install.ts'),
+    route('skills/:id', 'routes/api.skills.$id.ts'),
+    route('skills/:id/enabled', 'routes/api.skills.$id.enabled.ts'),
+    route('logs', 'routes/api.logs.ts'),
+    route('logs/enabled', 'routes/api.logs.enabled.ts'),
+    route('logs/export', 'routes/api.logs.export.ts'),
+    route('logs/clear', 'routes/api.logs.clear.ts'),
+    route('projects', 'routes/api.projects.ts'),
+    route('projects/active', 'routes/api.projects.active.ts'),
+    route('projects/:projectId', 'routes/api.projects.$projectId.ts'),
+    route('projects/:projectId/knowledge', 'routes/api.projects.$projectId.knowledge.ts'),
+    route('projects/:projectId/source-ingest', 'routes/api.projects.$projectId.source-ingest.ts'),
+    route(
+      'projects/:projectId/source-ingest/:batchId/approve',
+      'routes/api.projects.$projectId.source-ingest.$batchId.approve.ts'
+    ),
+    route(
+      'projects/:projectId/source-ingest/:batchId/reject',
+      'routes/api.projects.$projectId.source-ingest.$batchId.reject.ts'
+    ),
+    route('projects/:projectId/evidence', 'routes/api.projects.$projectId.evidence.ts'),
+    route(
+      'projects/:projectId/canvas-documents',
+      'routes/api.projects.$projectId.canvas-documents.ts'
+    ),
+    route(
+      'projects/:projectId/canvas-documents/:documentId/publish',
+      'routes/api.projects.$projectId.canvas-documents.$documentId.publish.ts'
+    ),
+    route('projects/:projectId/collections', 'routes/api.projects.$projectId.collections.ts'),
+    route(
+      'projects/:projectId/collections/ensure',
+      'routes/api.projects.$projectId.collections.ensure.ts'
+    ),
+    route('projects/:projectId/documents', 'routes/api.projects.$projectId.documents.ts'),
+    route('projects/:projectId/artifacts', 'routes/api.projects.$projectId.artifacts.ts'),
+    route(
+      'projects/:projectId/artifacts/:artifactId/content',
+      'routes/api.projects.$projectId.artifacts.$artifactId.content.ts'
+    ),
+    route(
+      'projects/:projectId/artifacts/:artifactId/versions',
+      'routes/api.projects.$projectId.artifacts.$artifactId.versions.ts'
+    ),
+    route(
+      'projects/:projectId/documents/:documentId/artifact',
+      'routes/api.projects.$projectId.documents.$documentId.artifact.ts'
+    ),
+    route(
+      'projects/:projectId/analyst-mcp/papers/:identifier/artifact',
+      'routes/api.projects.$projectId.analyst-mcp.papers.$identifier.artifact.ts'
+    ),
+    route(
+      'projects/:projectId/artifacts/capture',
+      'routes/api.projects.$projectId.artifacts.capture.ts'
+    ),
+    route('projects/:projectId/import/url', 'routes/api.projects.$projectId.import.url.ts'),
+    route('projects/:projectId/import/file', 'routes/api.projects.$projectId.import.file.ts'),
+    route('projects/:projectId/rag/query', 'routes/api.projects.$projectId.rag.query.ts'),
+    route('projects/:projectId/memory', 'routes/api.projects.$projectId.memory.ts'),
+    route(
+      'projects/:projectId/memory/:memoryId',
+      'routes/api.projects.$projectId.memory.$memoryId.ts'
+    ),
+    route('models', 'routes/api.models.ts'),
+    route('debug/store', 'routes/api.debug.store.ts'),
   ]),
 
-  route("*", "routes/_catchall.tsx"),
+  route('*', 'routes/_catchall.tsx'),
 ] satisfies RouteConfig;

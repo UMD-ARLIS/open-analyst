@@ -1,3 +1,13 @@
+# Local development stack.
+#
+# 1. Copy .env.example to .env and fill in required values.
+# 2. Run: docker compose up -d
+#
+# The Postgres service creates the database.  Application services read
+# .env for secrets/config and .env.docker for container-aware host
+# overrides (localhost → container names).  The .env.docker file is
+# loaded AFTER .env, so its values win for keys that appear in both.
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -17,5 +27,65 @@ services:
       timeout: 5s
       retries: 5
 
+  webapp:
+    build: .
+    ports:
+      - "5173:5173"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      runtime:
+        condition: service_started
+      analyst-mcp:
+        condition: service_started
+    env_file:
+      - .env
+      - .env.docker
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5173/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  runtime:
+    build: services/langgraph-runtime
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+      - .env.docker
+    volumes:
+      - workspaces:/home/appuser/.config/open-analyst/workspaces
+      - captures:/home/appuser/.config/open-analyst/captures
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  analyst-mcp:
+    build: services/analyst-mcp
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+      - .env.docker
+    volumes:
+      - analyst-mcp-data:/var/open-analyst/analyst-mcp/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
 volumes:
   pgdata:
+  workspaces:
+  captures:
+  analyst-mcp-data:

@@ -71,7 +71,7 @@ export function SandboxSyncToast({ status }: Props) {
   const isError = status.phase === 'error';
 
   return (
-    <div 
+    <div
       className={`fixed bottom-4 right-4 z-40 transition-all duration-300 ${
         fadeOut ? 'opacity-0 translate-y-2' : 'opacity-100 translate-y-0'
       }`}
@@ -79,21 +79,17 @@ export function SandboxSyncToast({ status }: Props) {
       <div className="bg-surface/95 backdrop-blur-sm border border-border rounded-2xl shadow-xl max-w-sm overflow-hidden">
         {/* Header */}
         <div className="flex items-center gap-3 px-4 py-3">
-          <div className={`text-xl ${isComplete ? '' : 'animate-pulse'}`}>
-            {config.icon}
-          </div>
+          <div className={`text-xl ${isComplete ? '' : 'animate-pulse'}`}>{config.icon}</div>
           <div className="flex-1 min-w-0">
-            <p className={`font-medium text-sm ${
-              isComplete ? 'text-green-500' : 
-              isError ? 'text-red-500' : 
-              'text-accent'
-            }`}>
+            <p
+              className={`font-medium text-sm ${
+                isComplete ? 'text-green-500' : isError ? 'text-red-500' : 'text-accent'
+              }`}
+            >
               {status.message}
             </p>
             {status.detail && (
-              <p className="text-xs text-text-muted mt-0.5 truncate">
-                {status.detail}
-              </p>
+              <p className="text-xs text-text-muted mt-0.5 truncate">{status.detail}</p>
             )}
           </div>
           {!isComplete && !isError && (
@@ -116,7 +112,8 @@ export function SandboxSyncToast({ status }: Props) {
           <div className="px-4 py-2.5 bg-accent-muted/50 border-t border-border">
             <p className="text-xs text-text-secondary leading-relaxed">
               Syncing project files to isolated sandbox for secure code execution.
-              <span className="text-accent font-medium"> First sync is slower</span>, incremental syncs will be faster.
+              <span className="text-accent font-medium"> First sync is slower</span>, incremental
+              syncs will be faster.
             </p>
           </div>
         )}

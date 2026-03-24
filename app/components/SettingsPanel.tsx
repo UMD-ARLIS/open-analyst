@@ -15,10 +15,7 @@ import {
 import { useAppStore } from '~/lib/store';
 import { AlertDialog } from './AlertDialog';
 import type { AppConfig, Skill } from '~/lib/types';
-import {
-  getBrowserConfig,
-  saveBrowserConfig,
-} from '~/lib/browser-config';
+import { getBrowserConfig, saveBrowserConfig } from '~/lib/browser-config';
 import { supportsToolCalling } from '~/lib/model-capabilities';
 import {
   headlessGetCredentials,
@@ -116,7 +113,6 @@ export function SettingsPanel({
   initialData,
   variant = 'modal',
 }: SettingsPanelProps) {
-
   if (!isOpen) return null;
 
   const content = (
@@ -146,8 +142,14 @@ export function SettingsPanel({
 
       <div className="flex-1 overflow-y-auto p-5">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold">{TABS.find((tab) => tab.id === activeTab)?.label}</h3>
-          <button onClick={onClose} className="p-2 rounded hover:bg-surface-hover" aria-label="Close settings">
+          <h3 className="text-lg font-semibold">
+            {TABS.find((tab) => tab.id === activeTab)?.label}
+          </h3>
+          <button
+            onClick={onClose}
+            className="p-2 rounded hover:bg-surface-hover"
+            aria-label="Close settings"
+          >
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -155,7 +157,12 @@ export function SettingsPanel({
         {activeTab === 'api' && <APISettingsTab currentModel={initialData?.currentModel} />}
         {activeTab === 'sandbox' && <SandboxTab />}
         {activeTab === 'credentials' && <CredentialsTab initialItems={initialData?.credentials} />}
-        {activeTab === 'connectors' && <ConnectorsTab initialServers={initialData?.mcpServers} initialPresets={initialData?.mcpPresets} />}
+        {activeTab === 'connectors' && (
+          <ConnectorsTab
+            initialServers={initialData?.mcpServers}
+            initialPresets={initialData?.mcpPresets}
+          />
+        )}
         {activeTab === 'skills' && <SkillsTab initialSkills={initialData?.skills} />}
         {activeTab === 'logs' && <LogsTab initialEnabled={initialData?.logsEnabled} />}
       </div>
@@ -172,7 +179,9 @@ export function APISettingsTab({ currentModel }: { currentModel?: string }) {
   const [model, setModel] = useState(currentModel || config.model || '');
   const [customModel, setCustomModel] = useState('');
   const [useCustomModel, setUseCustomModel] = useState(false);
-  const [models, setModels] = useState<Array<{ id: string; name: string; supportsTools: boolean }>>([]);
+  const [models, setModels] = useState<Array<{ id: string; name: string; supportsTools: boolean }>>(
+    []
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -189,7 +198,9 @@ export function APISettingsTab({ currentModel }: { currentModel?: string }) {
           }
         }
       })
-      .catch((e) => setError(`Failed to load models: ${e instanceof Error ? e.message : String(e)}`))
+      .catch((e) =>
+        setError(`Failed to load models: ${e instanceof Error ? e.message : String(e)}`)
+      )
       .finally(() => setLoading(false));
   }, []);
 
@@ -200,7 +211,9 @@ export function APISettingsTab({ currentModel }: { currentModel?: string }) {
       return;
     }
     if (!supportsToolCalling(resolvedModel)) {
-      setError('This model does not appear to support tool calling. Choose a tool-capable model such as Claude Sonnet or Opus.');
+      setError(
+        'This model does not appear to support tool calling. Choose a tool-capable model such as Claude Sonnet or Opus.'
+      );
       return;
     }
     const next: AppConfig = {
@@ -222,13 +235,18 @@ export function APISettingsTab({ currentModel }: { currentModel?: string }) {
       {error && <Banner tone="error" text={error} />}
       {success && <Banner tone="success" text={success} />}
       <p className="text-sm text-text-secondary">
-        Models are served through the LiteLLM gateway. Open Analyst requires a model that supports tool calling.
+        Models are served through the LiteLLM gateway. Open Analyst requires a model that supports
+        tool calling.
       </p>
-      <label className="text-sm">Model
+      <label className="text-sm">
+        Model
         <select
           className="input mt-1"
           value={model}
-          onChange={(e) => { setModel(e.target.value); setUseCustomModel(false); }}
+          onChange={(e) => {
+            setModel(e.target.value);
+            setUseCustomModel(false);
+          }}
           disabled={loading}
         >
           {loading && <option>Loading models...</option>}
@@ -239,7 +257,8 @@ export function APISettingsTab({ currentModel }: { currentModel?: string }) {
           ))}
         </select>
       </label>
-      <label className="text-sm">Custom Model (optional)
+      <label className="text-sm">
+        Custom Model (optional)
         <input
           className="input mt-1"
           value={useCustomModel ? customModel : ''}
@@ -264,14 +283,20 @@ export function APISettingsTab({ currentModel }: { currentModel?: string }) {
 function SandboxTab() {
   return (
     <div className="space-y-3">
-      <Banner tone="info" text="Sandbox controls are removed in headless mode. Isolation is handled by your container/VM runtime." />
-      <p className="text-sm text-text-secondary">Configure host-level security (container user, seccomp/apparmor, IAM, network policy) outside this app.</p>
+      <Banner
+        tone="info"
+        text="Sandbox controls are removed in headless mode. Isolation is handled by your container/VM runtime."
+      />
+      <p className="text-sm text-text-secondary">
+        Configure host-level security (container user, seccomp/apparmor, IAM, network policy)
+        outside this app.
+      </p>
     </div>
   );
 }
 
 export function CredentialsTab({ initialItems }: { initialItems?: any[] }) {
-  const [items, setItems] = useState<Credential[]>(initialItems as Credential[] || []);
+  const [items, setItems] = useState<Credential[]>((initialItems as Credential[]) || []);
   const [error, setError] = useState('');
   const [draft, setDraft] = useState<Partial<Credential>>({ type: 'api' });
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -286,7 +311,9 @@ export function CredentialsTab({ initialItems }: { initialItems?: any[] }) {
     }
   };
 
-  useEffect(() => { if (!initialItems) void load(); }, []);
+  useEffect(() => {
+    if (!initialItems) void load();
+  }, []);
 
   const save = async () => {
     if (!draft.name?.trim() || !draft.username?.trim()) return;
@@ -339,18 +366,37 @@ export function CredentialsTab({ initialItems }: { initialItems?: any[] }) {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
         <label className="text-sm">
           <span className="sr-only">Credential name</span>
-          <input className="input" placeholder="Name" value={draft.name || ''} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} />
+          <input
+            className="input"
+            placeholder="Name"
+            value={draft.name || ''}
+            onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+          />
         </label>
         <label className="text-sm">
           <span className="sr-only">Username</span>
-          <input className="input" placeholder="Username" value={draft.username || ''} onChange={(e) => setDraft((d) => ({ ...d, username: e.target.value }))} />
+          <input
+            className="input"
+            placeholder="Username"
+            value={draft.username || ''}
+            onChange={(e) => setDraft((d) => ({ ...d, username: e.target.value }))}
+          />
         </label>
         <label className="text-sm">
           <span className="sr-only">Secret or password</span>
-          <input className="input" placeholder="Secret/Password" type="password" value={draft.password || ''} autoComplete="new-password" onChange={(e) => setDraft((d) => ({ ...d, password: e.target.value }))} />
+          <input
+            className="input"
+            placeholder="Secret/Password"
+            type="password"
+            value={draft.password || ''}
+            autoComplete="new-password"
+            onChange={(e) => setDraft((d) => ({ ...d, password: e.target.value }))}
+          />
         </label>
       </div>
-      <button className="btn btn-primary" onClick={() => void save()} disabled={isSaving}>{editingId ? 'Update' : 'Save'} Credential</button>
+      <button className="btn btn-primary" onClick={() => void save()} disabled={isSaving}>
+        {editingId ? 'Update' : 'Save'} Credential
+      </button>
 
       <div className="space-y-2">
         {items.map((item) => (
@@ -364,7 +410,15 @@ export function CredentialsTab({ initialItems }: { initialItems?: any[] }) {
               <div className="text-xs text-text-muted">{item.username}</div>
             </div>
             <div className="flex gap-2">
-              <button className="btn btn-secondary" onClick={() => { setEditingId(item.id); setDraft(item); }}>Edit</button>
+              <button
+                className="btn btn-secondary"
+                onClick={() => {
+                  setEditingId(item.id);
+                  setDraft(item);
+                }}
+              >
+                Edit
+              </button>
               <button
                 className="btn btn-ghost text-error"
                 onClick={() => handleDelete(item.id)}
@@ -387,7 +441,9 @@ export function ConnectorsTab({
   initialServers?: MCPServerConfig[];
   initialPresets?: Record<string, SettingsPresetServer>;
 }) {
-  const [servers, setServers] = useState<MCPServerConfig[]>(initialServers as MCPServerConfig[] || []);
+  const [servers, setServers] = useState<MCPServerConfig[]>(
+    (initialServers as MCPServerConfig[]) || []
+  );
   const [statuses, setStatuses] = useState<
     Array<{
       id: string;
@@ -432,10 +488,7 @@ export function ConnectorsTab({
 
   const refreshStatus = async () => {
     try {
-      const [st, t] = await Promise.all([
-        headlessGetMcpServerStatus(),
-        headlessGetMcpTools(),
-      ]);
+      const [st, t] = await Promise.all([headlessGetMcpServerStatus(), headlessGetMcpTools()]);
       setStatuses(st);
       setTools(t);
       setError('');
@@ -500,13 +553,16 @@ export function ConnectorsTab({
       {error && <Banner tone="error" text={error} />}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
         {Object.keys(presets).map((key) => (
-          <button key={key} className="btn btn-secondary" onClick={() => addPreset(key)}>Add Preset: {presets[key].name || key}</button>
+          <button key={key} className="btn btn-secondary" onClick={() => addPreset(key)}>
+            Add Preset: {presets[key].name || key}
+          </button>
         ))}
       </div>
       <div className="space-y-2">
         {servers.map((server) => {
           const status = statuses.find((s) => s.id === server.id);
-          const count = tools.filter((t) => t.serverId === server.id).length || status?.toolCount || 0;
+          const count =
+            tools.filter((t) => t.serverId === server.id).length || status?.toolCount || 0;
           return (
             <div
               key={server.id}
@@ -517,14 +573,16 @@ export function ConnectorsTab({
                 <div className="text-sm font-medium">{server.name}</div>
                 <div className="text-xs text-text-muted">
                   {server.alias ? `${server.alias} • ` : ''}
-                  {server.type} • {status?.connected ? 'connected' : server.enabled ? 'error' : 'disabled'} • {count} tools
+                  {server.type} •{' '}
+                  {status?.connected ? 'connected' : server.enabled ? 'error' : 'disabled'} •{' '}
+                  {count} tools
                 </div>
-                {status?.error && (
-                  <div className="text-xs text-error mt-1">{status.error}</div>
-                )}
+                {status?.error && <div className="text-xs text-error mt-1">{status.error}</div>}
               </div>
               <div className="flex gap-2">
-                <button className="btn btn-secondary" onClick={() => toggleServer(server)}>{server.enabled ? 'Disable' : 'Enable'}</button>
+                <button className="btn btn-secondary" onClick={() => toggleServer(server)}>
+                  {server.enabled ? 'Disable' : 'Enable'}
+                </button>
                 <button
                   className="btn btn-ghost text-error"
                   onClick={() => deleteServer(server.id)}
@@ -542,13 +600,13 @@ export function ConnectorsTab({
 }
 
 function SkillsTab({ initialSkills }: { initialSkills?: any[] }) {
-  const [skills, setSkills] = useState<Skill[]>(initialSkills as Skill[] || []);
+  const [skills, setSkills] = useState<Skill[]>((initialSkills as Skill[]) || []);
   const [error, setError] = useState('');
   const [showInstallDialog, setShowInstallDialog] = useState(false);
 
   const load = async () => {
     try {
-      setSkills(await headlessGetSkills() as any);
+      setSkills((await headlessGetSkills()) as any);
       setError('');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -602,7 +660,9 @@ function SkillsTab({ initialSkills }: { initialSkills?: any[] }) {
   return (
     <div className="space-y-3">
       {error && <Banner tone="error" text={error} />}
-      <button className="btn btn-primary" onClick={() => setShowInstallDialog(true)}>Install Skill From Path</button>
+      <button className="btn btn-primary" onClick={() => setShowInstallDialog(true)}>
+        Install Skill From Path
+      </button>
       {showInstallDialog && (
         <AlertDialog
           open={showInstallDialog}
@@ -625,7 +685,9 @@ function SkillsTab({ initialSkills }: { initialSkills?: any[] }) {
               <div className="text-xs text-text-muted">{skill.type}</div>
             </div>
             <div className="flex gap-2">
-              <button className="btn btn-secondary" onClick={() => void toggleEnabled(skill)}>{skill.enabled ? 'Disable' : 'Enable'}</button>
+              <button className="btn btn-secondary" onClick={() => void toggleEnabled(skill)}>
+                {skill.enabled ? 'Disable' : 'Enable'}
+              </button>
               {skill.type !== 'builtin' && (
                 <button
                   className="btn btn-ghost text-error"
@@ -644,7 +706,9 @@ function SkillsTab({ initialSkills }: { initialSkills?: any[] }) {
 }
 
 export function LogsTab({ initialEnabled }: { initialEnabled?: boolean }) {
-  const [files, setFiles] = useState<Array<{ name: string; path: string; size: number; mtime: string | Date }>>([]);
+  const [files, setFiles] = useState<
+    Array<{ name: string; path: string; size: number; mtime: string | Date }>
+  >([]);
   const [dir, setDir] = useState('');
   const [enabled, setEnabled] = useState(initialEnabled ?? true);
   const [error, setError] = useState('');
@@ -703,14 +767,27 @@ export function LogsTab({ initialEnabled }: { initialEnabled?: boolean }) {
       {error && <Banner tone="error" text={error} />}
       {success && <Banner tone="success" text={success} />}
       <div className="flex gap-2">
-        <button className="btn btn-secondary" onClick={() => void toggleEnabled()}>{enabled ? 'Disable Dev Logs' : 'Enable Dev Logs'}</button>
-        <button className="btn btn-secondary" onClick={() => void exportLogs()}>Export</button>
-        <button className="btn btn-ghost text-error" onClick={() => void clearLogs()}>Clear</button>
+        <button className="btn btn-secondary" onClick={() => void toggleEnabled()}>
+          {enabled ? 'Disable Dev Logs' : 'Enable Dev Logs'}
+        </button>
+        <button className="btn btn-secondary" onClick={() => void exportLogs()}>
+          Export
+        </button>
+        <button className="btn btn-ghost text-error" onClick={() => void clearLogs()}>
+          Clear
+        </button>
       </div>
-      {dir && <div className="text-xs text-text-muted">Directory: <span className="font-mono">{dir}</span></div>}
+      {dir && (
+        <div className="text-xs text-text-muted">
+          Directory: <span className="font-mono">{dir}</span>
+        </div>
+      )}
       <div className="space-y-1 max-h-[380px] overflow-y-auto">
         {files.map((file) => (
-          <div key={file.path} className="p-2 rounded border border-border bg-surface-muted text-sm flex justify-between">
+          <div
+            key={file.path}
+            className="p-2 rounded border border-border bg-surface-muted text-sm flex justify-between"
+          >
             <span className="font-mono truncate max-w-[60%]">{file.name}</span>
             <span className="text-text-muted text-xs">{(file.size / 1024).toFixed(1)} KB</span>
           </div>
@@ -721,11 +798,12 @@ export function LogsTab({ initialEnabled }: { initialEnabled?: boolean }) {
 }
 
 export function Banner({ tone, text }: { tone: 'error' | 'success' | 'info'; text: string }) {
-  const style = tone === 'error'
-    ? 'bg-error/10 text-error'
-    : tone === 'success'
-      ? 'bg-success/10 text-success'
-      : 'bg-blue-500/10 text-blue-600';
+  const style =
+    tone === 'error'
+      ? 'bg-error/10 text-error'
+      : tone === 'success'
+        ? 'bg-success/10 text-success'
+        : 'bg-blue-500/10 text-blue-600';
   return (
     <div className={`px-3 py-2 rounded-lg text-sm flex items-center gap-2 ${style}`}>
       {tone === 'error' && <AlertCircle className="w-4 h-4" />}

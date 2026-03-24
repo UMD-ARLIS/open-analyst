@@ -41,7 +41,7 @@ export function AlertDialog({
   if (!open) return null;
 
   const handleConfirm = () => {
-    onConfirm(inputLabel ? inputRef.current?.value ?? inputDefaultValue : undefined);
+    onConfirm(inputLabel ? (inputRef.current?.value ?? inputDefaultValue) : undefined);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -52,7 +52,11 @@ export function AlertDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60" onClick={onCancel} onKeyDown={handleKeyDown}>
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60"
+      onClick={onCancel}
+      onKeyDown={handleKeyDown}
+    >
       <div
         className="bg-surface rounded-xl border border-border shadow-2xl p-0 w-full max-w-md mx-4"
         onClick={(e) => e.stopPropagation()}
@@ -65,7 +69,9 @@ export function AlertDialog({
 
           {inputLabel && (
             <div className="space-y-1">
-              <label htmlFor={inputId} className="text-sm text-text-secondary">{inputLabel}</label>
+              <label htmlFor={inputId} className="text-sm text-text-secondary">
+                {inputLabel}
+              </label>
               <input
                 key={`${inputId}:${inputDefaultValue}`}
                 id={inputId}

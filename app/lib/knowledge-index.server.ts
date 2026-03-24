@@ -1,21 +1,22 @@
-import { getDocument, updateDocumentEmbedding, updateDocumentMetadata } from "~/lib/db/queries/documents.server";
+import {
+  getDocument,
+  updateDocumentEmbedding,
+  updateDocumentMetadata,
+} from '~/lib/db/queries/documents.server';
 import {
   buildKnowledgeEmbeddingText,
   embedKnowledgeTexts,
   isKnowledgeEmbeddingConfigured,
-} from "~/lib/knowledge-embedding.server";
+} from '~/lib/knowledge-embedding.server';
 
-export async function refreshDocumentKnowledgeIndex(
-  projectId: string,
-  documentId: string
-) {
+export async function refreshDocumentKnowledgeIndex(projectId: string, documentId: string) {
   const document = await getDocument(projectId, documentId);
   if (!document) {
     return null;
   }
 
   const metadata =
-    document.metadata && typeof document.metadata === "object"
+    document.metadata && typeof document.metadata === 'object'
       ? { ...(document.metadata as Record<string, unknown>) }
       : {};
   const input = buildKnowledgeEmbeddingText({
@@ -26,8 +27,8 @@ export async function refreshDocumentKnowledgeIndex(
   if (!input) {
     const updated = await updateDocumentMetadata(projectId, documentId, {
       ...metadata,
-      knowledgeIndexStatus: "skipped",
-      knowledgeIndexError: "No indexable text was available for this document.",
+      knowledgeIndexStatus: 'skipped',
+      knowledgeIndexError: 'No indexable text was available for this document.',
     });
     await updateDocumentEmbedding(projectId, documentId, null);
     return updated;
@@ -36,9 +37,8 @@ export async function refreshDocumentKnowledgeIndex(
   if (!isKnowledgeEmbeddingConfigured()) {
     const updated = await updateDocumentMetadata(projectId, documentId, {
       ...metadata,
-      knowledgeIndexStatus: "skipped",
-      knowledgeIndexError:
-        "LITELLM_EMBEDDING_MODEL is not configured for Open Analyst knowledge.",
+      knowledgeIndexStatus: 'skipped',
+      knowledgeIndexError: 'LITELLM_EMBEDDING_MODEL is not configured for Open Analyst knowledge.',
     });
     await updateDocumentEmbedding(projectId, documentId, null);
     return updated;
@@ -49,7 +49,7 @@ export async function refreshDocumentKnowledgeIndex(
     await updateDocumentEmbedding(projectId, documentId, embedding || null);
     return await updateDocumentMetadata(projectId, documentId, {
       ...metadata,
-      knowledgeIndexStatus: "indexed",
+      knowledgeIndexStatus: 'indexed',
       knowledgeIndexError: null,
       knowledgeIndexedAt: new Date().toISOString(),
     });
@@ -57,9 +57,8 @@ export async function refreshDocumentKnowledgeIndex(
     await updateDocumentEmbedding(projectId, documentId, null);
     return await updateDocumentMetadata(projectId, documentId, {
       ...metadata,
-      knowledgeIndexStatus: "error",
-      knowledgeIndexError:
-        error instanceof Error ? error.message : String(error),
+      knowledgeIndexStatus: 'error',
+      knowledgeIndexError: error instanceof Error ? error.message : String(error),
     });
   }
 }

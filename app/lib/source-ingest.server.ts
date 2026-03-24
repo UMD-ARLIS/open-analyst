@@ -1,13 +1,13 @@
-import { buildProjectMcpHeaders, getAnalystMcpServer } from "~/lib/mcp.server";
-import { readArtifact, storeArtifact } from "~/lib/artifacts.server";
+import { buildProjectMcpHeaders, getAnalystMcpServer } from '~/lib/mcp.server';
+import { readArtifact, storeArtifact } from '~/lib/artifacts.server';
 import {
   createDocument,
   ensureCollection,
   getDocumentBySourceUri,
   updateDocument,
   updateDocumentMetadata,
-} from "~/lib/db/queries/documents.server";
-import { getProject } from "~/lib/db/queries/projects.server";
+} from '~/lib/db/queries/documents.server';
+import { getProject } from '~/lib/db/queries/projects.server';
 import {
   createSourceIngestBatch,
   getSourceIngestBatch,
@@ -15,30 +15,30 @@ import {
   updateSourceIngestBatch,
   updateSourceIngestItem,
   type SourceIngestBatchWithItems,
-} from "~/lib/db/queries/source-ingest.server";
-import { refreshDocumentKnowledgeIndex } from "~/lib/knowledge-index.server";
-import { buildProjectArtifactUrls } from "~/lib/project-storage.server";
-import { sanitizeFilename, inferExtension } from "~/lib/file-utils";
-import { normalizeUuid } from "~/lib/uuid";
+} from '~/lib/db/queries/source-ingest.server';
+import { refreshDocumentKnowledgeIndex } from '~/lib/knowledge-index.server';
+import { buildProjectArtifactUrls } from '~/lib/project-storage.server';
+import { sanitizeFilename, inferExtension } from '~/lib/file-utils';
+import { normalizeUuid } from '~/lib/uuid';
 
 function normalizeWhitespace(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
+  return value.replace(/\s+/g, ' ').trim();
 }
 
 function stripHtml(value: string): string {
   return normalizeWhitespace(
     value
-      .replace(/<script[\s\S]*?<\/script>/gi, " ")
-      .replace(/<style[\s\S]*?<\/style>/gi, " ")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/&nbsp;/gi, " ")
-      .replace(/&amp;/gi, "&")
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
   );
 }
 
 function extractHtmlTitle(value: string): string {
   const match = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(value);
-  return match ? normalizeWhitespace(match[1]) : "";
+  return match ? normalizeWhitespace(match[1]) : '';
 }
 
 function buildWebMarkdown(input: {
@@ -49,21 +49,21 @@ function buildWebMarkdown(input: {
 }): string {
   return [
     `# ${input.title}`,
-    "",
+    '',
     `Source: ${input.url}`,
     `Fetched: ${input.fetchedAt}`,
-    "",
-    input.text || "No extractable text was available.",
-    "",
-  ].join("\n");
+    '',
+    input.text || 'No extractable text was available.',
+    '',
+  ].join('\n');
 }
 
 function getAnalystApiBaseUrl(): string {
   const configured = getAnalystMcpServer();
   const rawUrl =
     configured?.url ||
-    `http://${process.env.ANALYST_MCP_HOST || "localhost"}:${process.env.ANALYST_MCP_PORT || "8000"}/mcp/`;
-  return rawUrl.replace(/\/mcp\/?$/g, "");
+    `http://${process.env.ANALYST_MCP_HOST || 'localhost'}:${process.env.ANALYST_MCP_PORT || '8000'}/mcp/`;
+  return rawUrl.replace(/\/mcp\/?$/g, '');
 }
 
 async function fetchAnalystJson<T>(
@@ -73,12 +73,13 @@ async function fetchAnalystJson<T>(
   init: RequestInit = {}
 ): Promise<T> {
   const project = await getProject(projectId);
-  if (!project) throw new Error("Project not found");
+  if (!project) throw new Error('Project not found');
   const analystServer = getAnalystMcpServer();
   const headers: Record<string, string> = {
-    "content-type": "application/json",
-    "x-api-key":
-      String(analystServer?.headers?.["x-api-key"] || process.env.ANALYST_MCP_API_KEY || "change-me").trim(),
+    'content-type': 'application/json',
+    'x-api-key': String(
+      analystServer?.headers?.['x-api-key'] || process.env.ANALYST_MCP_API_KEY || 'change-me'
+    ).trim(),
     ...buildProjectMcpHeaders(project, requestOrigin),
   };
   const controller = new AbortController();
@@ -99,7 +100,7 @@ async function fetchAnalystJson<T>(
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const detail =
-      (payload && typeof payload === "object" && (payload.detail || payload.error)) ||
+      (payload && typeof payload === 'object' && (payload.detail || payload.error)) ||
       `HTTP ${response.status}`;
     throw new Error(String(detail));
   }
@@ -107,38 +108,38 @@ async function fetchAnalystJson<T>(
 }
 
 function deriveCollectionName(input: {
-  origin: "literature" | "web";
+  origin: 'literature' | 'web';
   query?: string | null;
   collectionName?: string | null;
   sourceUrl?: string | null;
 }) {
-  const explicit = String(input.collectionName || "").trim();
+  const explicit = String(input.collectionName || '').trim();
   if (explicit) return explicit;
 
-  if (input.origin === "literature") {
-    const normalizedQuery = normalizeWhitespace(String(input.query || "Research Inbox"));
+  if (input.origin === 'literature') {
+    const normalizedQuery = normalizeWhitespace(String(input.query || 'Research Inbox'));
     const shortened =
       normalizedQuery.length > 56 ? `${normalizedQuery.slice(0, 53).trim()}...` : normalizedQuery;
-    return shortened || "Research Inbox";
+    return shortened || 'Research Inbox';
   }
 
   if (input.sourceUrl) {
     try {
-      const hostname = new URL(input.sourceUrl).hostname.replace(/^www\./, "").trim();
+      const hostname = new URL(input.sourceUrl).hostname.replace(/^www\./, '').trim();
       if (hostname) return `Web - ${hostname}`;
     } catch {
       // Fall through to generic web collection name.
     }
   }
 
-  return "Research Inbox";
+  return 'Research Inbox';
 }
 
 async function resolveTargetCollection(
   projectId: string,
   input: { collectionId?: string | null; collectionName?: string | null }
 ) {
-  const targetName = String(input.collectionName || "Research Inbox").trim() || "Research Inbox";
+  const targetName = String(input.collectionName || 'Research Inbox').trim() || 'Research Inbox';
   const normalizedCollectionId = normalizeUuid(input.collectionId);
   if (normalizedCollectionId) {
     const batches = await listSourceIngestBatches(projectId);
@@ -151,43 +152,43 @@ async function resolveTargetCollection(
   const collection = await ensureCollection(
     projectId,
     targetName,
-    "Collected research sources staged for review"
+    'Collected research sources staged for review'
   );
   return { id: collection.id, name: collection.name };
 }
 
 function normalizeLiteratureItem(item: Record<string, unknown>) {
-  const title = String(item.title || "Untitled Article").trim();
+  const title = String(item.title || 'Untitled Article').trim();
   const authors = Array.isArray(item.authors)
     ? item.authors
         .map((author) =>
-          typeof author === "string"
+          typeof author === 'string'
             ? author
-            : author && typeof author === "object"
-              ? String((author as Record<string, unknown>).name || "").trim()
-              : ""
+            : author && typeof author === 'object'
+              ? String((author as Record<string, unknown>).name || '').trim()
+              : ''
         )
         .filter(Boolean)
     : [];
   const canonicalId =
-    String(item.canonical_id || item.canonicalId || item.paper_id || "").trim() || null;
-  const pdfUrl = String(item.pdf_url || item.pdfUrl || "").trim() || null;
-  const url = String(item.url || "").trim() || pdfUrl;
+    String(item.canonical_id || item.canonicalId || item.paper_id || '').trim() || null;
+  const pdfUrl = String(item.pdf_url || item.pdfUrl || '').trim() || null;
+  const url = String(item.url || '').trim() || pdfUrl;
   return {
     externalId: canonicalId,
     sourceUrl: url,
     title,
-    mimeTypeHint: pdfUrl ? "application/pdf" : null,
-    targetFilename: `${sanitizeFilename(title)}${inferExtension("application/pdf", ".pdf")}`,
+    mimeTypeHint: pdfUrl ? 'application/pdf' : null,
+    targetFilename: `${sanitizeFilename(title)}${inferExtension('application/pdf', '.pdf')}`,
     normalizedMetadata: {
       canonicalId,
-      provider: String(item.provider || "").trim() || null,
-      doi: String(item.doi || "").trim() || null,
+      provider: String(item.provider || '').trim() || null,
+      doi: String(item.doi || '').trim() || null,
       url,
       pdfUrl,
-      venue: String(item.venue || "").trim() || null,
-      abstract: String(item.abstract || item.abstract_snippet || "").trim() || null,
-      publishedAt: String(item.published_at || item.publishedAt || "").trim() || null,
+      venue: String(item.venue || '').trim() || null,
+      abstract: String(item.abstract || item.abstract_snippet || '').trim() || null,
+      publishedAt: String(item.published_at || item.publishedAt || '').trim() || null,
       citationCount: Number(item.citation_count || item.citationCount || 0) || 0,
       authors,
       topics: Array.isArray(item.topics) ? item.topics.filter(Boolean) : [],
@@ -200,7 +201,7 @@ export async function stageSourceIngestBatch(
   input: {
     collectionId?: string | null;
     collectionName?: string | null;
-    origin: "literature" | "web";
+    origin: 'literature' | 'web';
     query?: string;
     summary?: string;
     metadata?: Record<string, unknown>;
@@ -250,12 +251,12 @@ export async function stageLiteratureCollectionBatch(
   }
 ) {
   const params = new URLSearchParams();
-  params.set("query", input.query);
-  params.set("limit", String(Math.max(1, Math.min(input.limit || 10, 20))));
-  if (input.dateFrom) params.set("date_from", input.dateFrom);
-  if (input.dateTo) params.set("date_to", input.dateTo);
+  params.set('query', input.query);
+  params.set('limit', String(Math.max(1, Math.min(input.limit || 10, 20))));
+  if (input.dateFrom) params.set('date_from', input.dateFrom);
+  if (input.dateTo) params.set('date_to', input.dateTo);
   for (const source of input.sources || []) {
-    if (source) params.append("sources", source);
+    if (source) params.append('sources', source);
   }
   const payload = await fetchAnalystJson<{
     results?: Array<Record<string, unknown>>;
@@ -266,9 +267,9 @@ export async function stageLiteratureCollectionBatch(
   return stageSourceIngestBatch(projectId, {
     collectionId: input.collectionId || null,
     collectionName: input.collectionName || null,
-    origin: "literature",
+    origin: 'literature',
     query: input.query,
-    summary: `Staged ${results.length} literature source${results.length === 1 ? "" : "s"} from analyst search.`,
+    summary: `Staged ${results.length} literature source${results.length === 1 ? '' : 's'} from analyst search.`,
     metadata: {
       sourcesUsed: Array.isArray(payload.sources_used) ? payload.sources_used : [],
       currentDate: payload.current_date || null,
@@ -288,19 +289,19 @@ export async function stageWebSourceBatch(
     collectionName?: string | null;
   }
 ) {
-  const normalizedUrl = new URL(String(input.url || "").trim()).toString();
+  const normalizedUrl = new URL(String(input.url || '').trim()).toString();
   return stageSourceIngestBatch(projectId, {
     collectionId: input.collectionId || null,
     collectionName: input.collectionName || null,
-    origin: "web",
+    origin: 'web',
     query: normalizedUrl,
-    summary: "Staged web source for capture.",
+    summary: 'Staged web source for capture.',
     items: [
       {
         sourceUrl: normalizedUrl,
         title: String(input.title || normalizedUrl).trim(),
-        mimeTypeHint: "text/markdown; charset=utf-8",
-        targetFilename: `${sanitizeFilename(input.title || new URL(normalizedUrl).hostname || "web-source")}.md`,
+        mimeTypeHint: 'text/markdown; charset=utf-8',
+        targetFilename: `${sanitizeFilename(input.title || new URL(normalizedUrl).hostname || 'web-source')}.md`,
         normalizedMetadata: {
           url: normalizedUrl,
         },
@@ -327,7 +328,7 @@ async function upsertSourceDocument(
     : await createDocument(projectId, input);
   const links = buildProjectArtifactUrls(projectId, document.id);
   const updated = await updateDocumentMetadata(projectId, document.id, {
-    ...(document.metadata && typeof document.metadata === "object" ? document.metadata : {}),
+    ...(document.metadata && typeof document.metadata === 'object' ? document.metadata : {}),
     ...input.metadata,
     artifactUrl: links.artifactUrl,
     downloadUrl: links.downloadUrl,
@@ -337,19 +338,18 @@ async function upsertSourceDocument(
 
 async function importLiteratureItem(
   batch: SourceIngestBatchWithItems,
-  item: SourceIngestBatchWithItems["items"][number],
+  item: SourceIngestBatchWithItems['items'][number],
   requestOrigin: string
 ) {
   const project = await getProject(batch.projectId);
-  if (!project) throw new Error("Project not found");
+  if (!project) throw new Error('Project not found');
   const metadata =
-    item.normalizedMetadata && typeof item.normalizedMetadata === "object"
+    item.normalizedMetadata && typeof item.normalizedMetadata === 'object'
       ? { ...(item.normalizedMetadata as Record<string, unknown>) }
       : {};
-  const canonicalId =
-    String(item.externalId || metadata.canonicalId || "").trim();
+  const canonicalId = String(item.externalId || metadata.canonicalId || '').trim();
   if (!canonicalId) {
-    throw new Error("Literature item is missing a canonical identifier");
+    throw new Error('Literature item is missing a canonical identifier');
   }
   const payload = await fetchAnalystJson<{
     downloads?: Array<{
@@ -361,47 +361,48 @@ async function importLiteratureItem(
       canonical_id?: string;
     }>;
   }>(batch.projectId, requestOrigin, `/api/papers/${encodeURIComponent(canonicalId)}/download`, {
-    method: "POST",
-    body: JSON.stringify({ preferred_formats: ["pdf"] }),
+    method: 'POST',
+    body: JSON.stringify({ preferred_formats: ['pdf'] }),
   });
   const download = Array.isArray(payload.downloads) ? payload.downloads[0] : null;
   if (!download?.path) {
-    throw new Error("No download path was returned for the paper");
+    throw new Error('No download path was returned for the paper');
   }
-  let extractedText = String(metadata.abstract || "").trim();
+  let extractedText = String(metadata.abstract || '').trim();
   if (download.extracted_text_path) {
     try {
       const extracted = await readArtifact({
         storageUri: download.extracted_text_path,
         filename: `${sanitizeFilename(item.title)}.txt`,
-        mimeType: "text/plain; charset=utf-8",
+        mimeType: 'text/plain; charset=utf-8',
       });
-      extractedText = extracted.body.toString("utf8").trim() || extractedText;
+      extractedText = extracted.body.toString('utf8').trim() || extractedText;
     } catch {
       // Keep abstract fallback.
     }
   }
-  const sourceUri =
-    String(metadata.url || metadata.doi || item.sourceUrl || `paper:${canonicalId}`).trim();
+  const sourceUri = String(
+    metadata.url || metadata.doi || item.sourceUrl || `paper:${canonicalId}`
+  ).trim();
   const document = await upsertSourceDocument(batch.projectId, {
     collectionId: batch.collectionId,
     title: item.title,
-    sourceType: "literature",
+    sourceType: 'literature',
     sourceUri,
     storageUri: download.path,
     content: extractedText || `[Stored literature artifact at ${download.path}]`,
     metadata: {
       ...metadata,
       canonicalId,
-      mimeType: String(download.mime_type || item.mimeTypeHint || "application/pdf"),
+      mimeType: String(download.mime_type || item.mimeTypeHint || 'application/pdf'),
       bytes: Number(download.bytes_written || 0) || 0,
       filename:
         item.targetFilename ||
-        `${sanitizeFilename(item.title)}${inferExtension(String(download.mime_type || "application/pdf"), ".pdf")}`,
-      storageBackend: download.path.startsWith("s3://") ? "s3" : "local",
+        `${sanitizeFilename(item.title)}${inferExtension(String(download.mime_type || 'application/pdf'), '.pdf')}`,
+      storageBackend: download.path.startsWith('s3://') ? 's3' : 'local',
       extractedTextLength: extractedText.length,
       batchId: batch.id,
-      importedFrom: "analyst-mcp",
+      importedFrom: 'analyst-mcp',
     },
   });
   return {
@@ -412,32 +413,28 @@ async function importLiteratureItem(
 
 async function importWebItem(
   batch: SourceIngestBatchWithItems,
-  item: SourceIngestBatchWithItems["items"][number]
+  item: SourceIngestBatchWithItems['items'][number]
 ) {
   const project = await getProject(batch.projectId);
-  if (!project) throw new Error("Project not found");
-  const url = String(item.sourceUrl || "").trim();
-  if (!url) throw new Error("Web source is missing a URL");
+  if (!project) throw new Error('Project not found');
+  const url = String(item.sourceUrl || '').trim();
+  if (!url) throw new Error('Web source is missing a URL');
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30_000);
   let response: Response;
   try {
     response = await fetch(url, {
-      headers: { "User-Agent": "open-analyst-headless" },
+      headers: { 'User-Agent': 'open-analyst-headless' },
       signal: controller.signal,
     });
   } finally {
     clearTimeout(timeout);
   }
-  const contentType = response.headers.get("content-type") || "text/html";
+  const contentType = response.headers.get('content-type') || 'text/html';
   const raw = await response.text();
   const fetchedAt = new Date().toISOString();
-  const extractedText =
-    contentType.includes("html") ? stripHtml(raw) : normalizeWhitespace(raw);
-  const title =
-    item.title ||
-    extractHtmlTitle(raw) ||
-    new URL(url).hostname;
+  const extractedText = contentType.includes('html') ? stripHtml(raw) : normalizeWhitespace(raw);
+  const title = item.title || extractHtmlTitle(raw) || new URL(url).hostname;
   const markdown = buildWebMarkdown({
     title,
     url,
@@ -447,17 +444,17 @@ async function importWebItem(
   const stored = await storeArtifact({
     project,
     filename: item.targetFilename || `${sanitizeFilename(title)}.md`,
-    mimeType: "text/markdown; charset=utf-8",
-    buffer: Buffer.from(markdown, "utf8"),
+    mimeType: 'text/markdown; charset=utf-8',
+    buffer: Buffer.from(markdown, 'utf8'),
   });
   const metadata =
-    item.normalizedMetadata && typeof item.normalizedMetadata === "object"
+    item.normalizedMetadata && typeof item.normalizedMetadata === 'object'
       ? { ...(item.normalizedMetadata as Record<string, unknown>) }
       : {};
   const document = await upsertSourceDocument(batch.projectId, {
     collectionId: batch.collectionId,
     title,
-    sourceType: "web",
+    sourceType: 'web',
     sourceUri: url,
     storageUri: stored.storageUri,
     content: extractedText || markdown,
@@ -486,9 +483,9 @@ export async function approveSourceIngestBatch(
   requestOrigin: string
 ) {
   const batch = await getSourceIngestBatch(projectId, batchId);
-  if (!batch) throw new Error("Source ingest batch not found");
+  if (!batch) throw new Error('Source ingest batch not found');
   await updateSourceIngestBatch(projectId, batchId, {
-    status: "importing",
+    status: 'importing',
     approvedAt: new Date(),
   });
   let importedCount = 0;
@@ -496,33 +493,33 @@ export async function approveSourceIngestBatch(
   try {
     const results = await Promise.allSettled(
       batch.items
-        .filter((item) => item.status !== "completed")
+        .filter((item) => item.status !== 'completed')
         .map(async (item) => {
           const result =
-            batch.origin === "web"
+            batch.origin === 'web'
               ? await importWebItem(batch, item)
               : await importLiteratureItem(batch, item, requestOrigin);
           await updateSourceIngestItem(projectId, item.id, {
             documentId: result.document.id,
             storageUri: result.storageUri,
-            status: "completed",
+            status: 'completed',
             error: null,
             importedAt: new Date(),
           });
           return result;
         })
     );
-    const alreadyCompleted = batch.items.filter((item) => item.status === "completed").length;
+    const alreadyCompleted = batch.items.filter((item) => item.status === 'completed').length;
     for (let i = 0; i < results.length; i++) {
       const result = results[i];
-      if (result.status === "fulfilled") {
+      if (result.status === 'fulfilled') {
         importedCount += 1;
       } else {
         failureCount += 1;
-        const item = batch.items.filter((item) => item.status !== "completed")[i];
+        const item = batch.items.filter((item) => item.status !== 'completed')[i];
         if (item) {
           await updateSourceIngestItem(projectId, item.id, {
-            status: "failed",
+            status: 'failed',
             error: result.reason instanceof Error ? result.reason.message : String(result.reason),
             importedAt: null,
           });
@@ -534,14 +531,14 @@ export async function approveSourceIngestBatch(
     // Unexpected crash during import loop
     failureCount = batch.items.length - importedCount;
   }
-  const finalStatus = failureCount > 0 && importedCount === 0 ? "failed" : "completed";
+  const finalStatus = failureCount > 0 && importedCount === 0 ? 'failed' : 'completed';
   await updateSourceIngestBatch(projectId, batchId, {
     status: finalStatus,
     importedCount,
     summary:
-      finalStatus === "completed"
-        ? `Imported ${importedCount} source${importedCount === 1 ? "" : "s"} into ${batch.collectionName || "the project"}${failureCount ? ` with ${failureCount} failure${failureCount === 1 ? "" : "s"}` : ""}.`
-        : `Import failed for all ${batch.items.length} staged source${batch.items.length === 1 ? "" : "s"}.`,
+      finalStatus === 'completed'
+        ? `Imported ${importedCount} source${importedCount === 1 ? '' : 's'} into ${batch.collectionName || 'the project'}${failureCount ? ` with ${failureCount} failure${failureCount === 1 ? '' : 's'}` : ''}.`
+        : `Import failed for all ${batch.items.length} staged source${batch.items.length === 1 ? '' : 's'}.`,
     completedAt: new Date(),
   });
   return getSourceIngestBatch(projectId, batchId);
@@ -549,20 +546,20 @@ export async function approveSourceIngestBatch(
 
 export async function rejectSourceIngestBatch(projectId: string, batchId: string) {
   const batch = await getSourceIngestBatch(projectId, batchId);
-  if (!batch) throw new Error("Source ingest batch not found");
+  if (!batch) throw new Error('Source ingest batch not found');
   for (const item of batch.items) {
-    if (item.status === "staged") {
+    if (item.status === 'staged') {
       await updateSourceIngestItem(projectId, item.id, {
-        status: "rejected",
+        status: 'rejected',
         error: null,
         importedAt: null,
       });
     }
   }
   await updateSourceIngestBatch(projectId, batchId, {
-    status: "rejected",
+    status: 'rejected',
     rejectedAt: new Date(),
-    summary: "Batch rejected before import.",
+    summary: 'Batch rejected before import.',
   });
   return getSourceIngestBatch(projectId, batchId);
 }

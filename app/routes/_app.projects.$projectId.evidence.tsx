@@ -1,4 +1,4 @@
-import { EvidenceWorkspaceView } from "~/components/EvidenceWorkspaceView";
+import { EvidenceWorkspaceView } from '~/components/EvidenceWorkspaceView';
 
 export default function EvidenceRoute() {
   return <EvidenceWorkspaceView />;

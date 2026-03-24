@@ -1,9 +1,20 @@
-import { memo, useMemo, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { Check, ChevronDown, ChevronRight, Copy, Download, ExternalLink, FileText, Loader2, Sparkles, Terminal } from "lucide-react";
-import { useAppStore } from "~/lib/store";
-import { formatRelativeTime } from "~/lib/format";
+import { memo, useMemo, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Download,
+  ExternalLink,
+  FileText,
+  Loader2,
+  Sparkles,
+  Terminal,
+} from 'lucide-react';
+import { useAppStore } from '~/lib/store';
+import { formatRelativeTime } from '~/lib/format';
 import type {
   ArtifactMeta,
   ContentBlock,
@@ -11,7 +22,7 @@ import type {
   StatusContent,
   ToolResultContent,
   ToolUseContent,
-} from "~/lib/types";
+} from '~/lib/types';
 
 interface MessageCardProps {
   message: Message;
@@ -20,16 +31,16 @@ interface MessageCardProps {
 
 function normalizeContent(content: unknown): ContentBlock[] {
   if (!Array.isArray(content)) {
-    return [{ type: "text", text: String(content ?? "") }];
+    return [{ type: 'text', text: String(content ?? '') }];
   }
   return content.filter(Boolean) as ContentBlock[];
 }
 
 function joinTextBlocks(blocks: ContentBlock[]): string {
   return blocks
-    .filter((block): block is Extract<ContentBlock, { type: "text" }> => block.type === "text")
+    .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
     .map((block) => block.text)
-    .join("");
+    .join('');
 }
 
 function formatFileSize(bytes: number): string {
@@ -81,11 +92,11 @@ function ArtifactCard({ artifact }: { artifact: ArtifactMeta }) {
 }
 
 function StatusBlock({ block }: { block: StatusContent }) {
-  if (block.status === "error") {
+  if (block.status === 'error') {
     return (
       <div className="flex items-center gap-2 rounded-xl border border-error/30 bg-error/5 px-4 py-3 text-sm text-error">
         <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm-.75 4a.75.75 0 011.5 0v3a.75.75 0 01-1.5 0V5zm.75 6.25a.75.75 0 100-1.5.75.75 0 000 1.5z"/>
+          <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm-.75 4a.75.75 0 011.5 0v3a.75.75 0 01-1.5 0V5zm.75 6.25a.75.75 0 100-1.5.75.75 0 000 1.5z" />
         </svg>
         <span>{block.text}</span>
       </div>
@@ -93,15 +104,15 @@ function StatusBlock({ block }: { block: StatusContent }) {
   }
 
   const tone =
-    block.status === "completed"
-      ? "border-success/30 bg-success/5 text-success"
-      : "border-accent/30 bg-accent/5 text-accent";
+    block.status === 'completed'
+      ? 'border-success/30 bg-success/5 text-success'
+      : 'border-accent/30 bg-accent/5 text-accent';
 
   return (
     <div
       className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium ${tone}`}
     >
-      {block.status === "running" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+      {block.status === 'running' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
       <span>{block.text}</span>
     </div>
   );
@@ -110,55 +121,55 @@ function StatusBlock({ block }: { block: StatusContent }) {
 function ToolUseBlock({ block }: { block: ToolUseContent }) {
   const [expanded, setExpanded] = useState(false);
   const input = (block.input || {}) as Record<string, unknown>;
-  const isTaskDelegation = block.name === "task";
+  const isTaskDelegation = block.name === 'task';
 
   const summary = useMemo(() => {
     if (isTaskDelegation) {
-      const subType = String(input.subagent_type || "agent");
-      const desc = String(input.description || "").slice(0, 80);
-      return `Delegating to ${subType}${desc ? `: ${desc}…` : ""}`;
+      const subType = String(input.subagent_type || 'agent');
+      const desc = String(input.description || '').slice(0, 80);
+      return `Delegating to ${subType}${desc ? `: ${desc}…` : ''}`;
     }
-    if (block.name === "search_literature" || block.name === "search_project_documents") {
+    if (block.name === 'search_literature' || block.name === 'search_project_documents') {
       return `Searching for "${input.query || '...'}"`;
     }
-    if (block.name === "search_project_memories") {
+    if (block.name === 'search_project_memories') {
       return `Searching memories for "${input.query || '...'}"`;
     }
-    if (block.name === "read_project_document") {
+    if (block.name === 'read_project_document') {
       return `Reading document ${String(input.document_id || '...').slice(0, 12)}`;
     }
-    if (block.name === "execute_command") {
+    if (block.name === 'execute_command') {
       return `Running: ${input.command || '...'}`;
     }
-    if (block.name === "save_canvas_markdown") {
+    if (block.name === 'save_canvas_markdown') {
       return `Saving canvas: ${input.title || 'draft'}`;
     }
-    if (block.name === "stage_literature_collection") {
+    if (block.name === 'stage_literature_collection') {
       return `Collecting sources for "${input.query || '...'}"`;
     }
-    if (block.name === "stage_web_source") {
+    if (block.name === 'stage_web_source') {
       return `Capturing: ${input.url || '...'}`;
     }
-    if (block.name === "publish_canvas_document") {
-      return "Publishing canvas document";
+    if (block.name === 'publish_canvas_document') {
+      return 'Publishing canvas document';
     }
-    if (block.name === "publish_workspace_file") {
+    if (block.name === 'publish_workspace_file') {
       return `Publishing: ${input.relative_path || 'file'}`;
     }
-    if (block.name === "capture_artifact") {
+    if (block.name === 'capture_artifact') {
       return `Capturing artifact: ${input.relativePath || input.title || 'file'}`;
     }
-    if (block.name === "propose_project_memory") {
+    if (block.name === 'propose_project_memory') {
       return `Saving memory: ${input.title || 'note'}`;
     }
-    if (block.name === "write_file") {
+    if (block.name === 'write_file') {
       return `Writing ${input.path || 'file'}`;
     }
-    if (block.name === "write_todos") {
-      return "Updating plan";
+    if (block.name === 'write_todos') {
+      return 'Updating plan';
     }
     const firstVal = Object.values(input)[0];
-    return firstVal ? String(firstVal).slice(0, 60) : block.name.replace(/_/g, " ");
+    return firstVal ? String(firstVal).slice(0, 60) : block.name.replace(/_/g, ' ');
   }, [block, input, isTaskDelegation]);
 
   // For task() delegations, don't show the expanded detail — the SubagentCard handles that
@@ -194,11 +205,11 @@ function ToolUseBlock({ block }: { block: ToolUseContent }) {
             <div key={key} className="flex gap-2">
               <span className="text-text-muted shrink-0 w-28 text-right">{key}:</span>
               <span className="text-text-secondary break-all">
-                {typeof val === "string" && val.length > 200
+                {typeof val === 'string' && val.length > 200
                   ? `${val.slice(0, 200)}…`
-                  : typeof val === "object"
+                  : typeof val === 'object'
                     ? JSON.stringify(val)
-                    : String(val ?? "")}
+                    : String(val ?? '')}
               </span>
             </div>
           ))}
@@ -218,42 +229,44 @@ function ToolResultBlock({
   const [expanded, setExpanded] = useState(false);
   const toolUse = allBlocks.find(
     (candidate) =>
-      candidate.type === "tool_use" && (candidate as ToolUseContent).id === block.toolUseId
+      candidate.type === 'tool_use' && (candidate as ToolUseContent).id === block.toolUseId
   ) as ToolUseContent | undefined;
 
   // For task() results, the content is the subagent's summary — show it inline
-  const isTaskResult = toolUse?.name === "task";
+  const isTaskResult = toolUse?.name === 'task';
 
   const summary = useMemo(() => {
     if (block.isError) {
-      const text = block.content.split("\n")[0] || "Tool failed";
+      const text = block.content.split('\n')[0] || 'Tool failed';
       return `Failed: ${text}`;
     }
     if (block.artifacts?.length) {
-      return `Produced ${block.artifacts.length} artifact${block.artifacts.length === 1 ? "" : "s"}`;
+      return `Produced ${block.artifacts.length} artifact${block.artifacts.length === 1 ? '' : 's'}`;
     }
     if (!block.content) {
-      return "Completed";
+      return 'Completed';
     }
     // Try to extract a clean text summary (strip JSON wrappers)
     const trimmed = block.content.trim();
-    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
       try {
         const parsed = JSON.parse(trimmed);
-        if (typeof parsed === "object" && parsed.status) {
+        if (typeof parsed === 'object' && parsed.status) {
           const status = String(parsed.status);
           const detail =
-            typeof parsed.message === "string"
+            typeof parsed.message === 'string'
               ? parsed.message
-              : typeof parsed.error === "string"
+              : typeof parsed.error === 'string'
                 ? parsed.error
-                : Array.isArray(parsed.warnings) && typeof parsed.warnings[0] === "string"
+                : Array.isArray(parsed.warnings) && typeof parsed.warnings[0] === 'string'
                   ? parsed.warnings[0]
-                  : "";
-          const suffix = parsed.count ? ` (${parsed.count} items)` : "";
+                  : '';
+          const suffix = parsed.count ? ` (${parsed.count} items)` : '';
           return detail ? `${status}${suffix}: ${detail}` : `${status}${suffix}`;
         }
-      } catch { /* use raw */ }
+      } catch {
+        /* use raw */
+      }
     }
     return trimmed.length > 120 ? `${trimmed.slice(0, 120)}…` : trimmed;
   }, [block]);
@@ -278,24 +291,25 @@ function ToolResultBlock({
         <div className="flex-1 min-w-0 text-left">
           <span className="text-xs text-text-muted truncate">{summary}</span>
         </div>
-        {block.content && (
-          expanded ? (
+        {block.content &&
+          (expanded ? (
             <ChevronDown className="w-3.5 h-3.5 text-text-muted shrink-0" />
           ) : (
             <ChevronRight className="w-3.5 h-3.5 text-text-muted shrink-0" />
-          )
-        )}
+          ))}
       </button>
       {expanded && block.content ? (
         <div className="px-4 py-3 space-y-3 border-t border-border">
           <div className="prose prose-sm prose-invert max-w-none text-xs">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {block.content}
-            </ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.content}</ReactMarkdown>
           </div>
           {block.artifacts?.map((artifact) => (
             <ArtifactCard
-              key={artifact.documentId || artifact.artifactId || `${artifact.filename}-${artifact.artifactUrl}`}
+              key={
+                artifact.documentId ||
+                artifact.artifactId ||
+                `${artifact.filename}-${artifact.artifactUrl}`
+              }
               artifact={artifact}
             />
           ))}
@@ -313,7 +327,7 @@ function ContentBlockView({
   allBlocks: ContentBlock[];
 }) {
   switch (block.type) {
-    case "text":
+    case 'text':
       if (!block.text) return null;
       return (
         <div className="prose-chat max-w-none text-text-primary">
@@ -333,13 +347,13 @@ function ContentBlockView({
           </ReactMarkdown>
         </div>
       );
-    case "status":
+    case 'status':
       return <StatusBlock block={block} />;
-    case "tool_use":
+    case 'tool_use':
       return <ToolUseBlock block={block} />;
-    case "tool_result":
+    case 'tool_result':
       return <ToolResultBlock block={block} allBlocks={allBlocks} />;
-    case "file_attachment":
+    case 'file_attachment':
       return (
         <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-muted border border-border">
           <FileText className="w-4 h-4 text-accent flex-shrink-0" />
@@ -348,7 +362,7 @@ function ContentBlockView({
           </div>
         </div>
       );
-    case "thinking":
+    case 'thinking':
       return <div className="text-sm text-text-muted italic">{block.thinking}</div>;
     default:
       return null;
@@ -356,7 +370,7 @@ function ContentBlockView({
 }
 
 export const MessageCard = memo(function MessageCard({ message, isStreaming }: MessageCardProps) {
-  const isUser = message.role === "user";
+  const isUser = message.role === 'user';
   const contentBlocks = normalizeContent(message.content);
   const [copied, setCopied] = useState(false);
 
@@ -375,8 +389,11 @@ export const MessageCard = memo(function MessageCard({ message, isStreaming }: M
         <div className="flex items-start gap-2 justify-end group">
           <div className="message-user px-4 py-2.5 max-w-[80%] break-words">
             {contentBlocks.map((block, index) =>
-              block.type === "text" ? (
-                <p key={index} className="text-text-primary whitespace-pre-wrap break-words text-left">
+              block.type === 'text' ? (
+                <p
+                  key={index}
+                  className="text-text-primary whitespace-pre-wrap break-words text-left"
+                >
                   {block.text}
                 </p>
               ) : (

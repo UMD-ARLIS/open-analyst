@@ -1,32 +1,35 @@
-import { useEffect, useMemo, useState } from "react";
-import { BrainCircuit, Plug, Sparkles, Wrench } from "lucide-react";
-import type { WorkspaceContextData } from "~/lib/workspace-context.server";
+import { useEffect, useMemo, useState } from 'react';
+import { BrainCircuit, Plug, Sparkles, Wrench } from 'lucide-react';
+import type { WorkspaceContextData } from '~/lib/workspace-context.server';
 
 interface ThreadContextPanelProps {
   projectId: string;
   workspaceContext: WorkspaceContextData;
 }
 
-export function ThreadContextPanel({
-  projectId,
-  workspaceContext,
-}: ThreadContextPanelProps) {
+export function ThreadContextPanel({ projectId, workspaceContext }: ThreadContextPanelProps) {
   const [proposedMemories, setProposedMemories] = useState(workspaceContext.memories.proposed);
   const [activeMemories, setActiveMemories] = useState(workspaceContext.memories.active);
-  const activeSet = useMemo(() => new Set(workspaceContext.activeConnectorIds), [workspaceContext.activeConnectorIds]);
-  const pinnedSkillSet = useMemo(() => new Set(workspaceContext.pinnedSkillIds), [workspaceContext.pinnedSkillIds]);
+  const activeSet = useMemo(
+    () => new Set(workspaceContext.activeConnectorIds),
+    [workspaceContext.activeConnectorIds]
+  );
+  const pinnedSkillSet = useMemo(
+    () => new Set(workspaceContext.pinnedSkillIds),
+    [workspaceContext.pinnedSkillIds]
+  );
 
   useEffect(() => {
     setProposedMemories(workspaceContext.memories.proposed);
     setActiveMemories(workspaceContext.memories.active);
   }, [workspaceContext]);
 
-  const resolveMemory = async (memoryId: string, status: "active" | "dismissed") => {
+  const resolveMemory = async (memoryId: string, status: 'active' | 'dismissed') => {
     const response = await fetch(
       `/api/projects/${encodeURIComponent(projectId)}/memory/${encodeURIComponent(memoryId)}`,
       {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
       }
     );
@@ -34,12 +37,19 @@ export function ThreadContextPanel({
       return;
     }
     const body = (await response.json()) as {
-      memory?: { id: string; title: string; summary: string; memoryType: string; status: string; taskId?: string | null };
+      memory?: {
+        id: string;
+        title: string;
+        summary: string;
+        memoryType: string;
+        status: string;
+        taskId?: string | null;
+      };
     };
     const memory = body.memory;
     if (!memory) return;
     setProposedMemories((current) => current.filter((item) => item.id !== memoryId));
-    if (status === "active") {
+    if (status === 'active') {
       setActiveMemories((current) => [memory, ...current]);
     }
   };
@@ -65,7 +75,12 @@ export function ThreadContextPanel({
                 <div className="min-w-0">
                   <div className="text-sm font-medium">{connector.name}</div>
                   <div className="text-xs text-text-muted">
-                    {connector.connected ? "Connected" : connector.enabled ? "Unavailable" : "Disabled"} · {connector.toolCount} tools
+                    {connector.connected
+                      ? 'Connected'
+                      : connector.enabled
+                        ? 'Unavailable'
+                        : 'Disabled'}{' '}
+                    · {connector.toolCount} tools
                   </div>
                 </div>
                 {activeSet.has(connector.id) ? (
@@ -76,7 +91,8 @@ export function ThreadContextPanel({
           ))}
         </div>
         <p className="text-xs text-text-muted mt-4">
-          Connector defaults are managed from Settings and injected server-side for every thread run.
+          Connector defaults are managed from Settings and injected server-side for every thread
+          run.
         </p>
       </section>
 
@@ -92,11 +108,11 @@ export function ThreadContextPanel({
                 <div className="min-w-0">
                   <div className="text-sm font-medium">{skill.name}</div>
                   <div className="text-xs text-text-muted">
-                    {skill.description || "Deep agent skill"}
+                    {skill.description || 'Deep agent skill'}
                   </div>
                   {skill.tools.length > 0 ? (
                     <div className="text-[11px] text-text-muted mt-1">
-                      Tools: {skill.tools.join(", ")}
+                      Tools: {skill.tools.join(', ')}
                     </div>
                   ) : null}
                 </div>
@@ -116,12 +132,15 @@ export function ThreadContextPanel({
         </div>
         <div className="space-y-2">
           {workspaceContext.tools
-            .filter((tool) => tool.source === "local" || tool.active)
+            .filter((tool) => tool.source === 'local' || tool.active)
             .map((tool) => (
-              <div key={`${tool.source}-${tool.serverId || "local"}-${tool.name}`} className="rounded-lg border border-border px-3 py-2">
+              <div
+                key={`${tool.source}-${tool.serverId || 'local'}-${tool.name}`}
+                className="rounded-lg border border-border px-3 py-2"
+              >
                 <div className="text-sm font-medium">
                   {tool.name}
-                  {tool.source === "mcp" && tool.serverName ? ` · ${tool.serverName}` : ""}
+                  {tool.source === 'mcp' && tool.serverName ? ` · ${tool.serverName}` : ''}
                 </div>
                 <div className="text-xs text-text-muted mt-1">{tool.description}</div>
               </div>
@@ -161,14 +180,14 @@ export function ThreadContextPanel({
                   <button
                     type="button"
                     className="btn btn-primary text-sm"
-                    onClick={() => void resolveMemory(memory.id, "active")}
+                    onClick={() => void resolveMemory(memory.id, 'active')}
                   >
                     Promote
                   </button>
                   <button
                     type="button"
                     className="btn btn-secondary text-sm"
-                    onClick={() => void resolveMemory(memory.id, "dismissed")}
+                    onClick={() => void resolveMemory(memory.id, 'dismissed')}
                   >
                     Dismiss
                   </button>

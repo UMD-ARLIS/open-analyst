@@ -1,10 +1,10 @@
-import { queryRow, queryRows, withTransaction } from "../index.server";
+import { queryRow, queryRows, withTransaction } from '../index.server';
 import {
   type Artifact,
   type ArtifactVersion,
   type CanvasDocument,
   type ProjectProfile,
-} from "../schema";
+} from '../schema';
 
 function jsonParam(value: unknown, fallback: unknown): string {
   return JSON.stringify(value !== undefined ? value : fallback);
@@ -18,7 +18,7 @@ export async function getProjectProfile(projectId: string): Promise<ProjectProfi
       WHERE project_id = $1
       LIMIT 1
     `,
-    [projectId],
+    [projectId]
   );
 }
 
@@ -58,13 +58,15 @@ export async function upsertProjectProfile(
     `,
     [
       projectId,
-      updates.brief !== undefined ? String(updates.brief || "") : null,
+      updates.brief !== undefined ? String(updates.brief || '') : null,
       updates.retrievalPolicy !== undefined ? jsonParam(updates.retrievalPolicy, {}) : null,
       updates.memoryProfile !== undefined ? jsonParam(updates.memoryProfile, {}) : null,
       updates.templates !== undefined ? JSON.stringify(updates.templates || []) : null,
       updates.agentPolicies !== undefined ? jsonParam(updates.agentPolicies, {}) : null,
-      updates.defaultConnectorIds !== undefined ? JSON.stringify(updates.defaultConnectorIds || []) : null,
-    ],
+      updates.defaultConnectorIds !== undefined
+        ? JSON.stringify(updates.defaultConnectorIds || [])
+        : null,
+    ]
   );
   if (!profile) throw new Error(`Project profile upsert failed: ${projectId}`);
   return profile;
@@ -78,11 +80,14 @@ export async function listArtifacts(projectId: string): Promise<Artifact[]> {
       WHERE project_id = $1
       ORDER BY updated_at DESC
     `,
-    [projectId],
+    [projectId]
   );
 }
 
-export async function getArtifact(projectId: string, artifactId: string): Promise<Artifact | undefined> {
+export async function getArtifact(
+  projectId: string,
+  artifactId: string
+): Promise<Artifact | undefined> {
   return queryRow<Artifact>(
     `
       SELECT *
@@ -90,7 +95,7 @@ export async function getArtifact(projectId: string, artifactId: string): Promis
       WHERE project_id = $1 AND id = $2
       LIMIT 1
     `,
-    [projectId, artifactId],
+    [projectId, artifactId]
   );
 }
 
@@ -112,14 +117,14 @@ export async function createArtifact(
     `,
     [
       projectId,
-      String(input.title || "Untitled Artifact").trim(),
-      String(input.kind || "note"),
-      String(input.mimeType || "text/markdown"),
+      String(input.title || 'Untitled Artifact').trim(),
+      String(input.kind || 'note'),
+      String(input.mimeType || 'text/markdown'),
       input.storageUri || null,
       jsonParam(input.metadata, {}),
-    ],
+    ]
   );
-  if (!artifact) throw new Error("Artifact insert failed");
+  if (!artifact) throw new Error('Artifact insert failed');
   return artifact;
 }
 
@@ -143,7 +148,7 @@ export async function createArtifactVersion(
         LIMIT 1
       `,
       [projectId, artifactId],
-      client,
+      client
     );
     if (!artifact) throw new Error(`Artifact not found: ${artifactId}`);
 
@@ -173,12 +178,12 @@ export async function createArtifactVersion(
       [
         artifactId,
         String(input.title || artifact.title).trim(),
-        String(input.changeSummary || ""),
+        String(input.changeSummary || ''),
         input.storageUri || artifact.storageUri || null,
-        String(input.contentText || ""),
+        String(input.contentText || ''),
         jsonParam(input.metadata, {}),
       ],
-      client,
+      client
     );
     if (!version) throw new Error(`Artifact version insert failed: ${artifactId}`);
 
@@ -190,7 +195,7 @@ export async function createArtifactVersion(
         RETURNING *
       `,
       [version.title, version.storageUri, artifactId],
-      client,
+      client
     );
 
     return version;
@@ -206,7 +211,7 @@ export async function getArtifactVersionCounts(projectId: string): Promise<Recor
       WHERE artifacts.project_id = $1
       GROUP BY artifact_versions.artifact_id
     `,
-    [projectId],
+    [projectId]
   );
   return Object.fromEntries(rows.map((row) => [row.artifactId, Number(row.count)]));
 }
@@ -224,7 +229,7 @@ export async function listArtifactVersions(
       WHERE artifact_id = $1
       ORDER BY version DESC
     `,
-    [artifactId],
+    [artifactId]
   );
 }
 
@@ -236,7 +241,7 @@ export async function listCanvasDocuments(projectId: string): Promise<CanvasDocu
       WHERE project_id = $1
       ORDER BY updated_at DESC
     `,
-    [projectId],
+    [projectId]
   );
 }
 
@@ -251,7 +256,7 @@ export async function getCanvasDocument(
       WHERE project_id = $1 AND id = $2
       LIMIT 1
     `,
-    [projectId, canvasDocumentId],
+    [projectId, canvasDocumentId]
   );
 }
 
@@ -274,13 +279,13 @@ export async function createCanvasDocument(
     [
       projectId,
       input.artifactId || null,
-      String(input.title || "Untitled Canvas").trim(),
-      String(input.documentType || "markdown"),
+      String(input.title || 'Untitled Canvas').trim(),
+      String(input.documentType || 'markdown'),
       jsonParam(input.content, {}),
       jsonParam(input.metadata, {}),
-    ],
+    ]
   );
-  if (!doc) throw new Error("Canvas document insert failed");
+  if (!doc) throw new Error('Canvas document insert failed');
   return doc;
 }
 
@@ -295,13 +300,13 @@ export async function updateCanvasDocument(
     artifactId?: string | null;
   }
 ): Promise<CanvasDocument> {
-  const clauses: string[] = ["updated_at = NOW()"];
+  const clauses: string[] = ['updated_at = NOW()'];
   const params: unknown[] = [];
-  if (typeof updates.title === "string") {
+  if (typeof updates.title === 'string') {
     params.push(updates.title.trim());
     clauses.push(`title = $${params.length}`);
   }
-  if (typeof updates.documentType === "string") {
+  if (typeof updates.documentType === 'string') {
     params.push(updates.documentType);
     clauses.push(`document_type = $${params.length}`);
   }
@@ -321,11 +326,11 @@ export async function updateCanvasDocument(
   const doc = await queryRow<CanvasDocument>(
     `
       UPDATE canvas_documents
-      SET ${clauses.join(", ")}
+      SET ${clauses.join(', ')}
       WHERE project_id = $${params.length - 1} AND id = $${params.length}
       RETURNING *
     `,
-    params,
+    params
   );
   if (!doc) throw new Error(`Canvas document not found: ${canvasDocumentId}`);
   return doc;

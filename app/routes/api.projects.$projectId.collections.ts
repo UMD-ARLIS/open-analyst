@@ -1,9 +1,6 @@
-import {
-  listCollections,
-  createCollection,
-} from "~/lib/db/queries/documents.server";
-import { parseJsonBody } from "~/lib/request-utils";
-import type { Route } from "./+types/api.projects.$projectId.collections";
+import { listCollections, createCollection } from '~/lib/db/queries/documents.server';
+import { parseJsonBody } from '~/lib/request-utils';
+import type { Route } from './+types/api.projects.$projectId.collections';
 
 export async function loader({ params }: Route.LoaderArgs) {
   const collections = await listCollections(params.projectId);
@@ -11,8 +8,8 @@ export async function loader({ params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  if (request.method !== "POST") {
-    return Response.json({ error: "Method not allowed" }, { status: 405 });
+  if (request.method !== 'POST') {
+    return Response.json({ error: 'Method not allowed' }, { status: 405 });
   }
   const body = await parseJsonBody(request);
   if (body instanceof Response) return body;

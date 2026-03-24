@@ -1,6 +1,6 @@
-import { redirect } from "react-router";
-import { getSettings } from "~/lib/db/queries/settings.server";
-import { getProject } from "~/lib/db/queries/projects.server";
+import { redirect } from 'react-router';
+import { getSettings } from '~/lib/db/queries/settings.server';
+import { getProject } from '~/lib/db/queries/projects.server';
 
 export async function loader() {
   const settings = await getSettings();

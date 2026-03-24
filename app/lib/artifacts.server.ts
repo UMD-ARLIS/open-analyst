@@ -1,14 +1,19 @@
-import fs from "fs/promises";
-import path from "path";
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
-import { env } from "./env.server";
-import { getConfigDir } from "./helpers.server";
-import type { ArtifactRecord } from "./types";
-import type { Project } from "./db/schema";
-import { resolveProjectArtifactConfig } from "./project-storage.server";
-import { sanitizeFilename, inferMimeType } from "~/lib/file-utils";
+import fs from 'fs/promises';
+import path from 'path';
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  DeleteObjectCommand,
+} from '@aws-sdk/client-s3';
+import { env } from './env.server';
+import { getConfigDir } from './helpers.server';
+import type { ArtifactRecord } from './types';
+import type { Project } from './db/schema';
+import { resolveProjectArtifactConfig } from './project-storage.server';
+import { sanitizeFilename, inferMimeType } from '~/lib/file-utils';
 
-const DEFAULT_ARTIFACT_PREFIX = "open-analyst-artifacts";
+const DEFAULT_ARTIFACT_PREFIX = 'open-analyst-artifacts';
 
 function getS3Client(input: { region?: string; endpoint?: string }): S3Client {
   return new S3Client({
@@ -24,16 +29,23 @@ function parseS3Uri(uri: string): { bucket: string; key: string } {
 }
 
 function isGenericMimeType(value: string | undefined): boolean {
-  const mimeType = String(value || "").trim().toLowerCase();
-  return !mimeType || mimeType === "application/octet-stream";
+  const mimeType = String(value || '')
+    .trim()
+    .toLowerCase();
+  return !mimeType || mimeType === 'application/octet-stream';
 }
 
 async function streamToBuffer(value: unknown): Promise<Buffer> {
   if (!value) return Buffer.alloc(0);
   if (value instanceof Uint8Array) return Buffer.from(value);
   if (Buffer.isBuffer(value)) return value;
-  if (typeof (value as { transformToByteArray?: () => Promise<Uint8Array> }).transformToByteArray === "function") {
-    return Buffer.from(await (value as { transformToByteArray: () => Promise<Uint8Array> }).transformToByteArray());
+  if (
+    typeof (value as { transformToByteArray?: () => Promise<Uint8Array> }).transformToByteArray ===
+    'function'
+  ) {
+    return Buffer.from(
+      await (value as { transformToByteArray: () => Promise<Uint8Array> }).transformToByteArray()
+    );
   }
   const chunks: Buffer[] = [];
   for await (const chunk of value as AsyncIterable<Buffer | Uint8Array | string>) {
@@ -51,11 +63,14 @@ export async function storeArtifact(input: {
   const backend = resolveProjectArtifactConfig(input.project);
   const filename = sanitizeFilename(input.filename);
 
-  if (backend.backend === "s3") {
+  if (backend.backend === 's3') {
     if (!backend.bucket) {
-      throw new Error("Artifact S3 bucket is required for this project");
+      throw new Error('Artifact S3 bucket is required for this project');
     }
-    const key = `${backend.keyPrefix || DEFAULT_ARTIFACT_PREFIX}/${Date.now()}-${filename}`.replace(/^\/+|\/+$/g, "");
+    const key = `${backend.keyPrefix || DEFAULT_ARTIFACT_PREFIX}/${Date.now()}-${filename}`.replace(
+      /^\/+|\/+$/g,
+      ''
+    );
     const client = getS3Client({
       region: backend.region,
       endpoint: backend.endpoint,
@@ -69,7 +84,7 @@ export async function storeArtifact(input: {
       })
     );
     return {
-      backend: "s3",
+      backend: 's3',
       storageUri: `s3://${backend.bucket}/${key}`,
       filename,
       mimeType: input.mimeType || inferMimeType(filename),
@@ -77,12 +92,12 @@ export async function storeArtifact(input: {
     };
   }
 
-  const dir = backend.localArtifactDir || path.join(getConfigDir(), "captures", input.project.id);
+  const dir = backend.localArtifactDir || path.join(getConfigDir(), 'captures', input.project.id);
   await fs.mkdir(dir, { recursive: true });
   const fullPath = path.join(dir, `${Date.now()}-${filename}`);
   await fs.writeFile(fullPath, input.buffer);
   return {
-    backend: "local",
+    backend: 'local',
     storageUri: fullPath,
     filename,
     mimeType: input.mimeType || inferMimeType(filename),
@@ -95,12 +110,15 @@ export async function readArtifact(input: {
   filename?: string;
   mimeType?: string;
 }): Promise<{ body: Buffer; filename: string; mimeType: string; size: number }> {
-  const storageUri = String(input.storageUri || "").trim();
-  if (!storageUri) throw new Error("storageUri is required");
+  const storageUri = String(input.storageUri || '').trim();
+  if (!storageUri) throw new Error('storageUri is required');
 
-  if (storageUri.startsWith("s3://")) {
+  if (storageUri.startsWith('s3://')) {
     const { bucket, key } = parseS3Uri(storageUri);
-    const client = getS3Client({ region: env.ARTIFACT_S3_REGION, endpoint: env.ARTIFACT_S3_ENDPOINT });
+    const client = getS3Client({
+      region: env.ARTIFACT_S3_REGION,
+      endpoint: env.ARTIFACT_S3_ENDPOINT,
+    });
     const result = await client.send(
       new GetObjectCommand({
         Bucket: bucket,
@@ -117,8 +135,8 @@ export async function readArtifact(input: {
     return { body, filename, mimeType, size: body.length };
   }
 
-  const normalized = storageUri.startsWith("file://")
-    ? storageUri.slice("file://".length)
+  const normalized = storageUri.startsWith('file://')
+    ? storageUri.slice('file://'.length)
     : storageUri;
   const body = await fs.readFile(normalized);
   const filename = input.filename || path.basename(normalized);
@@ -129,24 +147,23 @@ export async function readArtifact(input: {
 }
 
 export async function deleteArtifact(storageUri: string): Promise<void> {
-  const uri = String(storageUri || "").trim();
+  const uri = String(storageUri || '').trim();
   if (!uri) return;
 
-  if (uri.startsWith("s3://")) {
+  if (uri.startsWith('s3://')) {
     const { bucket, key } = parseS3Uri(uri);
-    const client = getS3Client({ region: env.ARTIFACT_S3_REGION, endpoint: env.ARTIFACT_S3_ENDPOINT });
-    await client.send(
-      new DeleteObjectCommand({ Bucket: bucket, Key: key })
-    );
+    const client = getS3Client({
+      region: env.ARTIFACT_S3_REGION,
+      endpoint: env.ARTIFACT_S3_ENDPOINT,
+    });
+    await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
     return;
   }
 
-  const normalized = uri.startsWith("file://")
-    ? uri.slice("file://".length)
-    : uri;
+  const normalized = uri.startsWith('file://') ? uri.slice('file://'.length) : uri;
   try {
     await fs.unlink(normalized);
   } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
 }

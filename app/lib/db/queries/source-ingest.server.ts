@@ -1,9 +1,6 @@
-import { queryRow, queryRows } from "../index.server";
-import {
-  type SourceIngestBatch,
-  type SourceIngestItem,
-} from "../schema";
-import { normalizeUuid } from "~/lib/uuid";
+import { queryRow, queryRows } from '../index.server';
+import { type SourceIngestBatch, type SourceIngestItem } from '../schema';
+import { normalizeUuid } from '~/lib/uuid';
 
 export type SourceIngestBatchWithItems = SourceIngestBatch & {
   items: SourceIngestItem[];
@@ -26,7 +23,7 @@ export async function listSourceIngestBatches(
           WHERE project_id = $1 AND status = ANY($2::text[])
           ORDER BY updated_at DESC
         `,
-        [projectId, statuses],
+        [projectId, statuses]
       )
     : await queryRows<SourceIngestBatch>(
         `
@@ -35,7 +32,7 @@ export async function listSourceIngestBatches(
           WHERE project_id = $1
           ORDER BY updated_at DESC
         `,
-        [projectId],
+        [projectId]
       );
 
   if (!batches.length) return [];
@@ -46,7 +43,7 @@ export async function listSourceIngestBatches(
       WHERE batch_id = ANY($1::uuid[])
       ORDER BY created_at ASC
     `,
-    [batches.map((batch) => batch.id)],
+    [batches.map((batch) => batch.id)]
   );
   const itemsByBatchId = new Map<string, SourceIngestItem[]>();
   for (const item of items) {
@@ -71,7 +68,7 @@ export async function getSourceIngestBatch(
       WHERE project_id = $1 AND id = $2
       LIMIT 1
     `,
-    [projectId, batchId],
+    [projectId, batchId]
   );
   if (!batch) return undefined;
   const items = await queryRows<SourceIngestItem>(
@@ -81,7 +78,7 @@ export async function getSourceIngestBatch(
       WHERE batch_id = $1
       ORDER BY created_at ASC
     `,
-    [batch.id],
+    [batch.id]
   );
   return { ...batch, items };
 }
@@ -129,16 +126,16 @@ export async function createSourceIngestBatch(
     [
       projectId,
       normalizedCollectionId,
-      String(input.collectionName || "Research Inbox").trim(),
-      String(input.origin || "literature").trim(),
-      String(input.status || "staged").trim(),
-      String(input.query || "").trim(),
-      String(input.summary || "").trim(),
+      String(input.collectionName || 'Research Inbox').trim(),
+      String(input.origin || 'literature').trim(),
+      String(input.status || 'staged').trim(),
+      String(input.query || '').trim(),
+      String(input.summary || '').trim(),
       input.requestedCount ?? input.items.length,
       jsonParam(input.metadata, {}),
-    ],
+    ]
   );
-  if (!batch) throw new Error("Source ingest batch insert failed");
+  if (!batch) throw new Error('Source ingest batch insert failed');
 
   const items: SourceIngestItem[] = [];
   for (const item of input.items) {
@@ -163,12 +160,12 @@ export async function createSourceIngestBatch(
         projectId,
         item.externalId || null,
         item.sourceUrl || null,
-        String(item.title || "Untitled Source").trim(),
+        String(item.title || 'Untitled Source').trim(),
         item.mimeTypeHint || null,
         item.targetFilename || null,
         jsonParam(item.normalizedMetadata, {}),
-        String(item.status || "staged").trim(),
-      ],
+        String(item.status || 'staged').trim(),
+      ]
     );
     if (inserted) items.push(inserted);
   }
@@ -191,7 +188,7 @@ export async function updateSourceIngestBatch(
     rejectedAt: Date | null;
   }>
 ): Promise<SourceIngestBatch> {
-  const clauses: string[] = ["updated_at = NOW()"];
+  const clauses: string[] = ['updated_at = NOW()'];
   const params: unknown[] = [];
   if (updates.collectionId !== undefined) {
     params.push(normalizeUuid(updates.collectionId));
@@ -233,11 +230,11 @@ export async function updateSourceIngestBatch(
   const batch = await queryRow<SourceIngestBatch>(
     `
       UPDATE source_ingest_batches
-      SET ${clauses.join(", ")}
+      SET ${clauses.join(', ')}
       WHERE project_id = $${params.length - 1} AND id = $${params.length}
       RETURNING *
     `,
-    params,
+    params
   );
   if (!batch) throw new Error(`Source ingest batch not found: ${batchId}`);
   return batch;
@@ -255,7 +252,7 @@ export async function updateSourceIngestItem(
     importedAt: Date | null;
   }>
 ): Promise<SourceIngestItem> {
-  const clauses: string[] = ["updated_at = NOW()"];
+  const clauses: string[] = ['updated_at = NOW()'];
   const params: unknown[] = [];
   if (updates.documentId !== undefined) {
     params.push(updates.documentId);
@@ -285,11 +282,11 @@ export async function updateSourceIngestItem(
   const item = await queryRow<SourceIngestItem>(
     `
       UPDATE source_ingest_items
-      SET ${clauses.join(", ")}
+      SET ${clauses.join(', ')}
       WHERE project_id = $${params.length - 1} AND id = $${params.length}
       RETURNING *
     `,
-    params,
+    params
   );
   if (!item) throw new Error(`Source ingest item not found: ${itemId}`);
   return item;

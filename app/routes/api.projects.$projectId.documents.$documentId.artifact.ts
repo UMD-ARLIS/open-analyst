@@ -1,25 +1,24 @@
-import { getDocument } from "~/lib/db/queries/documents.server";
-import { readArtifact } from "~/lib/artifacts.server";
-import { inferMimeType } from "~/lib/file-utils";
+import { getDocument } from '~/lib/db/queries/documents.server';
+import { readArtifact } from '~/lib/artifacts.server';
+import { inferMimeType } from '~/lib/file-utils';
 
-function getMetadataValue(
-  metadata: unknown,
-  key: string
-): string | undefined {
-  if (!metadata || typeof metadata !== "object") return undefined;
+function getMetadataValue(metadata: unknown, key: string): string | undefined {
+  if (!metadata || typeof metadata !== 'object') return undefined;
   const value = (metadata as Record<string, unknown>)[key];
-  if (typeof value !== "string") return undefined;
+  if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed || undefined;
 }
 
 function encodeDispositionFilename(filename: string): string {
-  return filename.replace(/["\\]/g, "_");
+  return filename.replace(/["\\]/g, '_');
 }
 
 function normalizeMimeType(filename: string, mimeType: string): string {
-  const value = String(mimeType || "").trim().toLowerCase();
-  if (!value || value === "application/octet-stream" || value === "binary/octet-stream") {
+  const value = String(mimeType || '')
+    .trim()
+    .toLowerCase();
+  if (!value || value === 'application/octet-stream' || value === 'binary/octet-stream') {
     return inferMimeType(filename);
   }
   return mimeType;
@@ -34,16 +33,14 @@ export async function loader({
 }) {
   const document = await getDocument(params.projectId, params.documentId);
   if (!document) {
-    return Response.json({ error: "Document not found" }, { status: 404 });
+    return Response.json({ error: 'Document not found' }, { status: 404 });
   }
   if (!document.storageUri) {
-    return Response.json({ error: "Document has no artifact" }, { status: 404 });
+    return Response.json({ error: 'Document has no artifact' }, { status: 404 });
   }
 
-  const filename =
-    getMetadataValue(document.metadata, "filename") || document.title || "artifact";
-  const mimeType =
-    getMetadataValue(document.metadata, "mimeType") || "application/octet-stream";
+  const filename = getMetadataValue(document.metadata, 'filename') || document.title || 'artifact';
+  const mimeType = getMetadataValue(document.metadata, 'mimeType') || 'application/octet-stream';
 
   try {
     const artifact = await readArtifact({
@@ -52,15 +49,14 @@ export async function loader({
       mimeType,
     });
     const url = new URL(request.url);
-    const disposition =
-      url.searchParams.get("download") === "1" ? "attachment" : "inline";
+    const disposition = url.searchParams.get('download') === '1' ? 'attachment' : 'inline';
 
     return new Response(artifact.body, {
       headers: {
-        "Content-Type": normalizeMimeType(artifact.filename, artifact.mimeType),
-        "Content-Length": String(artifact.size),
-        "Cache-Control": "private, max-age=60",
-        "Content-Disposition": `${disposition}; filename="${encodeDispositionFilename(
+        'Content-Type': normalizeMimeType(artifact.filename, artifact.mimeType),
+        'Content-Length': String(artifact.size),
+        'Cache-Control': 'private, max-age=60',
+        'Content-Disposition': `${disposition}; filename="${encodeDispositionFilename(
           artifact.filename
         )}"`,
       },

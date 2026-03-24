@@ -1,8 +1,8 @@
-import { getProjectProfile } from "~/lib/db/queries/workspace.server";
-import { env } from "~/lib/env.server";
-import { getMcpStatus, getMcpTools, listMcpServers } from "~/lib/mcp.server";
-import { listActiveSkills } from "~/lib/skills.server";
-import { listAvailableTools } from "~/lib/tools.server";
+import { getProjectProfile } from '~/lib/db/queries/workspace.server';
+import { env } from '~/lib/env.server';
+import { getMcpStatus, getMcpTools, listMcpServers } from '~/lib/mcp.server';
+import { listActiveSkills } from '~/lib/skills.server';
+import { listAvailableTools } from '~/lib/tools.server';
 
 const RUNTIME_URL = env.LANGGRAPH_RUNTIME_URL;
 
@@ -20,7 +20,7 @@ export interface WorkspaceConnectorSummary {
 export interface WorkspaceToolSummary {
   name: string;
   description: string;
-  source: "local" | "mcp";
+  source: 'local' | 'mcp';
   serverId?: string;
   serverName?: string;
   active: boolean;
@@ -66,19 +66,17 @@ export interface WorkspaceContextData {
   };
 }
 
-export async function buildWorkspaceContext(
-  projectId: string
-): Promise<WorkspaceContextData> {
+export async function buildWorkspaceContext(projectId: string): Promise<WorkspaceContextData> {
   const fetchStoreMemories = async () => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10_000);
     try {
       const res = await fetch(`${RUNTIME_URL}/store/items/search`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
         body: JSON.stringify({
-          namespace_prefix: ["open-analyst", "projects", projectId, "memories"],
+          namespace_prefix: ['open-analyst', 'projects', projectId, 'memories'],
           limit: 50,
         }),
       });
@@ -92,14 +90,7 @@ export async function buildWorkspaceContext(
     }
   };
 
-  const [
-    profile,
-    serverConfigs,
-    statuses,
-    discoveredTools,
-    storeMemories,
-    activeSkills,
-  ] =
+  const [profile, serverConfigs, statuses, discoveredTools, storeMemories, activeSkills] =
     await Promise.all([
       getProjectProfile(projectId),
       Promise.resolve(listMcpServers()),
@@ -113,18 +104,18 @@ export async function buildWorkspaceContext(
     const value = (item.value ?? {}) as Record<string, unknown>;
     return {
       id: item.key as string,
-      title: String(value.title || ""),
-      summary: String(value.summary || ""),
-      memoryType: String(value.memoryType || value.memory_type || "note"),
-      status: String(value.status || "active"),
+      title: String(value.title || ''),
+      summary: String(value.summary || ''),
+      memoryType: String(value.memoryType || value.memory_type || 'note'),
+      status: String(value.status || 'active'),
     };
   });
-  const activeMemories = allMemories.filter(
-    (m: { status: string }) => m.status === "active"
-  ).slice(0, 12);
-  const proposedMemories = allMemories.filter(
-    (m: { status: string }) => m.status === "proposed"
-  ).slice(0, 12);
+  const activeMemories = allMemories
+    .filter((m: { status: string }) => m.status === 'active')
+    .slice(0, 12);
+  const proposedMemories = allMemories
+    .filter((m: { status: string }) => m.status === 'proposed')
+    .slice(0, 12);
 
   const enabledConnectorIds = serverConfigs
     .filter((server) => server.enabled)
@@ -158,13 +149,13 @@ export async function buildWorkspaceContext(
     ...listAvailableTools().map((tool) => ({
       name: tool.name,
       description: tool.description,
-      source: "local" as const,
+      source: 'local' as const,
       active: true,
     })),
     ...discoveredTools.map((tool) => ({
       name: tool.name,
       description: tool.description,
-      source: "mcp" as const,
+      source: 'mcp' as const,
       serverId: tool.serverId,
       serverName: tool.serverName,
       active: activeConnectorSet.has(tool.serverId),
@@ -177,7 +168,7 @@ export async function buildWorkspaceContext(
     connectors,
     tools,
     skills: activeSkills
-      .filter((skill) => skill.id !== "repo-skill-skill-creator")
+      .filter((skill) => skill.id !== 'repo-skill-skill-creator')
       .map((skill) => ({
         id: skill.id,
         name: skill.name,
@@ -188,17 +179,17 @@ export async function buildWorkspaceContext(
         sourceKind: skill.source?.kind,
       })),
     profile: {
-      brief: String(profile?.brief || ""),
+      brief: String(profile?.brief || ''),
       retrievalPolicy:
-        profile?.retrievalPolicy && typeof profile.retrievalPolicy === "object"
+        profile?.retrievalPolicy && typeof profile.retrievalPolicy === 'object'
           ? (profile.retrievalPolicy as Record<string, unknown>)
           : {},
       memoryProfile:
-        profile?.memoryProfile && typeof profile.memoryProfile === "object"
+        profile?.memoryProfile && typeof profile.memoryProfile === 'object'
           ? (profile.memoryProfile as Record<string, unknown>)
           : {},
       agentPolicies:
-        profile?.agentPolicies && typeof profile.agentPolicies === "object"
+        profile?.agentPolicies && typeof profile.agentPolicies === 'object'
           ? (profile.agentPolicies as Record<string, unknown>)
           : {},
       defaultConnectorIds: Array.isArray(profile?.defaultConnectorIds)
@@ -207,20 +198,36 @@ export async function buildWorkspaceContext(
     },
     taskContext: {},
     memories: {
-      active: activeMemories.map((memory: { id: string; title: string; summary: string; memoryType: string; status: string }) => ({
-        id: memory.id,
-        title: memory.title,
-        summary: memory.summary,
-        memoryType: memory.memoryType,
-        status: memory.status,
-      })),
-      proposed: proposedMemories.map((memory: { id: string; title: string; summary: string; memoryType: string; status: string }) => ({
-        id: memory.id,
-        title: memory.title,
-        summary: memory.summary,
-        memoryType: memory.memoryType,
-        status: memory.status,
-      })),
+      active: activeMemories.map(
+        (memory: {
+          id: string;
+          title: string;
+          summary: string;
+          memoryType: string;
+          status: string;
+        }) => ({
+          id: memory.id,
+          title: memory.title,
+          summary: memory.summary,
+          memoryType: memory.memoryType,
+          status: memory.status,
+        })
+      ),
+      proposed: proposedMemories.map(
+        (memory: {
+          id: string;
+          title: string;
+          summary: string;
+          memoryType: string;
+          status: string;
+        }) => ({
+          id: memory.id,
+          title: memory.title,
+          summary: memory.summary,
+          memoryType: memory.memoryType,
+          status: memory.status,
+        })
+      ),
     },
   };
 }

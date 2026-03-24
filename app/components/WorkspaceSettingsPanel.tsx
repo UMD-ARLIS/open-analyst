@@ -1,24 +1,26 @@
-import { useEffect, useMemo, useState } from "react";
-import { Database, Key, MemoryStick, Plug, Settings2, SlidersHorizontal, Activity } from "lucide-react";
-import { useAppStore } from "~/lib/store";
-import type { SettingsInitialData } from "./SettingsPanel";
+import { useEffect, useMemo, useState } from 'react';
 import {
-  APISettingsTab,
-  Banner,
-  ConnectorsTab,
-  CredentialsTab,
-  LogsTab,
-} from "./SettingsPanel";
-import type { WorkspaceContextData } from "~/lib/workspace-context.server";
+  Database,
+  Key,
+  MemoryStick,
+  Plug,
+  Settings2,
+  SlidersHorizontal,
+  Activity,
+} from 'lucide-react';
+import { useAppStore } from '~/lib/store';
+import type { SettingsInitialData } from './SettingsPanel';
+import { APISettingsTab, Banner, ConnectorsTab, CredentialsTab, LogsTab } from './SettingsPanel';
+import type { WorkspaceContextData } from '~/lib/workspace-context.server';
 
 type SettingsSection =
-  | "runtime"
-  | "connectors"
-  | "memory"
-  | "retrieval"
-  | "storage"
-  | "credentials"
-  | "diagnostics";
+  | 'runtime'
+  | 'connectors'
+  | 'memory'
+  | 'retrieval'
+  | 'storage'
+  | 'credentials'
+  | 'diagnostics';
 
 const SECTIONS: Array<{
   id: SettingsSection;
@@ -27,45 +29,45 @@ const SECTIONS: Array<{
   icon: typeof Settings2;
 }> = [
   {
-    id: "runtime",
-    label: "Runtime",
-    description: "Model and orchestration defaults",
+    id: 'runtime',
+    label: 'Runtime',
+    description: 'Model and orchestration defaults',
     icon: Settings2,
   },
   {
-    id: "connectors",
-    label: "Connectors",
-    description: "Project defaults and active services",
+    id: 'connectors',
+    label: 'Connectors',
+    description: 'Project defaults and active services',
     icon: Plug,
   },
   {
-    id: "memory",
-    label: "Memory",
-    description: "Promotion and recall behavior",
+    id: 'memory',
+    label: 'Memory',
+    description: 'Promotion and recall behavior',
     icon: MemoryStick,
   },
   {
-    id: "retrieval",
-    label: "Retrieval",
-    description: "Source ranking and grounding",
+    id: 'retrieval',
+    label: 'Retrieval',
+    description: 'Source ranking and grounding',
     icon: SlidersHorizontal,
   },
   {
-    id: "storage",
-    label: "Storage",
-    description: "Workspace and artifact persistence",
+    id: 'storage',
+    label: 'Storage',
+    description: 'Workspace and artifact persistence',
     icon: Database,
   },
   {
-    id: "credentials",
-    label: "Credentials",
-    description: "Secrets and service access",
+    id: 'credentials',
+    label: 'Credentials',
+    description: 'Secrets and service access',
     icon: Key,
   },
   {
-    id: "diagnostics",
-    label: "Diagnostics",
-    description: "Logs and runtime inspection",
+    id: 'diagnostics',
+    label: 'Diagnostics',
+    description: 'Logs and runtime inspection',
     icon: Activity,
   },
 ];
@@ -83,13 +85,13 @@ export function WorkspaceSettingsPanel({
   projectId,
   workspaceContext,
   initialData,
-  activeSection = "runtime",
+  activeSection = 'runtime',
   onSectionChange,
   onClose,
 }: WorkspaceSettingsPanelProps) {
   const upsertProject = useAppStore((state) => state.upsertProject);
-  const activeProject = useAppStore((state) =>
-    state.projects.find((project) => project.id === projectId) || null
+  const activeProject = useAppStore(
+    (state) => state.projects.find((project) => project.id === projectId) || null
   );
   const [memoryProfile, setMemoryProfile] = useState<Record<string, unknown>>(
     workspaceContext.profile.memoryProfile
@@ -102,16 +104,16 @@ export function WorkspaceSettingsPanel({
     workspaceContext.profile.defaultConnectorIds
   );
   const [storageDraft, setStorageDraft] = useState({
-    workspaceLocalRoot: activeProject?.workspaceLocalRoot || "",
-    artifactBackend: activeProject?.artifactBackend || "env",
-    artifactLocalRoot: activeProject?.artifactLocalRoot || "",
-    artifactS3Bucket: activeProject?.artifactS3Bucket || "",
-    artifactS3Region: activeProject?.artifactS3Region || "",
-    artifactS3Endpoint: activeProject?.artifactS3Endpoint || "",
-    artifactS3Prefix: activeProject?.artifactS3Prefix || "",
+    workspaceLocalRoot: activeProject?.workspaceLocalRoot || '',
+    artifactBackend: activeProject?.artifactBackend || 'env',
+    artifactLocalRoot: activeProject?.artifactLocalRoot || '',
+    artifactS3Bucket: activeProject?.artifactS3Bucket || '',
+    artifactS3Region: activeProject?.artifactS3Region || '',
+    artifactS3Endpoint: activeProject?.artifactS3Endpoint || '',
+    artifactS3Prefix: activeProject?.artifactS3Prefix || '',
   });
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const defaultSet = useMemo(() => new Set(defaultConnectorIds), [defaultConnectorIds]);
 
   useEffect(() => {
@@ -123,37 +125,37 @@ export function WorkspaceSettingsPanel({
 
   useEffect(() => {
     setStorageDraft({
-      workspaceLocalRoot: activeProject?.workspaceLocalRoot || "",
-      artifactBackend: activeProject?.artifactBackend || "env",
-      artifactLocalRoot: activeProject?.artifactLocalRoot || "",
-      artifactS3Bucket: activeProject?.artifactS3Bucket || "",
-      artifactS3Region: activeProject?.artifactS3Region || "",
-      artifactS3Endpoint: activeProject?.artifactS3Endpoint || "",
-      artifactS3Prefix: activeProject?.artifactS3Prefix || "",
+      workspaceLocalRoot: activeProject?.workspaceLocalRoot || '',
+      artifactBackend: activeProject?.artifactBackend || 'env',
+      artifactLocalRoot: activeProject?.artifactLocalRoot || '',
+      artifactS3Bucket: activeProject?.artifactS3Bucket || '',
+      artifactS3Region: activeProject?.artifactS3Region || '',
+      artifactS3Endpoint: activeProject?.artifactS3Endpoint || '',
+      artifactS3Prefix: activeProject?.artifactS3Prefix || '',
     });
   }, [activeProject]);
 
   const saveProfile = async (payload: Record<string, unknown>) => {
     const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw new Error(body.error || "Failed to save project settings");
+      throw new Error(body.error || 'Failed to save project settings');
     }
-    if (body.project && typeof body.project === "object") {
+    if (body.project && typeof body.project === 'object') {
       upsertProject(body.project as Parameters<typeof upsertProject>[0]);
     }
   };
 
-  const withStatus = async (work: () => Promise<void>, message = "Saved.") => {
-    setError("");
+  const withStatus = async (work: () => Promise<void>, message = 'Saved.') => {
+    setError('');
     try {
       await work();
       setSuccess(message);
-      window.setTimeout(() => setSuccess(""), 2000);
+      window.setTimeout(() => setSuccess(''), 2000);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : String(nextError));
     }
@@ -169,8 +171,8 @@ export function WorkspaceSettingsPanel({
             onClick={() => onSectionChange?.(section.id)}
             className={`w-full rounded-xl px-3 py-2.5 text-left ${
               activeSection === section.id
-                ? "bg-accent/10 text-accent"
-                : "text-text-secondary hover:bg-surface-hover"
+                ? 'bg-accent/10 text-accent'
+                : 'text-text-secondary hover:bg-surface-hover'
             }`}
           >
             <div className="flex items-center gap-2">
@@ -194,11 +196,7 @@ export function WorkspaceSettingsPanel({
               {SECTIONS.find((section) => section.id === activeSection)?.label}
             </h2>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="btn btn-secondary text-sm"
-          >
+          <button type="button" onClick={onClose} className="btn btn-secondary text-sm">
             Close
           </button>
         </div>
@@ -206,7 +204,7 @@ export function WorkspaceSettingsPanel({
         {error ? <Banner tone="error" text={error} /> : null}
         {success ? <Banner tone="success" text={success} /> : null}
 
-        {activeSection === "runtime" ? (
+        {activeSection === 'runtime' ? (
           <div className="space-y-4">
             <APISettingsTab currentModel={initialData?.currentModel} />
             <div className="rounded-xl border border-border bg-background-secondary p-4 space-y-3">
@@ -221,7 +219,10 @@ export function WorkspaceSettingsPanel({
                 type="button"
                 className="btn btn-primary text-sm"
                 onClick={() =>
-                  void withStatus(() => saveProfile({ brief: projectBrief }), "Project brief saved.")
+                  void withStatus(
+                    () => saveProfile({ brief: projectBrief }),
+                    'Project brief saved.'
+                  )
                 }
               >
                 Save brief
@@ -230,7 +231,7 @@ export function WorkspaceSettingsPanel({
           </div>
         ) : null}
 
-        {activeSection === "connectors" ? (
+        {activeSection === 'connectors' ? (
           <div className="space-y-4">
             <div className="rounded-xl border border-border bg-background-secondary p-4">
               <h3 className="text-sm font-semibold mb-3">Project defaults</h3>
@@ -252,7 +253,12 @@ export function WorkspaceSettingsPanel({
                     <div className="min-w-0">
                       <div className="text-sm font-medium">{connector.name}</div>
                       <div className="text-xs text-text-muted">
-                        {connector.connected ? "Connected" : connector.enabled ? "Unavailable" : "Disabled"} · {connector.toolCount} tools
+                        {connector.connected
+                          ? 'Connected'
+                          : connector.enabled
+                            ? 'Unavailable'
+                            : 'Disabled'}{' '}
+                        · {connector.toolCount} tools
                       </div>
                     </div>
                   </label>
@@ -264,7 +270,7 @@ export function WorkspaceSettingsPanel({
                 onClick={() =>
                   void withStatus(
                     () => saveProfile({ defaultConnectorIds }),
-                    "Project default connectors saved."
+                    'Project default connectors saved.'
                   )
                 }
               >
@@ -279,14 +285,14 @@ export function WorkspaceSettingsPanel({
           </div>
         ) : null}
 
-        {activeSection === "memory" ? (
+        {activeSection === 'memory' ? (
           <div className="space-y-4">
             <div className="rounded-xl border border-border bg-background-secondary p-4 space-y-3">
               <label className="text-sm">
                 Memory strategy
                 <select
                   className="input mt-1"
-                  value={String(memoryProfile.strategy || "explicit")}
+                  value={String(memoryProfile.strategy || 'explicit')}
                   onChange={(event) =>
                     setMemoryProfile((current) => ({
                       ...current,
@@ -332,10 +338,7 @@ export function WorkspaceSettingsPanel({
                 type="button"
                 className="btn btn-primary text-sm"
                 onClick={() =>
-                  void withStatus(
-                    () => saveProfile({ memoryProfile }),
-                    "Memory policy saved."
-                  )
+                  void withStatus(() => saveProfile({ memoryProfile }), 'Memory policy saved.')
                 }
               >
                 Save memory policy
@@ -345,7 +348,7 @@ export function WorkspaceSettingsPanel({
           </div>
         ) : null}
 
-        {activeSection === "retrieval" ? (
+        {activeSection === 'retrieval' ? (
           <div className="rounded-xl border border-border bg-background-secondary p-4 space-y-3">
             <label className="text-sm">
               Retrieval limit
@@ -397,10 +400,7 @@ export function WorkspaceSettingsPanel({
               type="button"
               className="btn btn-primary text-sm"
               onClick={() =>
-                void withStatus(
-                  () => saveProfile({ retrievalPolicy }),
-                  "Retrieval policy saved."
-                )
+                void withStatus(() => saveProfile({ retrievalPolicy }), 'Retrieval policy saved.')
               }
             >
               Save retrieval policy
@@ -408,7 +408,7 @@ export function WorkspaceSettingsPanel({
           </div>
         ) : null}
 
-        {activeSection === "storage" ? (
+        {activeSection === 'storage' ? (
           <div className="rounded-xl border border-border bg-background-secondary p-4 space-y-3">
             <label className="text-sm">
               Workspace root override
@@ -512,10 +512,7 @@ export function WorkspaceSettingsPanel({
               type="button"
               className="btn btn-primary text-sm"
               onClick={() =>
-                void withStatus(
-                  () => saveProfile(storageDraft),
-                  "Project storage settings saved."
-                )
+                void withStatus(() => saveProfile(storageDraft), 'Project storage settings saved.')
               }
             >
               Save storage settings
@@ -523,11 +520,11 @@ export function WorkspaceSettingsPanel({
           </div>
         ) : null}
 
-        {activeSection === "credentials" ? (
+        {activeSection === 'credentials' ? (
           <CredentialsTab initialItems={initialData?.credentials} />
         ) : null}
 
-        {activeSection === "diagnostics" ? (
+        {activeSection === 'diagnostics' ? (
           <LogsTab initialEnabled={initialData?.logsEnabled} />
         ) : null}
       </div>

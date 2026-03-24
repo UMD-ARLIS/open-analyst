@@ -1,23 +1,20 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir } from 'node:fs/promises';
 import {
   getProject,
   updateProject,
   deleteProject,
   listProjects,
-} from "~/lib/db/queries/projects.server";
-import { upsertSettings } from "~/lib/db/queries/settings.server";
-import { upsertProjectProfile } from "~/lib/db/queries/workspace.server";
-import { resolveProjectWorkspace } from "~/lib/project-storage.server";
-import { parseJsonBody } from "~/lib/request-utils";
-import type { Route } from "./+types/api.projects.$projectId";
+} from '~/lib/db/queries/projects.server';
+import { upsertSettings } from '~/lib/db/queries/settings.server';
+import { upsertProjectProfile } from '~/lib/db/queries/workspace.server';
+import { resolveProjectWorkspace } from '~/lib/project-storage.server';
+import { parseJsonBody } from '~/lib/request-utils';
+import type { Route } from './+types/api.projects.$projectId';
 
 export async function loader({ params }: Route.LoaderArgs) {
   const project = await getProject(params.projectId);
   if (!project) {
-    return Response.json(
-      { error: `Project not found: ${params.projectId}` },
-      { status: 404 }
-    );
+    return Response.json({ error: `Project not found: ${params.projectId}` }, { status: 404 });
   }
   return Response.json({ project });
 }
@@ -25,7 +22,7 @@ export async function loader({ params }: Route.LoaderArgs) {
 export async function action({ request, params }: Route.ActionArgs) {
   const projectId = params.projectId;
 
-  if (request.method === "PATCH") {
+  if (request.method === 'PATCH') {
     const body = await parseJsonBody(request);
     if (body instanceof Response) return body;
     try {
@@ -46,17 +43,17 @@ export async function action({ request, params }: Route.ActionArgs) {
         defaultConnectorIds !== undefined
       ) {
         await upsertProjectProfile(projectId, {
-          brief: typeof brief === "string" ? brief : undefined,
+          brief: typeof brief === 'string' ? brief : undefined,
           retrievalPolicy:
-            retrievalPolicy && typeof retrievalPolicy === "object"
+            retrievalPolicy && typeof retrievalPolicy === 'object'
               ? (retrievalPolicy as Record<string, unknown>)
               : undefined,
           memoryProfile:
-            memoryProfile && typeof memoryProfile === "object"
+            memoryProfile && typeof memoryProfile === 'object'
               ? (memoryProfile as Record<string, unknown>)
               : undefined,
           agentPolicies:
-            agentPolicies && typeof agentPolicies === "object"
+            agentPolicies && typeof agentPolicies === 'object'
               ? (agentPolicies as Record<string, unknown>)
               : undefined,
           defaultConnectorIds: Array.isArray(defaultConnectorIds)
@@ -74,7 +71,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     }
   }
 
-  if (request.method === "DELETE") {
+  if (request.method === 'DELETE') {
     try {
       const deleted = await deleteProject(projectId);
       const projects = await listProjects();
@@ -82,7 +79,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       await upsertSettings({ activeProjectId: newActiveId });
       return Response.json({
         ...deleted,
-        activeProjectId: newActiveId ?? "",
+        activeProjectId: newActiveId ?? '',
       });
     } catch (err) {
       return Response.json(
@@ -92,5 +89,5 @@ export async function action({ request, params }: Route.ActionArgs) {
     }
   }
 
-  return Response.json({ error: "Method not allowed" }, { status: 405 });
+  return Response.json({ error: 'Method not allowed' }, { status: 405 });
 }

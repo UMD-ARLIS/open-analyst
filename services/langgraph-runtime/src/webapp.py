@@ -11,6 +11,7 @@ endpoints — no custom routes are needed.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 from uuid import UUID
 
@@ -20,6 +21,8 @@ from fastapi.requests import Request
 
 from config import settings
 from runtime_context import derive_api_base_url, runtime_context_service
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="open-analyst-custom-routes")
 app.add_middleware(
@@ -238,14 +241,16 @@ async def _load_thread_metadata(thread_id: str) -> dict[str, Any]:
     try:
         from langgraph_api.api.runs import Threads
         from langgraph_runtime.database import connect
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to import Agent Server internals for thread %s: %s", thread_id, exc)
         return {}
 
     try:
         async with connect() as conn:
             thread_iter = await Threads.get(conn, thread_id)
             row = await anext(thread_iter)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to load metadata for thread %s: %s", thread_id, exc)
         return {}
 
     metadata = row.get("metadata") if isinstance(row, dict) else None

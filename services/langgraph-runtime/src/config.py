@@ -50,6 +50,7 @@ class RuntimeSettings(BaseSettings):
     embedding_dimensions: int = Field(default=1024)
     retrieval_limit: int = Field(default=6)
     retrieval_min_score: float = Field(default=0.2)
+    tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")
     langsmith_tracing: bool = Field(default=True, alias="LANGSMITH_TRACING")
     otel_service_name: str = Field(default="open-analyst-langgraph-runtime", alias="OTEL_SERVICE_NAME")
     otel_exporter_otlp_endpoint: str | None = Field(default=None, alias="OTEL_EXPORTER_OTLP_ENDPOINT")

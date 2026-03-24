@@ -1125,6 +1125,9 @@ def _system_prompt() -> str:
         "After parallel retriever branches finish, consolidate their candidates and request one final approval. Do not ask the user to approve each branch separately.\n\n"
         "Before launching a broad retrieval pass, check search_project_memories and reuse relevant findings unless the user explicitly asks for a refresh or revalidation. "
         "If the user asks what is already known or previously collected, default to memories and project documents first; do not launch new retrieval unless a concrete gap blocks an answer.\n\n"
+        "## Collection deduplication\n"
+        "Before adding items to a collection, always check whether the item already exists by calling search_project_documents first. "
+        "Never add duplicates to a collection. The system enforces dedup by sourceUri and title, but you should also avoid staging sources that are already in the project.\n\n"
         "You can invoke multiple task() calls in parallel for independent work "
         "(e.g., multiple retriever tasks for separate source sets, or multiple researcher tasks for competing hypotheses).\n"
         "When a request naturally decomposes into independent lines of effort, launch multiple subagents in parallel before synthesizing.\n\n"
@@ -1361,14 +1364,20 @@ async def _save_canvas_document_api(
     project_id: str,
     markdown: str,
     title: str = "Analysis Draft",
+    document_id: str | None = None,
 ) -> dict[str, Any] | None:
     api_base_url = str(api_base_url or "").rstrip("/")
     if not api_base_url or not markdown.strip():
         return None
     try:
         existing = await _list_canvas_documents_api(api_base_url, project_id)
-        if existing:
+        target: dict[str, Any] | None = None
+        if document_id:
+            target = next((d for d in existing if d.get("id") == document_id), None)
+        elif len(existing) == 1:
             target = existing[0]
+
+        if target:
             method = "PUT"
             body: dict[str, Any] = {
                 "id": target.get("id"),
@@ -2902,14 +2911,24 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         return json.dumps(documents)
 
     @tool
-    async def save_canvas_markdown(markdown: str, title: str = "Analysis Draft", runtime: ToolRuntime = None) -> str:
-        """Create or update the primary markdown canvas document for the current project."""
+    async def save_canvas_markdown(markdown: str, title: str = "Analysis Draft", document_id: str = "", runtime: ToolRuntime = None) -> str:
+        """Create or update a markdown canvas document for the current project.
+
+        Args:
+            markdown: The markdown content to save.
+            title: Document title (default "Analysis Draft").
+            document_id: Optional ID of an existing canvas document to update.
+                         If empty, updates the sole existing document or creates a new one.
+        """
         cfg = _get_project_config(runtime)
         api_base_url = cfg.get("api_base_url", "")
         project_id = cfg.get("project_id", "")
         if not project_id:
             return "{}"
-        document = await _save_canvas_document_api(api_base_url, project_id, markdown=markdown, title=title)
+        document = await _save_canvas_document_api(
+            api_base_url, project_id, markdown=markdown, title=title,
+            document_id=document_id or None,
+        )
         return json.dumps(document or {})
 
     @tool
@@ -2984,6 +3003,22 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         )
         return json.dumps(entry or {})
 
+    @tool
+    async def web_search(query: str, limit: int = 5, runtime: ToolRuntime = None) -> str:
+        """Search the web for a query and return summary results with source URLs."""
+        from web_tools import get_web_search_provider
+        provider = get_web_search_provider()
+        result = await provider.search(query, limit=limit)
+        return json.dumps(result)
+
+    @tool
+    async def web_fetch(url: str, runtime: ToolRuntime = None) -> str:
+        """Fetch and extract content from a web URL."""
+        from web_tools import get_web_search_provider
+        provider = get_web_search_provider()
+        result = await provider.fetch(url)
+        return json.dumps(result)
+
     # All tools are built here but the supervisor only gets a minimal
     # coordination set.  Heavy-lifting tools live on subagents exclusively
     # so the supervisor is forced to delegate via the task() tool.
@@ -2998,6 +3033,8 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         "approve_collected_literature": approve_collected_literature,
         "stage_literature_collection": stage_literature_collection,
         "stage_web_source": stage_web_source,
+        "web_search": web_search,
+        "web_fetch": web_fetch,
         "list_active_connectors": list_active_connectors,
         "list_active_skills": list_active_skills,
         "describe_runtime_capabilities": describe_runtime_capabilities,
@@ -3086,6 +3123,8 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["search_literature"],
                 tool_map["collect_literature_candidates"],
                 tool_map["stage_web_source"],
+                tool_map["web_search"],
+                tool_map["web_fetch"],
                 tool_map["search_project_documents"],
                 tool_map["read_project_document"],
                 tool_map["search_project_memories"],
@@ -3304,6 +3343,8 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["read_project_document"],
                 tool_map["search_project_memories"],
                 tool_map["search_literature"],
+                tool_map["web_search"],
+                tool_map["web_fetch"],
                 tool_map["list_canvas_documents"],
             ],
             "middleware": list(subagent_middleware),

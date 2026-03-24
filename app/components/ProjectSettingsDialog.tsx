@@ -1,5 +1,5 @@
-import { useEffect, useId, useRef, useState } from "react";
-import type { HeadlessProject } from "~/lib/headless-api";
+import { useEffect, useId, useRef, useState } from 'react';
+import type { HeadlessProject } from '~/lib/headless-api';
 
 type ProjectStorageForm = {
   workspaceLocalRoot: string;
@@ -21,13 +21,13 @@ interface ProjectSettingsDialogProps {
 
 function toInitialState(project: HeadlessProject | null): ProjectStorageForm {
   return {
-    workspaceLocalRoot: project?.workspaceLocalRoot || "",
-    artifactBackend: project?.artifactBackend || "env",
-    artifactLocalRoot: project?.artifactLocalRoot || "",
-    artifactS3Bucket: project?.artifactS3Bucket || "",
-    artifactS3Region: project?.artifactS3Region || "",
-    artifactS3Endpoint: project?.artifactS3Endpoint || "",
-    artifactS3Prefix: project?.artifactS3Prefix || "",
+    workspaceLocalRoot: project?.workspaceLocalRoot || '',
+    artifactBackend: project?.artifactBackend || 'env',
+    artifactLocalRoot: project?.artifactLocalRoot || '',
+    artifactS3Bucket: project?.artifactS3Bucket || '',
+    artifactS3Region: project?.artifactS3Region || '',
+    artifactS3Endpoint: project?.artifactS3Endpoint || '',
+    artifactS3Prefix: project?.artifactS3Prefix || '',
   };
 }
 
@@ -57,8 +57,8 @@ export function ProjectSettingsDialog({
 
   if (!open || !project) return null;
 
-  const isS3 = form.artifactBackend === "s3";
-  const isLocal = form.artifactBackend === "local";
+  const isS3 = form.artifactBackend === 's3';
+  const isLocal = form.artifactBackend === 'local';
 
   const handleSubmit = () => {
     onSave(form);
@@ -114,17 +114,17 @@ export function ProjectSettingsDialog({
             <span className="text-sm text-text-secondary">Artifact backend</span>
             <div className="flex flex-wrap gap-2">
               {[
-                { value: "env", label: "Use .env defaults" },
-                { value: "local", label: "Local override" },
-                { value: "s3", label: "S3 override" },
+                { value: 'env', label: 'Use .env defaults' },
+                { value: 'local', label: 'Local override' },
+                { value: 's3', label: 'S3 override' },
               ].map((option) => (
                 <button
                   key={option.value}
                   type="button"
                   className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
                     form.artifactBackend === option.value
-                      ? "border-accent bg-accent-muted text-accent"
-                      : "border-border text-text-secondary hover:bg-surface-hover"
+                      ? 'border-accent bg-accent-muted text-accent'
+                      : 'border-border text-text-secondary hover:bg-surface-hover'
                   }`}
                   onClick={() =>
                     setForm((current) => ({
@@ -139,7 +139,7 @@ export function ProjectSettingsDialog({
             </div>
           </div>
 
-          {(form.artifactBackend === "env" || isLocal) && (
+          {(form.artifactBackend === 'env' || isLocal) && (
             <div className="space-y-1">
               <label htmlFor={localArtifactRootId} className="text-sm text-text-secondary">
                 Local artifact root override
@@ -155,12 +155,12 @@ export function ProjectSettingsDialog({
                     artifactLocalRoot: event.target.value,
                   }))
                 }
-                placeholder={isLocal ? "Absolute path for project artifacts" : "Optional override"}
+                placeholder={isLocal ? 'Absolute path for project artifacts' : 'Optional override'}
               />
             </div>
           )}
 
-          {(form.artifactBackend === "env" || isS3) && (
+          {(form.artifactBackend === 'env' || isS3) && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-1">
                 <label htmlFor={s3BucketId} className="text-sm text-text-secondary">
@@ -237,8 +237,8 @@ export function ProjectSettingsDialog({
           )}
 
           <div className="rounded-lg border border-border bg-background-secondary px-3 py-2 text-sm text-text-secondary">
-            Files are stored under the project workspace slug, and artifact metadata keeps both
-            the raw storage URI and the stable app link.
+            Files are stored under the project workspace slug, and artifact metadata keeps both the
+            raw storage URI and the stable app link.
           </div>
 
           <div className="flex justify-end gap-2">
@@ -246,7 +246,7 @@ export function ProjectSettingsDialog({
               Cancel
             </button>
             <button className="btn btn-primary" onClick={handleSubmit} disabled={isSaving}>
-              {isSaving ? "Saving..." : "Save"}
+              {isSaving ? 'Saving...' : 'Save'}
             </button>
           </div>
         </div>

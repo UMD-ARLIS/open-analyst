@@ -88,7 +88,7 @@ export default function AppLayout() {
       setAppConfig(saved);
       revalidate();
     },
-    [setAppConfig, revalidate],
+    [setAppConfig, revalidate]
   );
 
   const handleConfigClose = useCallback(() => {
@@ -96,7 +96,10 @@ export default function AppLayout() {
   }, [setShowConfigModal]);
 
   return (
-    <div className="h-screen w-screen flex flex-col overflow-hidden bg-background" data-hydrated={hydrated || undefined}>
+    <div
+      className="h-screen w-screen flex flex-col overflow-hidden bg-background"
+      data-hydrated={hydrated || undefined}
+    >
       <TopNav />
 
       <div className="flex-1 flex overflow-hidden">
@@ -124,7 +127,6 @@ export default function AppLayout() {
         initialConfig={appConfig}
         isFirstRun={!isConfigured}
       />
-
     </div>
   );
 }

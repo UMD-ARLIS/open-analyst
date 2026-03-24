@@ -38,7 +38,9 @@ export function XlsxRenderer({ url }: XlsxRendererProps) {
         const parsed: SheetData[] = await Promise.all(
           sheetNames.map(async (sheetName) => ({
             name: sheetName,
-            rows: (await readXlsxFile(blob, { sheet: sheetName })).map((row) => normalizeRowValues(row)),
+            rows: (await readXlsxFile(blob, { sheet: sheetName })).map((row) =>
+              normalizeRowValues(row)
+            ),
           }))
         );
         if (!cancelled) setSheets(parsed);
@@ -48,7 +50,9 @@ export function XlsxRenderer({ url }: XlsxRendererProps) {
     }
 
     void load();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [url]);
 
   if (error) {
@@ -96,7 +100,10 @@ export function XlsxRenderer({ url }: XlsxRendererProps) {
         <table className="w-full text-xs border-collapse">
           <tbody>
             {displayRows.map((row, ri) => (
-              <tr key={ri} className={ri === 0 ? 'font-semibold bg-surface-muted' : 'border-t border-border'}>
+              <tr
+                key={ri}
+                className={ri === 0 ? 'font-semibold bg-surface-muted' : 'border-t border-border'}
+              >
                 {(row as unknown[]).map((cell, ci) => (
                   <td key={ci} className="px-2 py-1 whitespace-nowrap">
                     {cell != null ? String(cell) : ''}

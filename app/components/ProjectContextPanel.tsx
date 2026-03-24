@@ -1,23 +1,23 @@
-import { useParams, useSearchParams } from "react-router";
-import { useAppStore } from "~/lib/store";
-import { CanvasPanel } from "./CanvasPanel";
-import { FileViewerPanel } from "./FileViewerPanel";
-import { KnowledgePanel } from "./KnowledgePanel";
-import { ProjectRightDock } from "./ProjectRightDock";
+import { useParams, useSearchParams } from 'react-router';
+import { useAppStore } from '~/lib/store';
+import { CanvasPanel } from './CanvasPanel';
+import { FileViewerPanel } from './FileViewerPanel';
+import { KnowledgePanel } from './KnowledgePanel';
+import { ProjectRightDock } from './ProjectRightDock';
 
 export function ProjectContextPanel() {
   const params = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const artifact = useAppStore((state) => state.fileViewerArtifact);
   const projectId = params.projectId;
-  const panel = searchParams.get("panel");
+  const panel = searchParams.get('panel');
 
   const clearPanel = () => {
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
-        next.delete("panel");
-        next.delete("tab");
+        next.delete('panel');
+        next.delete('tab');
         return next;
       },
       { replace: true }
@@ -32,7 +32,7 @@ export function ProjectContextPanel() {
             setSearchParams(
               (prev) => {
                 const next = new URLSearchParams(prev);
-                next.set("panel", "sources");
+                next.set('panel', 'sources');
                 return next;
               },
               { replace: true }
@@ -47,7 +47,7 @@ export function ProjectContextPanel() {
     return null;
   }
 
-  if (panel === "sources") {
+  if (panel === 'sources') {
     return (
       <ProjectRightDock mode="sources">
         <KnowledgePanel projectId={projectId} onClose={clearPanel} />
@@ -55,7 +55,7 @@ export function ProjectContextPanel() {
     );
   }
 
-  if (panel === "canvas") {
+  if (panel === 'canvas') {
     return (
       <ProjectRightDock mode="canvas">
         <CanvasPanel projectId={projectId} onClose={clearPanel} />

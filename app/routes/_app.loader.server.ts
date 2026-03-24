@@ -1,14 +1,8 @@
-import { listProjects } from "~/lib/db/queries/projects.server";
-import {
-  getSettings,
-  upsertSettings,
-} from "~/lib/db/queries/settings.server";
-import {
-  listCollections,
-  getCollectionDocumentCounts,
-} from "~/lib/db/queries/documents.server";
-import { env } from "~/lib/env.server";
-import { resolveModel } from "~/lib/litellm.server";
+import { listProjects } from '~/lib/db/queries/projects.server';
+import { getSettings, upsertSettings } from '~/lib/db/queries/settings.server';
+import { listCollections, getCollectionDocumentCounts } from '~/lib/db/queries/documents.server';
+import { env } from '~/lib/env.server';
+import { resolveModel } from '~/lib/litellm.server';
 
 const RUNTIME_URL = env.LANGGRAPH_RUNTIME_URL;
 
@@ -34,8 +28,8 @@ async function fetchThreadsForProject(projectId: string): Promise<SidebarThread[
   const timeout = setTimeout(() => controller.abort(), 5_000);
   try {
     const res = await fetch(`${RUNTIME_URL}/threads/search`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       signal: controller.signal,
       body: JSON.stringify({ metadata: { project_id: projectId }, limit: 20 }),
     });
@@ -44,19 +38,19 @@ async function fetchThreadsForProject(projectId: string): Promise<SidebarThread[
     return threads.map((t) => ({
       id: t.thread_id,
       title:
-        typeof t.metadata?.title === "string" && t.metadata.title.trim()
+        typeof t.metadata?.title === 'string' && t.metadata.title.trim()
           ? t.metadata.title.trim()
-          : typeof t.metadata?.summary === "string" && t.metadata.summary.trim()
+          : typeof t.metadata?.summary === 'string' && t.metadata.summary.trim()
             ? t.metadata.summary.trim()
-            : "Untitled thread",
+            : 'Untitled thread',
       summary:
-        typeof t.metadata?.summary === "string" && t.metadata.summary.trim()
+        typeof t.metadata?.summary === 'string' && t.metadata.summary.trim()
           ? t.metadata.summary.trim()
           : null,
       status:
-        typeof t.status === "string"
+        typeof t.status === 'string'
           ? t.status
-          : typeof t.metadata?.status === "string"
+          : typeof t.metadata?.status === 'string'
             ? t.metadata.status
             : null,
       updatedAt: t.updated_at || null,
@@ -71,10 +65,7 @@ async function fetchThreadsForProject(projectId: string): Promise<SidebarThread[
 }
 
 export async function loader() {
-  const [projects, settings] = await Promise.all([
-    listProjects(),
-    getSettings(),
-  ]);
+  const [projects, settings] = await Promise.all([listProjects(), getSettings()]);
 
   // Validate the persisted model against LiteLLM.
   // If empty or no longer available, default to first available and persist.
@@ -95,18 +86,17 @@ export async function loader() {
   let sidebarCollections: Awaited<ReturnType<typeof listCollections>> = [];
   let sidebarDocumentCounts: Record<string, number> = {};
   if (activeProjectId) {
-    [sidebarThreads, sidebarCollections, sidebarDocumentCounts] =
-      await Promise.all([
-        fetchThreadsForProject(activeProjectId),
-        listCollections(activeProjectId),
-        getCollectionDocumentCounts(activeProjectId),
-      ]);
+    [sidebarThreads, sidebarCollections, sidebarDocumentCounts] = await Promise.all([
+      fetchThreadsForProject(activeProjectId),
+      listCollections(activeProjectId),
+      getCollectionDocumentCounts(activeProjectId),
+    ]);
   }
 
   return {
     projects,
     activeProjectId,
-    workingDir: settings.workingDir || "",
+    workingDir: settings.workingDir || '',
     model: resolvedModel,
     langgraphRuntimeUrl: env.LANGGRAPH_RUNTIME_URL,
     isConfigured: true,

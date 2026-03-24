@@ -1,6 +1,6 @@
-import { useEffect } from "react";
-import { useNavigate } from "react-router";
-import { useAppStore } from "~/lib/store";
+import { useEffect } from 'react';
+import { useNavigate } from 'react-router';
+import { useAppStore } from '~/lib/store';
 
 export default function SettingsRoute() {
   const navigate = useNavigate();
@@ -13,7 +13,7 @@ export default function SettingsRoute() {
       });
       return;
     }
-    navigate("/", { replace: true });
+    navigate('/', { replace: true });
   }, [activeProjectId, navigate]);
 
   return null;

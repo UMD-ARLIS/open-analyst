@@ -1,6 +1,4 @@
-import type {
-  AppConfig,
-} from '~/lib/types';
+import type { AppConfig } from '~/lib/types';
 
 export type BrowserChatMessage = {
   role: 'user' | 'assistant' | 'system';
@@ -35,9 +33,7 @@ export function getBrowserConfig(): AppConfig {
   }
 }
 
-export function saveBrowserConfig(
-  updates: Partial<AppConfig>,
-): AppConfig {
+export function saveBrowserConfig(updates: Partial<AppConfig>): AppConfig {
   const current = getBrowserConfig();
   const merged: AppConfig = {
     ...current,

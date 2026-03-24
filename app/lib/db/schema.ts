@@ -16,7 +16,7 @@ export interface Project {
   updatedAt: Date | null;
 }
 
-export type NewProject = Omit<Project, "id" | "createdAt" | "updatedAt">;
+export type NewProject = Omit<Project, 'id' | 'createdAt' | 'updatedAt'>;
 
 export interface Collection {
   id: string;
@@ -27,7 +27,7 @@ export interface Collection {
   updatedAt: Date | null;
 }
 
-export type NewCollection = Omit<Collection, "id" | "createdAt" | "updatedAt">;
+export type NewCollection = Omit<Collection, 'id' | 'createdAt' | 'updatedAt'>;
 
 export interface Document {
   id: string;
@@ -45,7 +45,7 @@ export interface Document {
   updatedAt: Date | null;
 }
 
-export type NewDocument = Omit<Document, "id" | "createdAt" | "updatedAt">;
+export type NewDocument = Omit<Document, 'id' | 'createdAt' | 'updatedAt'>;
 
 export interface Settings {
   id: string;
@@ -60,7 +60,7 @@ export interface Settings {
   updatedAt: Date | null;
 }
 
-export type NewSettings = Omit<Settings, "id" | "updatedAt">;
+export type NewSettings = Omit<Settings, 'id' | 'updatedAt'>;
 
 export interface ProjectProfile {
   id: string;
@@ -75,7 +75,7 @@ export interface ProjectProfile {
   updatedAt: Date | null;
 }
 
-export type NewProjectProfile = Omit<ProjectProfile, "id" | "createdAt" | "updatedAt">;
+export type NewProjectProfile = Omit<ProjectProfile, 'id' | 'createdAt' | 'updatedAt'>;
 
 export interface Artifact {
   id: string;
@@ -89,7 +89,7 @@ export interface Artifact {
   updatedAt: Date | null;
 }
 
-export type NewArtifact = Omit<Artifact, "id" | "createdAt" | "updatedAt">;
+export type NewArtifact = Omit<Artifact, 'id' | 'createdAt' | 'updatedAt'>;
 
 export interface ArtifactVersion {
   id: string;
@@ -103,7 +103,7 @@ export interface ArtifactVersion {
   createdAt: Date | null;
 }
 
-export type NewArtifactVersion = Omit<ArtifactVersion, "id" | "createdAt">;
+export type NewArtifactVersion = Omit<ArtifactVersion, 'id' | 'createdAt'>;
 
 export interface EvidenceItem {
   id: string;
@@ -123,7 +123,7 @@ export interface EvidenceItem {
   updatedAt: Date | null;
 }
 
-export type NewEvidenceItem = Omit<EvidenceItem, "id" | "createdAt" | "updatedAt">;
+export type NewEvidenceItem = Omit<EvidenceItem, 'id' | 'createdAt' | 'updatedAt'>;
 
 export interface SourceIngestBatch {
   id: string;
@@ -144,7 +144,7 @@ export interface SourceIngestBatch {
   rejectedAt: Date | null;
 }
 
-export type NewSourceIngestBatch = Omit<SourceIngestBatch, "id" | "createdAt" | "updatedAt">;
+export type NewSourceIngestBatch = Omit<SourceIngestBatch, 'id' | 'createdAt' | 'updatedAt'>;
 
 export interface SourceIngestItem {
   id: string;
@@ -165,7 +165,7 @@ export interface SourceIngestItem {
   importedAt: Date | null;
 }
 
-export type NewSourceIngestItem = Omit<SourceIngestItem, "id" | "createdAt" | "updatedAt">;
+export type NewSourceIngestItem = Omit<SourceIngestItem, 'id' | 'createdAt' | 'updatedAt'>;
 
 export interface CanvasDocument {
   id: string;
@@ -179,4 +179,4 @@ export interface CanvasDocument {
   updatedAt: Date | null;
 }
 
-export type NewCanvasDocument = Omit<CanvasDocument, "id" | "createdAt" | "updatedAt">;
+export type NewCanvasDocument = Omit<CanvasDocument, 'id' | 'createdAt' | 'updatedAt'>;

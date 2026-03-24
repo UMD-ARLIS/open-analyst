@@ -1,28 +1,37 @@
 import {
   listDocuments,
   createDocument,
-} from "~/lib/db/queries/documents.server";
-import { refreshDocumentKnowledgeIndex } from "~/lib/knowledge-index.server";
-import { parseJsonBody } from "~/lib/request-utils";
-import { normalizeUuid } from "~/lib/uuid";
-import type { Route } from "./+types/api.projects.$projectId.documents";
+  findExistingDocument,
+} from '~/lib/db/queries/documents.server';
+import { refreshDocumentKnowledgeIndex } from '~/lib/knowledge-index.server';
+import { parseJsonBody } from '~/lib/request-utils';
+import { normalizeUuid } from '~/lib/uuid';
+import type { Route } from './+types/api.projects.$projectId.documents';
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   const url = new URL(request.url);
-  const collectionId = normalizeUuid(url.searchParams.get("collectionId"));
-  const documents = await listDocuments(
-    params.projectId,
-    collectionId || undefined
-  );
+  const collectionId = normalizeUuid(url.searchParams.get('collectionId'));
+  const documents = await listDocuments(params.projectId, collectionId || undefined);
   return Response.json({ documents });
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  if (request.method !== "POST") {
-    return Response.json({ error: "Method not allowed" }, { status: 405 });
+  if (request.method !== 'POST') {
+    return Response.json({ error: 'Method not allowed' }, { status: 405 });
   }
   const body = await parseJsonBody(request);
   if (body instanceof Response) return body;
+
+  const existing = await findExistingDocument(params.projectId, {
+    sourceUri: body.sourceUri,
+    sourceType: body.sourceType,
+    title: body.title,
+    collectionId: body.collectionId,
+  });
+  if (existing) {
+    return Response.json({ document: existing, deduplicated: true });
+  }
+
   const document = await createDocument(params.projectId, {
     collectionId: body.collectionId,
     title: body.title,

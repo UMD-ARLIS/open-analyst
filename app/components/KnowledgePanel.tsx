@@ -1,15 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useFetcher, useRevalidator, useSearchParams } from "react-router";
-import { BookOpen, Check, FileText, GripVertical, Link2, Loader2, X } from "lucide-react";
-import { useAppStore } from "~/lib/store";
-import type { ArtifactMeta } from "~/lib/types";
-import type { HeadlessDocument } from "~/lib/headless-api";
-import { DocumentPreview } from "./DocumentPreview";
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useFetcher, useRevalidator, useSearchParams } from 'react-router';
+import { BookOpen, Check, FileText, GripVertical, Link2, Loader2, X } from 'lucide-react';
+import { useAppStore } from '~/lib/store';
+import type { ArtifactMeta } from '~/lib/types';
+import type { HeadlessDocument } from '~/lib/headless-api';
+import { DocumentPreview } from './DocumentPreview';
 
 const MIN_LIST_WIDTH = 240;
 const MAX_LIST_WIDTH = 520;
 const DEFAULT_LIST_WIDTH = 300;
-const SPLIT_STORAGE_KEY = "open-analyst:knowledge:list-width";
+const SPLIT_STORAGE_KEY = 'open-analyst:knowledge:list-width';
 
 type SourceIngestBatch = {
   id: string;
@@ -34,7 +34,7 @@ interface KnowledgePanelProps {
 }
 
 function getInitialListWidth() {
-  if (typeof window === "undefined") return DEFAULT_LIST_WIDTH;
+  if (typeof window === 'undefined') return DEFAULT_LIST_WIDTH;
   const saved = window.localStorage.getItem(SPLIT_STORAGE_KEY);
   const parsed = saved ? Number(saved) : Number.NaN;
   if (!Number.isFinite(parsed)) return DEFAULT_LIST_WIDTH;
@@ -43,30 +43,29 @@ function getInitialListWidth() {
 
 function getArtifactMeta(projectId: string, document: HeadlessDocument): ArtifactMeta | null {
   const metadata =
-    document.metadata && typeof document.metadata === "object"
+    document.metadata && typeof document.metadata === 'object'
       ? (document.metadata as Record<string, unknown>)
       : {};
   const artifactUrl = document.storageUri
     ? `/api/projects/${projectId}/documents/${document.id}/artifact`
-    : "";
+    : '';
   if (!artifactUrl) return null;
   return {
     documentId: document.id,
-    filename: (metadata.filename as string) || document.title || "artifact",
-    mimeType: (metadata.mimeType as string) || "application/octet-stream",
+    filename: (metadata.filename as string) || document.title || 'artifact',
+    mimeType: (metadata.mimeType as string) || 'application/octet-stream',
     size:
-      typeof metadata.bytes === "number"
+      typeof metadata.bytes === 'number'
         ? metadata.bytes
-        : typeof metadata.size === "number"
+        : typeof metadata.size === 'number'
           ? metadata.size
           : 0,
     artifactUrl,
-    downloadUrl:
-      `${artifactUrl}?download=1`,
+    downloadUrl: `${artifactUrl}?download=1`,
     title: document.title || undefined,
     storageUri: document.storageUri || undefined,
     metadata,
-    textPreview: typeof document.content === "string" ? document.content.slice(0, 4000) : "",
+    textPreview: typeof document.content === 'string' ? document.content.slice(0, 4000) : '',
   };
 }
 
@@ -74,7 +73,7 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
   const { activeCollectionByProject, setProjectActiveCollection, openFileViewer } = useAppStore();
   const [, setSearchParams] = useSearchParams();
   const { revalidate } = useRevalidator();
-  const [sourceUrl, setSourceUrl] = useState("");
+  const [sourceUrl, setSourceUrl] = useState('');
   const [isSubmittingUrl, setIsSubmittingUrl] = useState(false);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [listWidth, setListWidth] = useState(() => getInitialListWidth());
@@ -99,13 +98,15 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
   const activeCollectionId = activeCollectionByProject[projectId] || collections[0]?.id || null;
 
   useEffect(() => {
-    const collectionId = activeCollectionId || "";
-    fetcher.load(`/api/projects/${projectId}/knowledge${collectionId ? `?collectionId=${collectionId}` : ""}`);
+    const collectionId = activeCollectionId || '';
+    fetcher.load(
+      `/api/projects/${projectId}/knowledge${collectionId ? `?collectionId=${collectionId}` : ''}`
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, activeCollectionId]);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
+    if (typeof window !== 'undefined') {
       window.localStorage.setItem(SPLIT_STORAGE_KEY, String(listWidth));
     }
   }, [listWidth]);
@@ -127,14 +128,14 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
     const handleMouseUp = () => {
       if (!isDragging.current) return;
       isDragging.current = false;
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
     };
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
     return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
     };
   }, []);
 
@@ -147,8 +148,10 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
     : null;
 
   const reload = () => {
-    const collectionId = activeCollectionId || "";
-    fetcher.load(`/api/projects/${projectId}/knowledge${collectionId ? `?collectionId=${collectionId}` : ""}`);
+    const collectionId = activeCollectionId || '';
+    fetcher.load(
+      `/api/projects/${projectId}/knowledge${collectionId ? `?collectionId=${collectionId}` : ''}`
+    );
   };
 
   const handleCollectionChange = (collectionId: string) => {
@@ -157,9 +160,9 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
       (prev) => {
         const next = new URLSearchParams(prev);
         if (collectionId) {
-          next.set("collection", collectionId);
+          next.set('collection', collectionId);
         } else {
-          next.delete("collection");
+          next.delete('collection');
         }
         return next;
       },
@@ -172,8 +175,8 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
     isDragging.current = true;
     startX.current = event.clientX;
     startWidth.current = listWidth;
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
   };
 
   const handleStageUrl = async () => {
@@ -182,18 +185,18 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
     setIsSubmittingUrl(true);
     try {
       const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/source-ingest`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          origin: "web",
+          origin: 'web',
           url,
           collectionId: activeCollectionId,
         }),
       });
       if (!response.ok) {
-        throw new Error("Failed to stage URL");
+        throw new Error('Failed to stage URL');
       }
-      setSourceUrl("");
+      setSourceUrl('');
       reload();
       revalidate();
     } finally {
@@ -201,12 +204,12 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
     }
   };
 
-  const handleBatchAction = async (batchId: string, action: "approve" | "reject") => {
+  const handleBatchAction = async (batchId: string, action: 'approve' | 'reject') => {
     setBusyBatchId(batchId);
     try {
       const response = await fetch(
         `/api/projects/${encodeURIComponent(projectId)}/source-ingest/${encodeURIComponent(batchId)}/${action}`,
-        { method: "POST" }
+        { method: 'POST' }
       );
       if (!response.ok) {
         throw new Error(`Failed to ${action} batch`);
@@ -237,7 +240,7 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
       <div className="border-b border-border px-3 py-2">
         <select
           className="input text-xs py-1.5"
-          value={activeCollectionId || ""}
+          value={activeCollectionId || ''}
           onChange={(event) => handleCollectionChange(event.target.value)}
         >
           {collections.map((collection) => (
@@ -263,20 +266,26 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
                   </div>
                 ) : (
                   sourceIngestBatches.map((batch) => (
-                    <div key={batch.id} className="rounded-xl border border-border bg-background px-3 py-3 space-y-2">
+                    <div
+                      key={batch.id}
+                      className="rounded-xl border border-border bg-background px-3 py-3 space-y-2"
+                    >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="text-xs font-medium text-text-primary truncate">
-                            {batch.collectionName || "Research Inbox"}
+                            {batch.collectionName || 'Research Inbox'}
                           </div>
                           <div className="text-[11px] text-text-muted">
-                            {batch.origin} · {batch.status} · {batch.requestedCount} item{batch.requestedCount === 1 ? "" : "s"}
+                            {batch.origin} · {batch.status} · {batch.requestedCount} item
+                            {batch.requestedCount === 1 ? '' : 's'}
                           </div>
                         </div>
-                        {busyBatchId === batch.id ? <Loader2 className="w-3.5 h-3.5 animate-spin text-text-muted" /> : null}
+                        {busyBatchId === batch.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-text-muted" />
+                        ) : null}
                       </div>
                       <div className="text-xs text-text-secondary line-clamp-3">
-                        {batch.summary || batch.query || "Staged source collection"}
+                        {batch.summary || batch.query || 'Staged source collection'}
                       </div>
                       <div className="space-y-1">
                         {batch.items.slice(0, 3).map((item) => (
@@ -285,7 +294,9 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
                           </div>
                         ))}
                         {batch.items.length > 3 ? (
-                          <div className="text-[11px] text-text-muted">+{batch.items.length - 3} more</div>
+                          <div className="text-[11px] text-text-muted">
+                            +{batch.items.length - 3} more
+                          </div>
                         ) : null}
                       </div>
                       <div className="flex gap-2">
@@ -293,7 +304,7 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
                           type="button"
                           className="btn btn-primary text-xs px-2 py-1"
                           disabled={busyBatchId === batch.id}
-                          onClick={() => void handleBatchAction(batch.id, "approve")}
+                          onClick={() => void handleBatchAction(batch.id, 'approve')}
                         >
                           <Check className="w-3.5 h-3.5" />
                           Approve
@@ -302,7 +313,7 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
                           type="button"
                           className="btn btn-secondary text-xs px-2 py-1"
                           disabled={busyBatchId === batch.id}
-                          onClick={() => void handleBatchAction(batch.id, "reject")}
+                          onClick={() => void handleBatchAction(batch.id, 'reject')}
                         >
                           Reject
                         </button>
@@ -324,11 +335,13 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
                     type="button"
                     onClick={() => setSelectedDocumentId(document.id)}
                     className={`w-full text-left px-2.5 py-2 rounded-lg text-xs flex items-center gap-2 transition-colors ${
-                      selectedDocumentId === document.id ? "bg-accent-muted" : "hover:bg-surface-hover"
+                      selectedDocumentId === document.id
+                        ? 'bg-accent-muted'
+                        : 'hover:bg-surface-hover'
                     }`}
                   >
                     <FileText className="w-3.5 h-3.5 text-text-muted shrink-0" />
-                    <span className="truncate">{document.title || "Untitled"}</span>
+                    <span className="truncate">{document.title || 'Untitled'}</span>
                   </button>
                 ))}
                 {documents.length === 0 ? (
@@ -347,7 +360,7 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
                 value={sourceUrl}
                 onChange={(event) => setSourceUrl(event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter") {
+                  if (event.key === 'Enter') {
                     event.preventDefault();
                     void handleStageUrl();
                   }
@@ -359,7 +372,11 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
                 disabled={isSubmittingUrl}
                 aria-label="Stage URL source"
               >
-                {isSubmittingUrl ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
+                {isSubmittingUrl ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Link2 className="w-3.5 h-3.5" />
+                )}
               </button>
             </div>
           </div>
@@ -379,9 +396,11 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
             <>
               <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border">
                 <div className="min-w-0">
-                  <div className="text-sm font-medium text-text-primary truncate">{selectedDocument.title}</div>
+                  <div className="text-sm font-medium text-text-primary truncate">
+                    {selectedDocument.title}
+                  </div>
                   <div className="text-xs text-text-muted truncate">
-                    {selectedDocument.sourceUri || selectedDocument.storageUri || "Project source"}
+                    {selectedDocument.sourceUri || selectedDocument.storageUri || 'Project source'}
                   </div>
                 </div>
                 {selectedDocumentArtifact ? (

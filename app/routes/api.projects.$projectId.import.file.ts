@@ -1,77 +1,72 @@
-import path from "path";
-import { createDocument, updateDocumentMetadata } from "~/lib/db/queries/documents.server";
-import { getProject } from "~/lib/db/queries/projects.server";
-import { storeArtifact } from "~/lib/artifacts.server";
-import { buildProjectArtifactUrls } from "~/lib/project-storage.server";
-import { refreshDocumentKnowledgeIndex } from "~/lib/knowledge-index.server";
-import { sanitizeFilename, inferExtension } from "~/lib/file-utils";
-import { parseJsonBody } from "~/lib/request-utils";
-import type { Route } from "./+types/api.projects.$projectId.import.file";
+import path from 'path';
+import { createDocument, updateDocumentMetadata } from '~/lib/db/queries/documents.server';
+import { getProject } from '~/lib/db/queries/projects.server';
+import { storeArtifact } from '~/lib/artifacts.server';
+import { buildProjectArtifactUrls } from '~/lib/project-storage.server';
+import { refreshDocumentKnowledgeIndex } from '~/lib/knowledge-index.server';
+import { sanitizeFilename, inferExtension } from '~/lib/file-utils';
+import { parseJsonBody } from '~/lib/request-utils';
+import type { Route } from './+types/api.projects.$projectId.import.file';
 
 async function extractTextFromBuffer(
   buffer: Buffer,
   mimeType: string,
   filename: string
 ): Promise<string> {
-  const type = String(mimeType || "").toLowerCase();
-  const lowerName = String(filename || "").toLowerCase();
-  if (
-    type.includes("wordprocessingml.document") ||
-    lowerName.endsWith(".docx")
-  ) {
+  const type = String(mimeType || '').toLowerCase();
+  const lowerName = String(filename || '').toLowerCase();
+  if (type.includes('wordprocessingml.document') || lowerName.endsWith('.docx')) {
     try {
-      const mammothModule = await import("mammoth");
+      const mammothModule = await import('mammoth');
       const mammoth = (mammothModule as any).default ?? mammothModule;
       const extracted = await mammoth.extractRawText({ buffer });
-      return String(extracted?.value || "").replace(/\s+/g, " ").trim();
+      return String(extracted?.value || '')
+        .replace(/\s+/g, ' ')
+        .trim();
     } catch {
-      return "";
+      return '';
     }
   }
   if (
-    type.includes("text/") ||
-    type.includes("json") ||
-    type.includes("xml") ||
-    type.includes("yaml") ||
-    type.includes("csv") ||
-    lowerName.endsWith(".txt") ||
-    lowerName.endsWith(".md") ||
-    lowerName.endsWith(".json") ||
-    lowerName.endsWith(".csv") ||
-    lowerName.endsWith(".xml") ||
-    lowerName.endsWith(".yml") ||
-    lowerName.endsWith(".yaml") ||
-    lowerName.endsWith(".html") ||
-    lowerName.endsWith(".htm")
+    type.includes('text/') ||
+    type.includes('json') ||
+    type.includes('xml') ||
+    type.includes('yaml') ||
+    type.includes('csv') ||
+    lowerName.endsWith('.txt') ||
+    lowerName.endsWith('.md') ||
+    lowerName.endsWith('.json') ||
+    lowerName.endsWith('.csv') ||
+    lowerName.endsWith('.xml') ||
+    lowerName.endsWith('.yml') ||
+    lowerName.endsWith('.yaml') ||
+    lowerName.endsWith('.html') ||
+    lowerName.endsWith('.htm')
   ) {
-    return buffer.toString("utf8");
+    return buffer.toString('utf8');
   }
-  return "";
+  return '';
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  if (request.method !== "POST") {
-    return Response.json({ error: "Method not allowed" }, { status: 405 });
+  if (request.method !== 'POST') {
+    return Response.json({ error: 'Method not allowed' }, { status: 405 });
   }
   const body = await parseJsonBody(request);
   if (body instanceof Response) return body;
   const projectId = params.projectId;
   const project = await getProject(projectId);
   if (!project) {
-    return Response.json({ error: "Project not found" }, { status: 404 });
+    return Response.json({ error: 'Project not found' }, { status: 404 });
   }
-  const filename = String(body.filename || "uploaded-file").trim();
-  const mimeType = String(body.mimeType || "application/octet-stream").trim();
-  const base64 = String(body.contentBase64 || "").trim();
+  const filename = String(body.filename || 'uploaded-file').trim();
+  const mimeType = String(body.mimeType || 'application/octet-stream').trim();
+  const base64 = String(body.contentBase64 || '').trim();
   if (!base64) {
-    return Response.json(
-      { error: "contentBase64 is required" },
-      { status: 400 }
-    );
+    return Response.json({ error: 'contentBase64 is required' }, { status: 400 });
   }
-  const buffer = Buffer.from(base64, "base64");
-  const extension =
-    path.extname(filename) || inferExtension(mimeType);
+  const buffer = Buffer.from(base64, 'base64');
+  const extension = path.extname(filename) || inferExtension(mimeType);
   const storedName = `${sanitizeFilename(path.basename(filename, path.extname(filename)))}${extension}`;
   const artifact = await storeArtifact({
     project,
@@ -81,26 +76,23 @@ export async function action({ request, params }: Route.ActionArgs) {
   });
 
   let content = await extractTextFromBuffer(buffer, mimeType, filename);
-  if (
-    !content &&
-    (mimeType.includes("pdf") || filename.toLowerCase().endsWith(".pdf"))
-  ) {
+  if (!content && (mimeType.includes('pdf') || filename.toLowerCase().endsWith('.pdf'))) {
     try {
-      const pdfParseModule = await import("pdf-parse");
+      const pdfParseModule = await import('pdf-parse');
       const pdfParse = (pdfParseModule as any).default ?? pdfParseModule;
       const parsed = await pdfParse(buffer);
-      content = String(parsed.text || "")
-        .replace(/\s+/g, " ")
+      content = String(parsed.text || '')
+        .replace(/\s+/g, ' ')
         .trim();
     } catch {
-      content = "";
+      content = '';
     }
   }
   const document = await createDocument(projectId, {
     collectionId: body.collectionId,
     title: body.title || filename,
-    sourceType: "file",
-    sourceUri: artifact.storageUri.startsWith("s3://")
+    sourceType: 'file',
+    sourceUri: artifact.storageUri.startsWith('s3://')
       ? artifact.storageUri
       : `file://${artifact.storageUri}`,
     storageUri: artifact.storageUri,
@@ -115,7 +107,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   });
   const links = buildProjectArtifactUrls(projectId, document.id);
   const updated = await updateDocumentMetadata(projectId, document.id, {
-    ...(document.metadata && typeof document.metadata === "object" ? document.metadata : {}),
+    ...(document.metadata && typeof document.metadata === 'object' ? document.metadata : {}),
     artifactUrl: links.artifactUrl,
     downloadUrl: links.downloadUrl,
     workspaceSlug: project.workspaceSlug,

@@ -1,4 +1,4 @@
-import { useStream, type UseDeepAgentStream } from "@langchain/langgraph-sdk/react";
+import { useStream, type UseDeepAgentStream } from '@langchain/langgraph-sdk/react';
 
 /**
  * Wraps the LangGraph `useStream` hook for the Open Analyst deep agent.
@@ -16,7 +16,7 @@ export function useAnalystStream(opts: {
   // AnyStreamOptions (internal type). They're read by StreamManager at
   // runtime, so a type assertion is the practical approach.
   const stream = useStream({
-    assistantId: "open-analyst",
+    assistantId: 'open-analyst',
     apiUrl: opts.apiUrl,
     threadId: opts.threadId,
     onThreadId: opts.onThreadId,
@@ -24,7 +24,7 @@ export function useAnalystStream(opts: {
     fetchStateHistory: { limit: 1 },
     throttle: 32,
     filterSubagentMessages: true,
-    subagentToolNames: ["task"],
+    subagentToolNames: ['task'],
     // Rejoin in-progress runs when navigating back to a thread
     reconnectOnMount: true,
   } as unknown as Parameters<typeof useStream>[0]) as UseDeepAgentStream;

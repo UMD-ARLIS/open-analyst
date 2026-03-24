@@ -1,5 +1,5 @@
-import type { HeadlessDocument } from "~/lib/headless-api";
-import { useArtifactObjectUrl } from "./file-renderers/useArtifactObjectUrl";
+import type { HeadlessDocument } from '~/lib/headless-api';
+import { useArtifactObjectUrl } from './file-renderers/useArtifactObjectUrl';
 
 interface DocumentPreviewProps {
   projectId: string;
@@ -9,35 +9,34 @@ interface DocumentPreviewProps {
   showArtifactPreview?: boolean;
 }
 
-function getMetadataString(
-  metadata: Record<string, unknown> | undefined,
-  key: string
-): string {
+function getMetadataString(metadata: Record<string, unknown> | undefined, key: string): string {
   const value = metadata?.[key];
-  return typeof value === "string" ? value : "";
+  return typeof value === 'string' ? value : '';
 }
 
 export function DocumentPreview({
   projectId,
   document,
   maxTextLength,
-  className = "",
+  className = '',
   showArtifactPreview = true,
 }: DocumentPreviewProps) {
-  const mimeType = getMetadataString(document.metadata, "mimeType");
+  const mimeType = getMetadataString(document.metadata, 'mimeType');
   const isPdf =
-    mimeType.toLowerCase().includes("pdf") ||
-    document.title.toLowerCase().endsWith(".pdf");
+    mimeType.toLowerCase().includes('pdf') || document.title.toLowerCase().endsWith('.pdf');
   const artifactUrl = `/api/projects/${encodeURIComponent(
     projectId
   )}/documents/${encodeURIComponent(document.id)}/artifact`;
   const downloadUrl = `${artifactUrl}?download=1`;
   const previewText =
-    typeof maxTextLength === "number" && maxTextLength > 0
-      ? (document.content || "").slice(0, maxTextLength)
-      : document.content || "";
+    typeof maxTextLength === 'number' && maxTextLength > 0
+      ? (document.content || '').slice(0, maxTextLength)
+      : document.content || '';
   const hasArtifact = showArtifactPreview && Boolean(artifactUrl);
-  const pdfPreviewUrl = useArtifactObjectUrl(artifactUrl, showArtifactPreview && isPdf && hasArtifact);
+  const pdfPreviewUrl = useArtifactObjectUrl(
+    artifactUrl,
+    showArtifactPreview && isPdf && hasArtifact
+  );
 
   return (
     <div className={`space-y-3 ${className}`.trim()}>
@@ -49,7 +48,7 @@ export function DocumentPreview({
             className="w-full h-[480px]"
           >
             <div className="p-4 text-sm text-text-secondary">
-              PDF preview unavailable.{" "}
+              PDF preview unavailable.{' '}
               <a
                 href={downloadUrl}
                 className="text-accent underline"
@@ -67,7 +66,7 @@ export function DocumentPreview({
       <div>
         <div className="text-xs text-text-muted mb-1">Extracted text</div>
         <pre className="text-xs text-text-secondary whitespace-pre-wrap max-h-64 overflow-y-auto">
-          {previewText || "No extracted text available."}
+          {previewText || 'No extracted text available.'}
         </pre>
       </div>
     </div>

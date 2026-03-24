@@ -1,6 +1,6 @@
-import { useCallback, useRef, useState } from "react";
-import { Link2, Upload, X } from "lucide-react";
-import { headlessImportUrl, headlessImportFile } from "~/lib/headless-api";
+import { useCallback, useRef, useState } from 'react';
+import { Link2, Upload, X } from 'lucide-react';
+import { headlessImportUrl, headlessImportFile } from '~/lib/headless-api';
 
 interface AddSourceModalProps {
   open: boolean;
@@ -10,7 +10,7 @@ interface AddSourceModalProps {
   onImported: () => void;
 }
 
-type Tab = "url" | "file";
+type Tab = 'url' | 'file';
 
 export function AddSourceModal({
   open,
@@ -19,8 +19,8 @@ export function AddSourceModal({
   onClose,
   onImported,
 }: AddSourceModalProps) {
-  const [tab, setTab] = useState<Tab>("url");
-  const [url, setUrl] = useState("");
+  const [tab, setTab] = useState<Tab>('url');
+  const [url, setUrl] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +28,7 @@ export function AddSourceModal({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const reset = useCallback(() => {
-    setUrl("");
+    setUrl('');
     setFile(null);
     setError(null);
     setLoading(false);
@@ -102,7 +102,7 @@ export function AddSourceModal({
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60"
       onClick={handleClose}
       onKeyDown={(e) => {
-        if (e.key === "Escape") handleClose();
+        if (e.key === 'Escape') handleClose();
       }}
     >
       <div
@@ -113,14 +113,8 @@ export function AddSourceModal({
       >
         {/* Header */}
         <div className="flex items-center justify-between p-5 pb-0">
-          <h3 className="text-base font-semibold text-text-primary">
-            Add Source
-          </h3>
-          <button
-            className="btn btn-secondary p-1.5"
-            onClick={handleClose}
-            aria-label="Close"
-          >
+          <h3 className="text-base font-semibold text-text-primary">Add Source</h3>
+          <button className="btn btn-secondary p-1.5" onClick={handleClose} aria-label="Close">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -136,22 +130,22 @@ export function AddSourceModal({
               <div className="flex gap-1 bg-surface-muted rounded-lg p-1">
                 <button
                   className={`flex-1 flex items-center justify-center gap-1.5 text-sm py-1.5 px-3 rounded-md transition-colors ${
-                    tab === "url"
-                      ? "bg-surface text-text-primary shadow-sm"
-                      : "text-text-muted hover:text-text-secondary"
+                    tab === 'url'
+                      ? 'bg-surface text-text-primary shadow-sm'
+                      : 'text-text-muted hover:text-text-secondary'
                   }`}
-                  onClick={() => setTab("url")}
+                  onClick={() => setTab('url')}
                 >
                   <Link2 className="w-3.5 h-3.5" />
                   URL
                 </button>
                 <button
                   className={`flex-1 flex items-center justify-center gap-1.5 text-sm py-1.5 px-3 rounded-md transition-colors ${
-                    tab === "file"
-                      ? "bg-surface text-text-primary shadow-sm"
-                      : "text-text-muted hover:text-text-secondary"
+                    tab === 'file'
+                      ? 'bg-surface text-text-primary shadow-sm'
+                      : 'text-text-muted hover:text-text-secondary'
                   }`}
-                  onClick={() => setTab("file")}
+                  onClick={() => setTab('file')}
                 >
                   <Upload className="w-3.5 h-3.5" />
                   File
@@ -159,7 +153,7 @@ export function AddSourceModal({
               </div>
 
               {/* URL tab */}
-              {tab === "url" && (
+              {tab === 'url' && (
                 <div className="space-y-3">
                   <input
                     type="url"
@@ -168,7 +162,7 @@ export function AddSourceModal({
                     value={url}
                     onChange={(e) => setUrl(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") {
+                      if (e.key === 'Enter') {
                         e.preventDefault();
                         handleImportUrl();
                       }
@@ -181,19 +175,19 @@ export function AddSourceModal({
                     onClick={handleImportUrl}
                     disabled={loading || !url.trim()}
                   >
-                    {loading ? "Importing..." : "Import URL"}
+                    {loading ? 'Importing...' : 'Import URL'}
                   </button>
                 </div>
               )}
 
               {/* File tab */}
-              {tab === "file" && (
+              {tab === 'file' && (
                 <div className="space-y-3">
                   <div
                     className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer ${
                       dragOver
-                        ? "border-accent bg-accent-muted"
-                        : "border-border hover:border-text-muted"
+                        ? 'border-accent bg-accent-muted'
+                        : 'border-border hover:border-text-muted'
                     }`}
                     onDragOver={(e) => {
                       e.preventDefault();
@@ -230,9 +224,7 @@ export function AddSourceModal({
               )}
 
               {error && (
-                <div className="text-sm text-error bg-error/10 rounded-lg px-3 py-2">
-                  {error}
-                </div>
+                <div className="text-sm text-error bg-error/10 rounded-lg px-3 py-2">{error}</div>
               )}
             </>
           )}

@@ -18,7 +18,9 @@
     "audit:prod": "pnpm audit --prod",
     "validate:inventory": "node scripts/validation/inventory.mjs --check",
     "knowledge:reindex": "node scripts/reindex-knowledge.mjs",
-    "reset:chat-state": "node scripts/reset-chat-state.mjs"
+    "reset:chat-state": "node scripts/reset-chat-state.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.77",
@@ -76,6 +78,9 @@
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
 
+    "vitest": "^3.2.1",
+    "@vitest/coverage-v8": "^3.2.1",
+    "happy-dom": "^18.0.1",
     "postcss": "^8.4.49",
     "prettier": "^3.4.2",
     "tailwindcss": "^3.4.16",

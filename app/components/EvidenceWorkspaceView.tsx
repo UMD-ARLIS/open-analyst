@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useParams } from "react-router";
+import { useEffect, useState } from 'react';
+import { useParams } from 'react-router';
 
 interface EvidenceItem {
   id: string;
@@ -23,7 +23,7 @@ export function EvidenceWorkspaceView() {
         if (!response.ok) {
           throw new Error(body.error || `HTTP ${response.status}`);
         }
-        return Array.isArray(body.evidence) ? body.evidence as EvidenceItem[] : [];
+        return Array.isArray(body.evidence) ? (body.evidence as EvidenceItem[]) : [];
       })
       .then(setItems)
       .catch(() => setItems([]));
@@ -42,7 +42,9 @@ export function EvidenceWorkspaceView() {
 
         <div className="space-y-3">
           {items.length === 0 ? (
-            <div className="card p-5 text-sm text-text-muted">No evidence has been recorded yet.</div>
+            <div className="card p-5 text-sm text-text-muted">
+              No evidence has been recorded yet.
+            </div>
           ) : (
             items.map((item) => (
               <div key={item.id} className="card p-5">
@@ -54,7 +56,12 @@ export function EvidenceWorkspaceView() {
                     </div>
                   </div>
                   {item.sourceUri && (
-                    <a href={item.sourceUri} target="_blank" rel="noreferrer" className="text-xs text-accent">
+                    <a
+                      href={item.sourceUri}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs text-accent"
+                    >
                       Open source
                     </a>
                   )}
@@ -63,7 +70,9 @@ export function EvidenceWorkspaceView() {
                   <div className="text-sm text-text-secondary mt-3">{item.citationText}</div>
                 )}
                 {item.extractedText && (
-                  <div className="text-sm leading-7 mt-3 whitespace-pre-wrap">{item.extractedText}</div>
+                  <div className="text-sm leading-7 mt-3 whitespace-pre-wrap">
+                    {item.extractedText}
+                  </div>
                 )}
               </div>
             ))

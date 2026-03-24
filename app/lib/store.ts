@@ -1,5 +1,13 @@
 import { create } from 'zustand';
-import type { ArtifactMeta, PermissionRequest, UserQuestionRequest, Settings, AppConfig, SandboxSetupProgress, SandboxSyncStatus } from '~/lib/types';
+import type {
+  ArtifactMeta,
+  PermissionRequest,
+  UserQuestionRequest,
+  Settings,
+  AppConfig,
+  SandboxSetupProgress,
+  SandboxSyncStatus,
+} from '~/lib/types';
 
 interface ProjectSummary {
   id: string;
@@ -143,7 +151,8 @@ export const useAppStore = create<AppState>((set) => ({
   // UI actions
   setLoading: (loading) => set({ isLoading: loading }),
   toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
-  toggleContextPanel: () => set((state) => ({ contextPanelCollapsed: !state.contextPanelCollapsed })),
+  toggleContextPanel: () =>
+    set((state) => ({ contextPanelCollapsed: !state.contextPanelCollapsed })),
 
   // Permission actions
   setPendingPermission: (permission) => set({ pendingPermission: permission }),
@@ -188,7 +197,8 @@ export const useAppStore = create<AppState>((set) => ({
   removeProject: (projectId) =>
     set((state) => {
       const projects = state.projects.filter((project) => project.id !== projectId);
-      const activeProjectId = state.activeProjectId === projectId ? projects[0]?.id || null : state.activeProjectId;
+      const activeProjectId =
+        state.activeProjectId === projectId ? projects[0]?.id || null : state.activeProjectId;
       return { projects, activeProjectId };
     }),
 

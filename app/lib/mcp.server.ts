@@ -1,10 +1,5 @@
 import path from 'path';
-import {
-  ensureConfigDir,
-  getConfigDir,
-  loadJsonArray,
-  saveJsonArray,
-} from './helpers.server';
+import { ensureConfigDir, getConfigDir, loadJsonArray, saveJsonArray } from './helpers.server';
 import { inspectMcpServer, type McpServerInspection } from './mcp-client.server';
 import type { McpPreset, McpServerConfig } from './types';
 import type { Project } from './db/schema';
@@ -92,8 +87,12 @@ function defaultMcpServers(): McpServerConfig[] {
 }
 
 function getAnalystMcpDefaults(): { url: string; apiKey: string } {
-  const host = String(process.env.ANALYST_MCP_HOST || ANALYST_MCP_DEFAULT_HOST).trim() || ANALYST_MCP_DEFAULT_HOST;
-  const port = String(process.env.ANALYST_MCP_PORT || ANALYST_MCP_DEFAULT_PORT).trim() || ANALYST_MCP_DEFAULT_PORT;
+  const host =
+    String(process.env.ANALYST_MCP_HOST || ANALYST_MCP_DEFAULT_HOST).trim() ||
+    ANALYST_MCP_DEFAULT_HOST;
+  const port =
+    String(process.env.ANALYST_MCP_PORT || ANALYST_MCP_DEFAULT_PORT).trim() ||
+    ANALYST_MCP_DEFAULT_PORT;
   const apiKey =
     String(process.env.ANALYST_MCP_API_KEY || '').trim() || ANALYST_MCP_DEFAULT_API_KEY;
   return {
@@ -110,10 +109,18 @@ const LOCAL_RESEARCH_TOOL_NAMES = new Set([
 ]);
 
 export function isAnalystMcpServer(server: Partial<McpServerConfig>): boolean {
-  const name = String(server.name || '').trim().toLowerCase();
-  const alias = String(server.alias || '').trim().toLowerCase();
-  const id = String(server.id || '').trim().toLowerCase();
-  const url = String(server.url || '').trim().toLowerCase();
+  const name = String(server.name || '')
+    .trim()
+    .toLowerCase();
+  const alias = String(server.alias || '')
+    .trim()
+    .toLowerCase();
+  const id = String(server.id || '')
+    .trim()
+    .toLowerCase();
+  const url = String(server.url || '')
+    .trim()
+    .toLowerCase();
   return (
     name === 'analyst mcp' ||
     alias === 'analyst' ||
@@ -175,7 +182,9 @@ function normalizeMcpServer(server: McpServerConfig): McpServerConfig {
     ...server,
     alias: server.alias || 'analyst',
     url:
-      !server.url || server.url === 'http://localhost:8000/mcp' || server.url === 'http://localhost:8000/mcp/'
+      !server.url ||
+      server.url === 'http://localhost:8000/mcp' ||
+      server.url === 'http://localhost:8000/mcp/'
         ? analystDefaults.url
         : server.url,
     headers: nextHeaders,
@@ -185,9 +194,14 @@ function normalizeMcpServer(server: McpServerConfig): McpServerConfig {
 function isToolCatalogPrompt(text: string): boolean {
   const lowered = text.toLowerCase();
   return (
-    (lowered.includes('what tools') || lowered.includes('which tools') || lowered.includes('available tools')) ||
+    lowered.includes('what tools') ||
+    lowered.includes('which tools') ||
+    lowered.includes('available tools') ||
     ((lowered.includes('tool') || lowered.includes('connector') || lowered.includes('mcp')) &&
-      (lowered.includes('available') || lowered.includes('have') || lowered.includes('can use') || lowered.includes('list')))
+      (lowered.includes('available') ||
+        lowered.includes('have') ||
+        lowered.includes('can use') ||
+        lowered.includes('list')))
   );
 }
 
@@ -222,7 +236,9 @@ function isResearchAcquisitionPrompt(text: string): boolean {
 function getResearchPromptBias(server: McpServerConfig, fullText: string): number {
   const aliasText = [server.name, server.alias].filter(Boolean).join(' ').toLowerCase();
   const looksLikeAnalystServer =
-    aliasText.includes('analyst') || aliasText.includes('literature') || aliasText.includes('research');
+    aliasText.includes('analyst') ||
+    aliasText.includes('literature') ||
+    aliasText.includes('research');
   if (!looksLikeAnalystServer) return 0;
 
   const keywords = [
@@ -346,8 +362,7 @@ export function saveMcpServer(
   configDir?: string
 ): McpServerConfig {
   const servers = listMcpServers(configDir);
-  const normalizedType =
-    input.type === 'sse' ? 'sse' : input.type === 'http' ? 'http' : 'stdio';
+  const normalizedType = input.type === 'sse' ? 'sse' : input.type === 'http' ? 'http' : 'stdio';
   const serverConfig: McpServerConfig = {
     id: String(input.id || '').trim() || `mcp-${Date.now()}`,
     name: String(input.name || '').trim() || 'MCP Server',
@@ -385,7 +400,9 @@ export function deleteMcpServer(id: string, configDir?: string): { success: bool
   return { success: true };
 }
 
-async function inspectServerHealth(server: McpServerConfig): Promise<Record<string, unknown> | undefined> {
+async function inspectServerHealth(
+  server: McpServerConfig
+): Promise<Record<string, unknown> | undefined> {
   if (!server.url) return undefined;
   try {
     const url = new URL(server.url);
@@ -496,13 +513,19 @@ export async function getSelectedMcpServers(
   if (enabledServers.length === 0) return [];
 
   const pinned = new Set((input.pinnedServerIds || []).map((id) => String(id)));
-  const prompt = String(input.prompt || '').trim().toLowerCase();
+  const prompt = String(input.prompt || '')
+    .trim()
+    .toLowerCase();
   const latestUserText = Array.isArray(input.messages)
     ? [...input.messages]
         .reverse()
         .find((message) => message?.role === 'user' && String(message?.content || '').trim())
     : null;
-  const fullText = prompt || String(latestUserText?.content || '').trim().toLowerCase();
+  const fullText =
+    prompt ||
+    String(latestUserText?.content || '')
+      .trim()
+      .toLowerCase();
 
   const inspected = await Promise.all(
     enabledServers.map(async (server) => ({
@@ -528,7 +551,9 @@ export async function getSelectedMcpServers(
     .filter(({ server }) => !pinned.has(server.id))
     .map(({ server, result }) => {
       let score = 0;
-      const aliases = [server.name, server.alias].filter(Boolean).map((value) => String(value).toLowerCase());
+      const aliases = [server.name, server.alias]
+        .filter(Boolean)
+        .map((value) => String(value).toLowerCase());
       for (const alias of aliases) {
         if (alias && fullText.includes(alias)) score += 20;
       }
