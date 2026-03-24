@@ -1,8 +1,16 @@
 import { redirect } from "react-router";
 import { env } from "~/lib/env.server";
+import { normalizeUuid } from "~/lib/uuid";
 import { buildWorkspaceContext } from "~/lib/workspace-context.server";
 
 const RUNTIME_URL = env.LANGGRAPH_RUNTIME_URL;
+
+function normalizeAnalysisMode(value: unknown): "chat" | "research" | "product" {
+  const mode = String(value || "").trim().toLowerCase();
+  if (mode === "product") return "product";
+  if (mode === "research") return "research";
+  return "chat";
+}
 
 export async function loader({
   params,
@@ -35,13 +43,8 @@ export async function loader({
       workspaceContext,
       threadMetadata: {
         collectionId:
-          typeof metadata.collection_id === "string" && metadata.collection_id.trim()
-            ? metadata.collection_id.trim()
-            : null,
-        analysisMode:
-          typeof metadata.analysis_mode === "string" && metadata.analysis_mode.trim()
-            ? metadata.analysis_mode.trim()
-            : "chat",
+          normalizeUuid(metadata.collection_id),
+        analysisMode: normalizeAnalysisMode(metadata.analysis_mode),
       },
     };
   } catch (error) {

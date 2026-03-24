@@ -21,7 +21,8 @@ export function useAnalystStream(opts: {
     threadId: opts.threadId,
     onThreadId: opts.onThreadId,
     onCreated: opts.onCreated,
-    fetchStateHistory: { limit: false },
+    fetchStateHistory: { limit: 1 },
+    throttle: 32,
     filterSubagentMessages: true,
     subagentToolNames: ["task"],
     // Rejoin in-progress runs when navigating back to a thread

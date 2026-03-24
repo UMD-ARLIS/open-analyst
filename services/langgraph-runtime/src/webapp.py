@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from uuid import UUID
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,8 +40,28 @@ def _trimmed_or_none(value: Any) -> str | None:
     return trimmed or None
 
 
+def _uuid_or_none(value: Any) -> str | None:
+    trimmed = _trimmed_or_none(value)
+    if not trimmed:
+        return None
+    try:
+        return str(UUID(trimmed))
+    except Exception:
+        return None
+
+
 def _json_object(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _runtime_context_payload(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump()
+        return dumped if isinstance(dumped, dict) else {}
+    return {}
 
 
 def _is_thread_run_request_path(path: str) -> bool:
@@ -72,27 +93,101 @@ def _get_project_id(body: dict[str, Any]) -> str:
 def _get_collection_id(body: dict[str, Any]) -> str | None:
     metadata = _json_object(body.get("metadata"))
     context = _json_object(body.get("context"))
-    return _trimmed_or_none(metadata.get("collection_id") or context.get("collection_id"))
+    return _uuid_or_none(metadata.get("collection_id") or context.get("collection_id"))
 
 
 def _get_analysis_mode(body: dict[str, Any]) -> str:
     metadata = _json_object(body.get("metadata"))
     context = _json_object(body.get("context"))
-    return _trimmed(metadata.get("analysis_mode") or context.get("analysis_mode"))
+    return _normalize_analysis_mode(metadata.get("analysis_mode") or context.get("analysis_mode"))
+
+
+def _normalize_analysis_mode(value: Any) -> str:
+    mode = _trimmed(value).lower()
+    if mode == "product":
+        return "product"
+    if mode == "research":
+        return "research"
+    return "chat"
+
+
+def _get_input_prompt(body: dict[str, Any]) -> str:
+    input_payload = _json_object(body.get("input"))
+    return _trimmed(input_payload.get("prompt"))
+
+
+def _get_input_messages(body: dict[str, Any]) -> list[dict[str, Any]]:
+    input_payload = _json_object(body.get("input"))
+    messages = input_payload.get("messages")
+    return [message for message in messages if isinstance(message, dict)] if isinstance(messages, list) else []
+
+
+def _active_skill_names(runtime_context: dict[str, Any]) -> list[str]:
+    available = runtime_context.get("available_skills")
+    if not isinstance(available, list):
+        return []
+    pinned_ids = runtime_context.get("pinned_skill_ids")
+    matched_ids = runtime_context.get("matched_skill_ids")
+    active_ids = {
+        *([_trimmed(item) for item in pinned_ids] if isinstance(pinned_ids, list) else []),
+        *([_trimmed(item) for item in matched_ids] if isinstance(matched_ids, list) else []),
+    }
+    names: list[str] = []
+    for skill in available:
+        if not isinstance(skill, dict):
+            continue
+        skill_id = _trimmed(skill.get("id"))
+        skill_name = _trimmed(skill.get("name")) or skill_id
+        if skill_id and skill_id in active_ids and skill_name:
+            names.append(skill_name)
+    return names
 
 
 def build_runtime_system_prompt(runtime_context: dict[str, Any], analysis_mode: str) -> str:
+    mode = _normalize_analysis_mode(analysis_mode)
     lines = [
         f"Current UTC date: {_trimmed(runtime_context.get('current_date')) or 'unknown'}.",
         f"Current UTC timestamp: {_trimmed(runtime_context.get('current_datetime_utc')) or 'unknown'}.",
         "Interpret relative time references like recent, latest, today, this week, this month, and this year using this date.",
     ]
-    if analysis_mode == "deep_research":
+    lines.append(f"Active interaction mode: {mode}.")
+    active_skill_names = _active_skill_names(runtime_context)
+    if active_skill_names:
+        lines.append(f"Relevant skill packs for this request: {', '.join(active_skill_names)}.")
+    if any("arlis-bulletin" in name.lower() or "arlis bulletin" in name.lower() for name in active_skill_names):
         lines.extend(
             [
-                "Deep research mode is active.",
-                "Plan before acting, delegate evidence collection to the researcher first,",
-                "use grounded sources, and synthesize only after retrieval has produced enough support.",
+                "This request matches the arlis-bulletin skill.",
+                "Do not stop at a canvas markdown draft. Completion requires generating the bulletin .docx in the project workspace and capturing it into project sources/artifacts.",
+                "Execute ARLIS bulletin requests as a staged workflow: argument-planner creates the plan, drafter creates the canvas draft, and packager generates and captures the final .docx into Reports.",
+                "If the user explicitly asks to publish or deliver the bulletin in this same request, treat that as publication approval for the final packaged file unless they explicitly ask to review a draft first.",
+                "If the user asks for a bulletin but key product framing is missing, ask a concise clarifying question with 2-4 numbered options and a custom option before drafting.",
+            ]
+        )
+    if mode == "chat":
+        lines.extend(
+            [
+                "Chat mode is active.",
+                "Stay conversational and lightweight.",
+                "You may inspect existing project context read-only, but do not create visible plans, delegate to subagents, stage retrieval workflows, or publish artifacts in this mode.",
+                "If the user asks for structured evidence gathering or deliverable production, recommend switching to Research or Product mode.",
+            ]
+        )
+    elif mode == "research":
+        lines.extend(
+            [
+                "Research mode is active.",
+                "Use structured retrieval and synthesis.",
+                "For multi-step work, create a visible plan, gather grounded evidence, and synthesize only after retrieval has produced enough support.",
+            ]
+        )
+    elif mode == "product":
+        lines.extend(
+            [
+                "Product mode is active.",
+                "Treat this as deliverable-oriented work.",
+                "Use structured planning, drafting, critique, packaging, and publication behavior.",
+                "If key framing is missing for a product request, ask concise clarifying questions before substantial drafting.",
             ]
         )
     return " ".join(lines)
@@ -168,7 +263,7 @@ async def enrich_run_payload(body: dict[str, Any], request: Request) -> dict[str
     if not project_id:
         return body
     analysis_mode = _get_analysis_mode(body) or _trimmed(thread_metadata.get("analysis_mode")) or "chat"
-    collection_id = _get_collection_id(body) or _trimmed_or_none(thread_metadata.get("collection_id"))
+    collection_id = _get_collection_id(body) or _uuid_or_none(thread_metadata.get("collection_id"))
     runtime_context = await runtime_context_service.build_context(
         project_id,
         collection_id=collection_id,
@@ -177,10 +272,13 @@ async def enrich_run_payload(body: dict[str, Any], request: Request) -> dict[str
             origin=request.headers.get("origin"),
             fallback_host=str(request.base_url),
         ),
+        prompt=_get_input_prompt(body),
+        messages=_get_input_messages(body),
     )
+    runtime_context_payload = _runtime_context_payload(runtime_context)
     payload = {
         **body,
-        "context": runtime_context.model_dump(),
+        "context": runtime_context_payload,
         "metadata": {
             **_json_object(body.get("metadata")),
             "project_id": project_id,
@@ -188,7 +286,7 @@ async def enrich_run_payload(body: dict[str, Any], request: Request) -> dict[str
             "analysis_mode": analysis_mode,
         },
     }
-    return apply_runtime_system_prompt(payload, runtime_context.model_dump(), analysis_mode)
+    return apply_runtime_system_prompt(payload, runtime_context_payload, analysis_mode)
 
 
 def _replace_json_body(request: Request, payload: dict[str, Any]) -> None:

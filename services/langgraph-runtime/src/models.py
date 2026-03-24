@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+from typing_extensions import TypedDict
 
 
 RunStatus = Literal["queued", "running", "waiting_for_approval", "completed", "failed", "cancelled"]
@@ -14,33 +15,33 @@ class Message(BaseModel):
     content: str = ""
 
 
-class RuntimeProjectContext(BaseModel):
+class RuntimeProjectContext(TypedDict):
     project_id: str
-    project_name: str = ""
-    workspace_path: str = ""
-    workspace_slug: str = ""
-    shared_storage_backend: Literal["local", "s3"] = "local"
-    shared_storage_local_root: str = ""
-    shared_storage_bucket: str = ""
-    shared_storage_region: str = ""
-    shared_storage_endpoint: str = ""
-    shared_storage_prefix: str = ""
-    current_date: str = ""
-    current_datetime_utc: str = ""
-    analysis_mode: Literal["chat", "deep_research"] = "chat"
-    brief: str = ""
-    retrieval_policy: dict[str, Any] = Field(default_factory=dict)
-    memory_profile: dict[str, Any] = Field(default_factory=dict)
-    templates: list[dict[str, Any]] = Field(default_factory=list)
-    agent_policies: dict[str, Any] = Field(default_factory=dict)
-    connector_ids: list[str] = Field(default_factory=list)
-    active_connector_ids: list[str] = Field(default_factory=list)
-    available_tools: list[dict[str, Any]] = Field(default_factory=list)
-    available_skills: list[dict[str, Any]] = Field(default_factory=list)
-    pinned_skill_ids: list[str] = Field(default_factory=list)
-    matched_skill_ids: list[str] = Field(default_factory=list)
-    api_base_url: str = ""
-    collection_id: str | None = None
+    project_name: str
+    workspace_path: str
+    workspace_slug: str
+    shared_storage_backend: Literal["local", "s3"]
+    shared_storage_local_root: str
+    shared_storage_bucket: str
+    shared_storage_region: str
+    shared_storage_endpoint: str
+    shared_storage_prefix: str
+    current_date: str
+    current_datetime_utc: str
+    analysis_mode: Literal["chat", "research", "product"]
+    brief: str
+    retrieval_policy: dict[str, Any]
+    memory_profile: dict[str, Any]
+    templates: list[dict[str, Any]]
+    agent_policies: dict[str, Any]
+    connector_ids: list[str]
+    active_connector_ids: list[str]
+    available_tools: list[dict[str, Any]]
+    available_skills: list[dict[str, Any]]
+    pinned_skill_ids: list[str]
+    matched_skill_ids: list[str]
+    api_base_url: str
+    collection_id: str | None
 
 
 class RuntimeRunRequest(BaseModel):

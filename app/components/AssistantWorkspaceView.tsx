@@ -1,17 +1,20 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useMatches, useNavigate, useSearchParams } from "react-router";
 import {
   BookOpen,
   Bot,
-  FlaskConical,
   ListTodo,
+  MessageSquare,
   PanelRightOpen,
+  PenTool,
+  Search,
   ShieldAlert,
   Square,
 } from "lucide-react";
 import { useAnalystStream } from "~/hooks/useAnalystStream";
 import { useAppStore } from "~/lib/store";
 import type { Message } from "~/lib/types";
+import { normalizeUuid } from "~/lib/uuid";
 import type { WorkspaceContextData } from "~/lib/workspace-context.server";
 import { InterruptCard } from "./InterruptCard";
 import { MessageCard } from "./MessageCard";
@@ -26,6 +29,8 @@ interface AssistantWorkspaceViewProps {
     analysisMode?: string | null;
   };
 }
+
+type AnalysisMode = "chat" | "research" | "product";
 
 type StreamTodo = {
   id?: string;
@@ -127,6 +132,47 @@ function deriveThreadSummary(prompt: string): string {
   return cleaned.slice(0, 140);
 }
 
+function normalizeAnalysisMode(value: unknown): AnalysisMode {
+  const mode = String(value || "").trim().toLowerCase();
+  if (mode === "product") return "product";
+  if (mode === "research") return "research";
+  return "chat";
+}
+
+function summarizeMessageContent(content: unknown): string {
+  if (typeof content === "string") return content.trim().slice(0, 80);
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((block) => {
+      if (typeof block === "string") return block;
+      if (!block || typeof block !== "object") return "";
+      const candidate = block as Record<string, unknown>;
+      if (candidate.type === "text" && typeof candidate.text === "string") {
+        return candidate.text;
+      }
+      if (candidate.type === "tool_use") {
+        return `${String(candidate.name || "tool")} ${JSON.stringify(candidate.input || {})}`;
+      }
+      return "";
+    })
+    .join(" ")
+    .trim()
+    .slice(0, 80);
+}
+
+function buildStableMessageId(
+  msg: { id?: string; type: string; content: unknown; tool_calls?: unknown[] },
+  sessionId: string,
+  index: number,
+): string {
+  if (msg.id && msg.id.trim()) return msg.id;
+  const toolCallId = Array.isArray(msg.tool_calls)
+    ? String((msg.tool_calls[0] as { id?: string } | undefined)?.id || "").trim()
+    : "";
+  const fingerprint = toolCallId || summarizeMessageContent(msg.content).replace(/\s+/g, "-").slice(0, 32) || "message";
+  return `lg-${sessionId || "thread"}-${msg.type}-${index}-${fingerprint}`;
+}
+
 /**
  * Convert a LangGraph BaseMessage (from useStream) to our Message type
  * so MessageCard can render it.
@@ -134,6 +180,8 @@ function deriveThreadSummary(prompt: string): string {
 function langGraphMessageToMessage(
   msg: { id?: string; type: string; content: unknown; tool_calls?: unknown[] },
   sessionId: string,
+  index: number,
+  timestamp: number,
 ): Message | null {
   const role = msg.type === "human" ? "user" : msg.type === "ai" ? "assistant" : null;
   if (!role) return null;
@@ -177,11 +225,11 @@ function langGraphMessageToMessage(
   if (content.length === 0) return null;
 
   return {
-    id: msg.id || `lg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    id: buildStableMessageId(msg, sessionId, index),
     sessionId,
     role,
     content,
-    timestamp: Date.now(),
+    timestamp,
   };
 }
 
@@ -204,6 +252,7 @@ export function AssistantWorkspaceView({
   const hasAutoSubmittedPendingPromptRef = useRef(false);
   const [resumingInterruptId, setResumingInterruptId] = useState<string | null>(null);
   const activeCollectionId = useAppStore((state) => state.activeCollectionByProject[projectId] || null);
+  const setProjectActiveCollection = useAppStore((state) => state.setProjectActiveCollection);
   const appLayoutMatch = matches.find((match) => match.id === "routes/_app");
   const runtimeConfig = appLayoutMatch?.data as { langgraphRuntimeUrl?: unknown } | undefined;
   const agentServerUrl =
@@ -246,22 +295,37 @@ export function AssistantWorkspaceView({
   });
   type StreamSubmitOptions = NonNullable<Parameters<typeof stream.submit>[1]>;
 
-  const deepResearch = searchParams.get("deepResearch") === "true";
   const activePanel = searchParams.get("panel") || "";
   const isProjectHome = !initialAgentThreadId;
+  const deferredStreamMessages = useDeferredValue(stream.messages || []);
+  const deferredStreamValues = useDeferredValue((stream.values || {}) as Record<string, unknown>);
+  const deferredStreamInterrupts = useDeferredValue((stream as { interrupts?: unknown }).interrupts);
+  const deferredStreamActiveSubagents = useDeferredValue(
+    Array.isArray((stream as { activeSubagents?: unknown }).activeSubagents)
+      ? ((stream as { activeSubagents?: unknown[] }).activeSubagents || [])
+      : [],
+  );
+  const deferredStreamSubagents = useDeferredValue(
+    Array.isArray((stream as { subagents?: unknown }).subagents)
+      ? ((stream as { subagents?: unknown[] }).subagents || [])
+      : [],
+  );
+  const messageTimestampCacheRef = useRef<Map<string, number>>(new Map());
   const contextSummary = useMemo(() => {
     const connectorCount = workspaceContext.activeConnectorIds.length;
     const skillCount = workspaceContext.skills.filter((skill) => skill.pinned || skill.enabled).length;
     const memoryCount = workspaceContext.memories.active.length;
     return `${connectorCount} connectors, ${skillCount} skills, ${memoryCount} memories active in project context`;
   }, [workspaceContext]);
-  const analysisMode = deepResearch ? "deep_research" : "chat";
-  const resolvedCollectionId = initialAgentThreadId
-    ? activeCollectionId ?? threadMetadata?.collectionId ?? null
-    : activeCollectionId;
-  const resolvedAnalysisMode = initialAgentThreadId
-    ? (threadMetadata?.analysisMode || "chat")
-    : analysisMode;
+  const [selectedMode, setSelectedMode] = useState<AnalysisMode>(
+    normalizeAnalysisMode(threadMetadata?.analysisMode),
+  );
+  const resolvedCollectionId = normalizeUuid(
+    initialAgentThreadId
+      ? activeCollectionId ?? threadMetadata?.collectionId ?? null
+      : activeCollectionId
+  );
+  const resolvedAnalysisMode = selectedMode;
   const requestMetadata = useMemo(
     () => ({
       project_id: projectId,
@@ -270,6 +334,52 @@ export function AssistantWorkspaceView({
     }),
     [projectId, resolvedAnalysisMode, resolvedCollectionId],
   );
+
+  useEffect(() => {
+    setSelectedMode(normalizeAnalysisMode(threadMetadata?.analysisMode));
+  }, [threadMetadata?.analysisMode, initialAgentThreadId]);
+
+  useEffect(() => {
+    const collectionFromUrl = normalizeUuid(searchParams.get("collection"));
+    const preferredCollectionId = collectionFromUrl ?? normalizeUuid(threadMetadata?.collectionId ?? null);
+    if (!preferredCollectionId || preferredCollectionId === activeCollectionId) return;
+    setProjectActiveCollection(projectId, preferredCollectionId);
+  }, [
+    activeCollectionId,
+    projectId,
+    searchParams,
+    setProjectActiveCollection,
+    threadMetadata?.collectionId,
+  ]);
+
+  useEffect(() => {
+    if (!initialAgentThreadId) return;
+    const nextMode = normalizeAnalysisMode(threadMetadata?.analysisMode);
+    if (nextMode === selectedMode) return;
+    void fetch(`${agentServerUrl}/threads/${initialAgentThreadId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        metadata: {
+          project_id: projectId,
+          collection_id: resolvedCollectionId,
+          analysis_mode: selectedMode,
+        },
+      }),
+    }).catch((error) => {
+      console.error("[AssistantWorkspaceView] mode patch failed", error);
+    });
+  }, [
+    agentServerUrl,
+    initialAgentThreadId,
+    projectId,
+    resolvedCollectionId,
+    selectedMode,
+    threadMetadata?.analysisMode,
+  ]);
   const pendingPromptFromNavigation = useMemo(() => {
     const state = location.state as { pendingPrompt?: unknown } | null;
     return typeof state?.pendingPrompt === "string" && state.pendingPrompt.trim()
@@ -282,15 +392,24 @@ export function AssistantWorkspaceView({
   }, [location.state]);
 
   const displayedMessages = useMemo(() => {
-    return (stream.messages || [])
-      .map((msg) =>
-        langGraphMessageToMessage(
-          msg as { id?: string; type: string; content: unknown; tool_calls?: unknown[] },
+    const nextTimestampCache = new Map<string, number>();
+    const messages = deferredStreamMessages
+      .map((msg, index) => {
+        const typedMessage = msg as { id?: string; type: string; content: unknown; tool_calls?: unknown[] };
+        const stableId = buildStableMessageId(typedMessage, initialAgentThreadId || "", index);
+        const timestamp = messageTimestampCacheRef.current.get(stableId) || Date.now();
+        nextTimestampCache.set(stableId, timestamp);
+        return langGraphMessageToMessage(
+          typedMessage,
           initialAgentThreadId || "",
-        ),
-      )
+          index,
+          timestamp,
+        );
+      })
       .filter((message): message is Message => message !== null);
-  }, [initialAgentThreadId, stream.messages]);
+    messageTimestampCacheRef.current = nextTimestampCache;
+    return messages;
+  }, [deferredStreamMessages, initialAgentThreadId]);
 
   const renderedMessages = useMemo(() => {
     if (displayedMessages.length > 0 || !initialAgentThreadId || !pendingPromptFromNavigation) {
@@ -309,9 +428,7 @@ export function AssistantWorkspaceView({
 
   const pendingInterrupts = useMemo(() => {
     const interruptCandidates: unknown[] = [];
-    const rootInterrupts = (stream as { interrupts?: unknown }).interrupts;
-    const values = (stream.values || {}) as Record<string, unknown>;
-    const valueInterrupts = values.interrupts;
+    const valueInterrupts = deferredStreamValues.__interrupt__ ?? deferredStreamValues.interrupts;
 
     const collectInterrupts = (source: unknown) => {
       if (Array.isArray(source)) {
@@ -328,14 +445,14 @@ export function AssistantWorkspaceView({
       }
     };
 
-    collectInterrupts(rootInterrupts);
+    collectInterrupts(deferredStreamInterrupts);
     collectInterrupts(valueInterrupts);
 
     if (stream.interrupt) {
       interruptCandidates.push(stream.interrupt);
     }
-    if (values.interrupt) {
-      interruptCandidates.push(values.interrupt);
+    if (deferredStreamValues.interrupt) {
+      interruptCandidates.push(deferredStreamValues.interrupt);
     }
 
     const unique = new Map<string, { id?: string; value: Record<string, unknown> }>();
@@ -352,32 +469,27 @@ export function AssistantWorkspaceView({
       unique.set(key, { id: interrupt.id, value: normalizedValue });
     });
     return Array.from(unique.values());
-  }, [stream]);
+  }, [deferredStreamInterrupts, deferredStreamValues, stream.interrupt]);
 
   const planTodos = useMemo(() => {
-    const values = (stream.values || {}) as Record<string, unknown>;
-    const rawTodos = Array.isArray(values.todos)
-      ? values.todos
-      : Array.isArray(values.active_plan)
-        ? values.active_plan
+    const rawTodos = Array.isArray(deferredStreamValues.todos)
+      ? deferredStreamValues.todos
+      : Array.isArray(deferredStreamValues.active_plan)
+        ? deferredStreamValues.active_plan
         : [];
     return rawTodos.map(normalizeTodo).filter((todo): todo is StreamTodo => todo !== null);
-  }, [stream.values]);
+  }, [deferredStreamValues]);
 
   const activeSubagents = useMemo(() => {
-    const raw = Array.isArray((stream as { activeSubagents?: unknown }).activeSubagents)
-      ? ((stream as { activeSubagents?: unknown[] }).activeSubagents || [])
-      : [];
-    return raw.map(normalizeSubagent).filter((subagent): subagent is StreamSubagent => subagent !== null);
-  }, [stream]);
+    return deferredStreamActiveSubagents
+      .map(normalizeSubagent)
+      .filter((subagent): subagent is StreamSubagent => subagent !== null);
+  }, [deferredStreamActiveSubagents]);
 
   const recentSubagents = useMemo(() => {
-    const raw = Array.isArray((stream as { subagents?: unknown }).subagents)
-      ? ((stream as { subagents?: unknown[] }).subagents || [])
-      : [];
     const activeIds = new Set(activeSubagents.map((subagent) => subagent.id).filter(Boolean));
     const unique = new Map<string, StreamSubagent>();
-    for (const item of raw) {
+    for (const item of deferredStreamSubagents) {
       const subagent = normalizeSubagent(item);
       if (!subagent) continue;
       const fallbackId = `${subagent.toolCall?.id || ""}:${subagent.toolCall?.args?.subagent_type || "agent"}:${subagent.status || "pending"}`;
@@ -391,7 +503,29 @@ export function AssistantWorkspaceView({
       })
       .slice(-6)
       .reverse();
-  }, [activeSubagents, stream]);
+  }, [activeSubagents, deferredStreamSubagents]);
+
+  const subagentsByMessageId = useMemo(() => {
+    const getter = stream.getSubagentsByMessage;
+    const grouped = new Map<string, StreamSubagent[]>();
+    const subagentCount = deferredStreamSubagents.length;
+    if (subagentCount === 0 && displayedMessages.length === 0) return grouped;
+    if (!getter) return grouped;
+    displayedMessages.forEach((message) => {
+      if (message.role !== "assistant") return;
+      try {
+        const subagents = (getter(message.id) || [])
+          .map(normalizeSubagent)
+          .filter((subagent): subagent is StreamSubagent => subagent !== null);
+        if (subagents.length > 0) {
+          grouped.set(message.id, subagents);
+        }
+      } catch {
+        // Ignore transient SDK lookup issues during stream transitions.
+      }
+    });
+    return grouped;
+  }, [displayedMessages, stream.getSubagentsByMessage, deferredStreamSubagents.length]);
 
   const completedTodoCount = useMemo(
     () => planTodos.filter((todo) => todo.status === "completed" || todo.status === "complete").length,
@@ -415,19 +549,6 @@ export function AssistantWorkspaceView({
       setResumingInterruptId(null);
     }
   };
-
-  const getSubagentsForMessage = useCallback(
-    (messageId: string) => {
-      const getter = stream.getSubagentsByMessage;
-      if (!getter) return [];
-      try {
-        return (getter(messageId) || []) as Array<Record<string, unknown>>;
-      } catch {
-        return [];
-      }
-    },
-    [stream],
-  );
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -576,6 +697,8 @@ export function AssistantWorkspaceView({
     shouldAutoSubmitPendingPrompt,
     stream,
   ]);
+
+  const lastRenderedMessageId = renderedMessages[renderedMessages.length - 1]?.id;
 
   const rail = hasRailContent ? (
     <div className="space-y-4">
@@ -782,7 +905,11 @@ export function AssistantWorkspaceView({
                   <p className="mx-auto max-w-2xl text-sm text-text-secondary">
                     {isProjectHome
                       ? "You are back at the main project workspace. Start a fresh thread here, open sources from the right panel, or adjust settings and memory from the left panel."
-                      : "Ask for research, planning, synthesis, critique, argument mapping, or report drafting. Use the left panel for settings and thread context, and the right panel for sources, file preview, and canvas work."}
+                      : selectedMode === "chat"
+                        ? "Use Chat mode for conversation, quick questions, and read-only project context. Switch to Research or Product when you want a structured workflow."
+                        : selectedMode === "research"
+                          ? "Research mode is for structured retrieval, source review, synthesis, and confidence/gap analysis."
+                          : "Product mode is for planning, drafting, packaging, and publishing deliverables from your project research."}
                   </p>
                   {isProjectHome ? (
                     <div className="mt-5 flex items-center justify-center gap-3">
@@ -809,10 +936,10 @@ export function AssistantWorkspaceView({
                 <React.Fragment key={message.id}>
                   <MessageCard
                     message={message}
-                    isStreaming={stream.isLoading && message === renderedMessages[renderedMessages.length - 1]}
+                    isStreaming={stream.isLoading && message.id === lastRenderedMessageId}
                   />
                   {message.role === "assistant" ? (
-                    <SubagentCards subagents={getSubagentsForMessage(message.id)} />
+                    <SubagentCards subagents={subagentsByMessageId.get(message.id) || []} />
                   ) : null}
                 </React.Fragment>
               ))}
@@ -839,24 +966,31 @@ export function AssistantWorkspaceView({
       <div className="border-t border-border bg-background px-6 py-4">
         <div className="mx-auto max-w-4xl">
           <div className="mb-3 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() =>
-                setSearchParams(
-                  (previous) => {
-                    const next = new URLSearchParams(previous);
-                    if (deepResearch) next.delete("deepResearch");
-                    else next.set("deepResearch", "true");
-                    return next;
-                  },
-                  { replace: true },
-                )
-              }
-              className={`tag text-xs ${deepResearch ? "tag-active" : ""}`}
-            >
-              <FlaskConical className="h-3.5 w-3.5" />
-              Deep Research
-            </button>
+            <div className="flex items-center gap-2 rounded-full border border-border bg-surface px-1 py-1">
+              {([
+                { id: "chat", label: "Chat", icon: MessageSquare },
+                { id: "research", label: "Research", icon: Search },
+                { id: "product", label: "Product", icon: PenTool },
+              ] as const).map((mode) => {
+                const Icon = mode.icon;
+                const active = selectedMode === mode.id;
+                return (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    onClick={() => setSelectedMode(mode.id)}
+                    className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                      active ? "bg-accent-muted text-accent" : "text-text-muted hover:text-text-primary"
+                    }`}
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <Icon className="h-3.5 w-3.5" />
+                      {mode.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
             {stream.isLoading ? (
               <button
                 type="button"
