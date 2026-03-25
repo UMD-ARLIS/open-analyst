@@ -71,6 +71,23 @@ The browser-facing Keycloak endpoints (`/realms/*`) must be routable from the us
 
 Auth tokens (access, refresh, ID) are stored server-side in memory, not in the session cookie. Only minimal user info (userId, email, name) is stored in the cookie to stay within browser cookie size limits. This means sessions are lost on webapp pod restarts.
 
+### Persistence Architecture
+
+The runtime uses the **inmem edition** with custom PostgreSQL checkpointer and store to avoid requiring a LangSmith license. This is configured in `langgraph.json`:
+
+- **Checkpointer**: `./src/pg_checkpointer.py:create_checkpointer` — Uses `AsyncPostgresSaver` from `langgraph-checkpoint-postgres`
+- **Store**: `./src/pg_store.py:create_store` — Uses `AsyncPostgresStore` for durable key-value/memory persistence
+
+Both connect to a dedicated `langgraph_runtime` database (set via `CHECKPOINT_POSTGRES_URI` env var on the runtime deployment) to avoid migration conflicts with the app's own schema.
+
+**What persists across restarts:**
+- Checkpoint state (graph execution snapshots, interrupt/resume state)
+- Store data (project memories)
+
+**What does NOT persist (known limitation):**
+- Thread listing / sidebar — the inmem runtime's thread index lives in SQLite `:memory:`. After a pod restart, old threads won't appear in the sidebar even though their checkpoint data is intact in Postgres.
+- TODO: Fix thread persistence by either customizing the inmem runtime's thread storage or migrating to a fully custom FastAPI server that uses Postgres for thread CRUD.
+
 ## EKS Deployment
 
 Kubernetes manifests are in `k8s/open-analyst/`. The deployment uses:
