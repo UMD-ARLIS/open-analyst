@@ -1,4 +1,4 @@
-import { Issuer, type Client, generators } from 'openid-client';
+import { Issuer, type Client } from 'openid-client';
 
 const KEYCLOAK_URL = process.env.KEYCLOAK_URL || 'http://keycloak:8080';
 const KEYCLOAK_REALM = process.env.KEYCLOAK_REALM || 'open-analyst';
@@ -16,12 +16,15 @@ let _client: Client | null = null;
 async function getClient(): Promise<Client> {
   if (_client) return _client;
 
-  // Discover from the internal URL (server-to-server)
-  const issuer = await Issuer.discover(INTERNAL_ISSUER_URL);
+  // Discover from the internal URL (avoids TLS issues when APP_URL differs from KEYCLOAK_URL)
+  const discovered = await Issuer.discover(INTERNAL_ISSUER_URL);
 
-  // Override issuer metadata to use public URLs for browser redirects
-  issuer.metadata.authorization_endpoint = `${PUBLIC_ISSUER_URL}/protocol/openid-connect/auth`;
-  issuer.metadata.end_session_endpoint = `${PUBLIC_ISSUER_URL}/protocol/openid-connect/logout`;
+  // Override the issuer to match the public URL so token validation works
+  // (Keycloak sets the issuer based on the incoming request hostname)
+  const issuer = new Issuer({
+    ...discovered.metadata,
+    issuer: PUBLIC_ISSUER_URL,
+  });
 
   _client = new issuer.Client({
     client_id: KEYCLOAK_CLIENT_ID,
@@ -34,15 +37,14 @@ async function getClient(): Promise<Client> {
 }
 
 export async function getAuthorizationUrl(state: string): Promise<string> {
-  const nonce = generators.nonce();
   // Build the URL manually using the PUBLIC issuer to avoid internal URLs leaking to browser
+  // Note: nonce is omitted because we don't persist it in the session for verification
   const params = new URLSearchParams({
     client_id: KEYCLOAK_CLIENT_ID,
     scope: 'openid email profile',
     response_type: 'code',
     redirect_uri: `${APP_URL}/auth/callback`,
     state,
-    nonce,
   });
   return `${PUBLIC_ISSUER_URL}/protocol/openid-connect/auth?${params.toString()}`;
 }
@@ -63,8 +65,6 @@ export async function handleCallback(
   const params = client.callbackParams(callbackUrl);
   const tokenSet = await client.callback(`${APP_URL}/auth/callback`, params, {
     state: checks.state,
-    // Skip nonce check since we don't persist it in the session
-    nonce: null as unknown as string,
   });
 
   const claims = tokenSet.claims();

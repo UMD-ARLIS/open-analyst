@@ -1,7 +1,12 @@
 import type { LoaderFunctionArgs } from 'react-router';
 import { redirect } from 'react-router';
-import { getSession, commitSession, type SessionUser } from '~/lib/auth/session.server';
+import {
+  getSession,
+  commitSession,
+  type SessionCookieUser,
+} from '~/lib/auth/session.server';
 import { handleCallback } from '~/lib/auth/keycloak.server';
+import { setTokens } from '~/lib/auth/token-store.server';
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const session = await getSession(request);
@@ -14,17 +19,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const result = await handleCallback(request.url, { state });
 
-    const user: SessionUser = {
-      userId: result.userId,
-      email: result.email,
-      name: result.name,
+    // Store tokens server-side to avoid cookie size limits
+    setTokens(result.userId, {
       accessToken: result.accessToken,
       refreshToken: result.refreshToken,
       idToken: result.idToken,
       expiresAt: result.expiresAt,
+    });
+
+    // Only store minimal user info in the cookie
+    const cookieUser: SessionCookieUser = {
+      userId: result.userId,
+      email: result.email,
+      name: result.name,
     };
 
-    session.set('user', user);
+    session.set('user', cookieUser);
     session.unset('oauth_state');
 
     return redirect('/', {

@@ -6,6 +6,7 @@ import {
   type SessionUser,
 } from './session.server';
 import { refreshTokens } from './keycloak.server';
+import { setTokens } from './token-store.server';
 
 const AUTH_ENABLED = process.env.AUTH_ENABLED !== 'false';
 const DEV_USER_FALLBACK: SessionUser = {
@@ -33,15 +34,10 @@ export async function requireUser(request: Request): Promise<SessionUser> {
     const refreshed = await refreshTokens(user.refreshToken);
     if (!refreshed) throw redirect('/login');
 
-    const session = await getSession(request);
-    const updated: SessionUser = {
-      ...user,
-      ...refreshed,
-    };
-    session.set('user', updated);
-    // Can't redirect with updated session here easily,
-    // but the next request will use the refreshed token
-    return updated;
+    // Update server-side token store
+    setTokens(user.userId, refreshed);
+
+    return { ...user, ...refreshed };
   }
 
   return user;

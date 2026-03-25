@@ -24,15 +24,34 @@ export interface SessionUser {
   expiresAt: number;
 }
 
+/** Minimal data stored in the cookie; tokens live server-side */
+export interface SessionCookieUser {
+  userId: string;
+  email: string;
+  name: string;
+}
+
 export async function getSession(request: Request) {
   return sessionStorage.getSession(request.headers.get('Cookie'));
 }
 
 export async function getSessionUser(request: Request): Promise<SessionUser | null> {
+  const { getTokens } = await import('./token-store.server');
   const session = await getSession(request);
-  const user = session.get('user') as SessionUser | undefined;
-  if (!user?.userId) return null;
-  return user;
+  const cookieUser = session.get('user') as SessionCookieUser | SessionUser | undefined;
+  if (!cookieUser?.userId) return null;
+
+  // Hydrate tokens from server-side store
+  const tokens = getTokens(cookieUser.userId);
+  return {
+    userId: cookieUser.userId,
+    email: cookieUser.email,
+    name: cookieUser.name,
+    accessToken: tokens?.accessToken || (cookieUser as SessionUser).accessToken || '',
+    refreshToken: tokens?.refreshToken || (cookieUser as SessionUser).refreshToken || '',
+    idToken: tokens?.idToken || (cookieUser as SessionUser).idToken || '',
+    expiresAt: tokens?.expiresAt || (cookieUser as SessionUser).expiresAt || 0,
+  };
 }
 
 export async function commitSession(

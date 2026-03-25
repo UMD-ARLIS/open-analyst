@@ -69,6 +69,8 @@ The app uses Keycloak for OIDC authentication. Required env vars:
 
 The browser-facing Keycloak endpoints (`/realms/*`) must be routable from the user's browser at the same domain as the app.
 
+Auth tokens (access, refresh, ID) are stored server-side in memory, not in the session cookie. Only minimal user info (userId, email, name) is stored in the cookie to stay within browser cookie size limits. This means sessions are lost on webapp pod restarts.
+
 ## EKS Deployment
 
 Kubernetes manifests are in `k8s/open-analyst/`. The deployment uses:
@@ -81,6 +83,40 @@ Kubernetes manifests are in `k8s/open-analyst/`. The deployment uses:
 - Shared RDS PostgreSQL (existing)
 
 Services: webapp, runtime, analyst-mcp, keycloak, all in namespace `open-analyst`.
+
+### ALB Direct Access Workaround
+
+If the domain `analyst.insights.arlis.umd.edu` does not resolve from your network (e.g., corporate DNS hasn't propagated), the app can be accessed directly via the ALB hostname. The following changes were made to support this:
+
+1. **Ingress**: Removed the `host` restriction so the ALB accepts requests on any hostname (not just `analyst.insights.arlis.umd.edu`).
+2. **ConfigMap**: Set `OPEN_ANALYST_WEB_URL` and `LANGGRAPH_RUNTIME_PUBLIC_URL` to `https://<ALB_HOSTNAME>` so auth redirects use the ALB.
+3. **Keycloak client**: Added the ALB hostname as an additional valid redirect URI and web origin (the original domain entries are preserved).
+
+The ALB hostname is: `k8s-openanal-openanal-945e74a1d3-462564428.us-east-1.elb.amazonaws.com`
+
+You will see a TLS certificate warning because the ACM cert covers `*.insights.arlis.umd.edu`, not the ALB hostname. Click through it.
+
+### Reverting to the Proper Domain
+
+Once DNS resolves correctly, revert these changes:
+
+```bash
+# 1. Restore host restriction on ingress
+kubectl patch ingress open-analyst -n open-analyst --type='json' \
+  -p='[{"op": "add", "path": "/spec/rules/0/host", "value": "analyst.insights.arlis.umd.edu"}]'
+
+# 2. Restore configmap URLs
+kubectl patch configmap open-analyst-config -n open-analyst --type='json' -p='[
+  {"op": "replace", "path": "/data/OPEN_ANALYST_WEB_URL", "value": "https://analyst.insights.arlis.umd.edu"},
+  {"op": "replace", "path": "/data/LANGGRAPH_RUNTIME_PUBLIC_URL", "value": "https://analyst.insights.arlis.umd.edu"}
+]'
+
+# 3. Restart webapp to pick up config
+kubectl rollout restart deployment/webapp -n open-analyst
+
+# 4. (Optional) Remove ALB hostname from Keycloak client redirect URIs
+#    via Keycloak admin console or kcadm.sh
+```
 
 ## Recommended Infrastructure
 
