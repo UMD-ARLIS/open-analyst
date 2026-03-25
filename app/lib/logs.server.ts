@@ -45,15 +45,16 @@ export function listLogs(configDir?: string): {
   return { files, directory: dir };
 }
 
-export async function isLogsEnabled(): Promise<boolean> {
-  const settings = await getSettings();
+export async function isLogsEnabled(userId: string): Promise<boolean> {
+  const settings = await getSettings(userId);
   return settings.devLogsEnabled !== false;
 }
 
 export async function setLogsEnabled(
-  enabled: boolean
+  enabled: boolean,
+  userId: string
 ): Promise<{ success: boolean; enabled: boolean }> {
-  await upsertSettings({ devLogsEnabled: enabled });
+  await upsertSettings({ devLogsEnabled: enabled }, userId);
   return { success: true, enabled };
 }
 
@@ -92,10 +93,11 @@ export function clearLogs(configDir?: string): { success: boolean; deletedCount:
 export async function appendLog(
   level: string,
   message: string,
-  metadata: Record<string, unknown> = {}
+  metadata: Record<string, unknown> = {},
+  userId?: string
 ): Promise<void> {
   try {
-    const settings = await getSettings();
+    const settings = await getSettings(userId ?? 'dev-user');
     if (settings.devLogsEnabled === false) return;
     const dir = ensureLogsDir();
     const logPath = path.join(dir, HEADLESS_LOG_FILENAME);

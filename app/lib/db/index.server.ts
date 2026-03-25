@@ -2,8 +2,6 @@ import pg from 'pg';
 
 const { Pool } = pg;
 
-// Hardcoded dev user ID — replaced with Keycloak user ID later
-export const DEV_USER_ID = 'dev-user';
 
 let pool: pg.Pool | null = null;
 

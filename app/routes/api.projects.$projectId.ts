@@ -1,4 +1,5 @@
 import { mkdir } from 'node:fs/promises';
+import { requireApiUser } from '~/lib/auth/require-user.server';
 import {
   getProject,
   updateProject,
@@ -20,6 +21,7 @@ export async function loader({ params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
+  const { userId } = await requireApiUser(request);
   const projectId = params.projectId;
 
   if (request.method === 'PATCH') {
@@ -74,9 +76,9 @@ export async function action({ request, params }: Route.ActionArgs) {
   if (request.method === 'DELETE') {
     try {
       const deleted = await deleteProject(projectId);
-      const projects = await listProjects();
+      const projects = await listProjects(userId);
       const newActiveId = projects[0]?.id || null;
-      await upsertSettings({ activeProjectId: newActiveId });
+      await upsertSettings({ activeProjectId: newActiveId }, userId);
       return Response.json({
         ...deleted,
         activeProjectId: newActiveId ?? '',

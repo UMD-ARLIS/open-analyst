@@ -1,4 +1,4 @@
-import { DEV_USER_ID, queryRow } from '../index.server';
+import { queryRow } from '../index.server';
 import { type Settings } from '../schema';
 
 export interface SettingsData {
@@ -33,7 +33,7 @@ function toSettingsData(row: Settings): SettingsData {
   };
 }
 
-export async function getSettings(userId: string = DEV_USER_ID): Promise<SettingsData> {
+export async function getSettings(userId: string): Promise<SettingsData> {
   const row = await queryRow<Settings>(
     `
       SELECT *
@@ -49,7 +49,7 @@ export async function getSettings(userId: string = DEV_USER_ID): Promise<Setting
 
 export async function upsertSettings(
   updates: Partial<SettingsData>,
-  userId: string = DEV_USER_ID
+  userId: string
 ): Promise<SettingsData> {
   const row = await queryRow<Settings>(
     `

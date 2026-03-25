@@ -78,3 +78,13 @@ world_models_*.md
 services/langgraph-runtime/.langgraph_api/
 services/langgraph-runtime/.venv/
 services/langgraph-runtime/.pytest_cache/
+
+# Local secrets
+docs/SECRETS.local.md
+*.local.md
+
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.backup
+infra/terraform/.terraform.lock.hcl

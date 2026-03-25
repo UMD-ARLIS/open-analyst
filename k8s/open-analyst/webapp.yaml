@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp
+  namespace: open-analyst
+  labels:
+    app: webapp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: webapp
+  template:
+    metadata:
+      labels:
+        app: webapp
+    spec:
+      serviceAccountName: open-analyst
+      containers:
+        - name: webapp
+          image: 718277288702.dkr.ecr.us-east-1.amazonaws.com/open-analyst/webapp:v4
+          ports:
+            - containerPort: 5173
+          envFrom:
+            - configMapRef:
+                name: open-analyst-config
+            - secretRef:
+                name: open-analyst-secrets
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 5173
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 5173
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webapp
+  namespace: open-analyst
+spec:
+  selector:
+    app: webapp
+  ports:
+    - port: 5173
+      targetPort: 5173
+      protocol: TCP
+  type: ClusterIP

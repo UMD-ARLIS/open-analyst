@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { DEV_USER_ID, queryRow, queryRows } from '../index.server';
+import { queryRow, queryRows } from '../index.server';
 import { type Project } from '../schema';
 import { buildProjectWorkspaceSlug } from '~/lib/project-storage.server';
 
@@ -9,18 +9,21 @@ function trimOrNull(value: string | null | undefined): string | null {
   return trimmed || null;
 }
 
-export async function createProject(input: {
-  name?: string;
-  description?: string;
-  datastores?: unknown[];
-  workspaceLocalRoot?: string | null;
-  artifactBackend?: string | null;
-  artifactLocalRoot?: string | null;
-  artifactS3Bucket?: string | null;
-  artifactS3Region?: string | null;
-  artifactS3Endpoint?: string | null;
-  artifactS3Prefix?: string | null;
-}): Promise<Project> {
+export async function createProject(
+  input: {
+    name?: string;
+    description?: string;
+    datastores?: unknown[];
+    workspaceLocalRoot?: string | null;
+    artifactBackend?: string | null;
+    artifactLocalRoot?: string | null;
+    artifactS3Bucket?: string | null;
+    artifactS3Region?: string | null;
+    artifactS3Endpoint?: string | null;
+    artifactS3Prefix?: string | null;
+  },
+  userId: string,
+): Promise<Project> {
   const id = randomUUID();
   const trimmedName = String(input.name || 'Untitled Project').trim();
   const project = await queryRow<Project>(
@@ -45,7 +48,7 @@ export async function createProject(input: {
     `,
     [
       id,
-      DEV_USER_ID,
+      userId,
       trimmedName,
       String(input.description || '').trim(),
       JSON.stringify(Array.isArray(input.datastores) ? input.datastores : []),
@@ -65,7 +68,7 @@ export async function createProject(input: {
   return project;
 }
 
-export async function listProjects(): Promise<Project[]> {
+export async function listProjects(userId: string): Promise<Project[]> {
   return queryRows<Project>(
     `
       SELECT *
@@ -73,7 +76,7 @@ export async function listProjects(): Promise<Project[]> {
       WHERE user_id = $1
       ORDER BY updated_at DESC
     `,
-    [DEV_USER_ID]
+    [userId]
   );
 }
 

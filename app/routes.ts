@@ -1,6 +1,11 @@
 import { type RouteConfig, index, route, layout, prefix } from '@react-router/dev/routes';
 
 export default [
+  route('login', 'routes/login.tsx'),
+  route('auth/login', 'routes/auth.login.ts'),
+  route('auth/callback', 'routes/auth.callback.ts'),
+  route('auth/logout', 'routes/auth.logout.ts'),
+
   layout('routes/_app.tsx', [
     index('routes/_app._index.tsx'),
     route('projects/:projectId', 'routes/_app.projects.$projectId.tsx'),

@@ -3,6 +3,7 @@ import { getSettings, upsertSettings } from '~/lib/db/queries/settings.server';
 import { listCollections, getCollectionDocumentCounts } from '~/lib/db/queries/documents.server';
 import { env } from '~/lib/env.server';
 import { resolveModel } from '~/lib/litellm.server';
+import { requireUser } from '~/lib/auth/require-user.server';
 
 const RUNTIME_URL = env.LANGGRAPH_RUNTIME_URL;
 
@@ -64,21 +65,25 @@ async function fetchThreadsForProject(projectId: string): Promise<SidebarThread[
   }
 }
 
-export async function loader() {
-  const [projects, settings] = await Promise.all([listProjects(), getSettings()]);
+export async function loader({ request }: { request: Request }) {
+  const user = await requireUser(request);
+  const [projects, settings] = await Promise.all([
+    listProjects(user.userId),
+    getSettings(user.userId),
+  ]);
 
   // Validate the persisted model against LiteLLM.
   // If empty or no longer available, default to first available and persist.
   const resolvedModel = await resolveModel(settings.model, { requireToolSupport: true });
   if (resolvedModel !== settings.model) {
-    await upsertSettings({ model: resolvedModel });
+    await upsertSettings({ model: resolvedModel }, user.userId);
   }
 
   // Validate activeProjectId — clear if the project no longer exists
   let activeProjectId = settings.activeProjectId ?? null;
   if (activeProjectId && !projects.some((p) => p.id === activeProjectId)) {
     activeProjectId = null;
-    await upsertSettings({ activeProjectId: null });
+    await upsertSettings({ activeProjectId: null }, user.userId);
   }
 
   // Load sidebar data for the active project

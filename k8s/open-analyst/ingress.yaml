@@ -1,0 +1,95 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: open-analyst
+  namespace: open-analyst
+  annotations:
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    # HTTPS with ACM certificate
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:718277288702:certificate/3d013b77-732a-44af-8e49-82db71ed03ab
+    # Long idle timeout for streaming connections
+    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=3600
+    # Health check — matches webapp and runtime; Keycloak uses success-codes to accept redirects
+    alb.ingress.kubernetes.io/healthcheck-path: /
+    alb.ingress.kubernetes.io/success-codes: "200,301,302,303"
+spec:
+  ingressClassName: alb
+  rules:
+    - host: analyst.insights.arlis.umd.edu
+      http:
+        paths:
+          # LangGraph Agent Server — browser connects directly for streaming
+          - path: /threads
+            pathType: Prefix
+            backend:
+              service:
+                name: runtime
+                port:
+                  number: 8081
+          - path: /assistants
+            pathType: Prefix
+            backend:
+              service:
+                name: runtime
+                port:
+                  number: 8081
+          - path: /runs
+            pathType: Prefix
+            backend:
+              service:
+                name: runtime
+                port:
+                  number: 8081
+          - path: /store
+            pathType: Prefix
+            backend:
+              service:
+                name: runtime
+                port:
+                  number: 8081
+          - path: /health
+            pathType: Exact
+            backend:
+              service:
+                name: runtime
+                port:
+                  number: 8081
+          # Keycloak OIDC + admin
+          - path: /realms
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  number: 8080
+          - path: /resources
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  number: 8080
+          - path: /admin
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  number: 8080
+          - path: /js
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  number: 8080
+          # Everything else → webapp
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: webapp
+                port:
+                  number: 5173

@@ -56,6 +56,32 @@ Common optional values:
 - `CHAT_RATE_LIMIT_MAX_BUCKET_SIZE`
 - `CHAT_MAX_CONCURRENT_REQUESTS`
 
+## Authentication (Keycloak)
+
+The app uses Keycloak for OIDC authentication. Required env vars:
+
+- `AUTH_ENABLED` — `true` to enforce login, `false` for local dev without auth
+- `SESSION_SECRET` — random string for signing session cookies
+- `KEYCLOAK_URL` — internal Keycloak URL (e.g., `http://keycloak:8080`)
+- `KEYCLOAK_REALM` — Keycloak realm name (default: `open-analyst`)
+- `KEYCLOAK_CLIENT_ID` — OIDC client ID (default: `open-analyst-web`)
+- `KEYCLOAK_CLIENT_SECRET` — OIDC client secret
+
+The browser-facing Keycloak endpoints (`/realms/*`) must be routable from the user's browser at the same domain as the app.
+
+## EKS Deployment
+
+Kubernetes manifests are in `k8s/open-analyst/`. The deployment uses:
+
+- EKS Auto Mode (cluster `eks`, us-east-1)
+- ALB Ingress Controller with path-based routing
+- ACM certificate for HTTPS
+- External-dns for automatic DNS (`*.insights.arlis.umd.edu`)
+- EKS Pod Identity for S3 access
+- Shared RDS PostgreSQL (existing)
+
+Services: webapp, runtime, analyst-mcp, keycloak, all in namespace `open-analyst`.
+
 ## Recommended Infrastructure
 
 ### Postgres
