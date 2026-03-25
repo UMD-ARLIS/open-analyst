@@ -41,7 +41,6 @@ def main() -> None:
     if runtime_edition == "inmem":
         defaults["DATABASE_URI"] = ":memory:"
         defaults["MIGRATIONS_PATH"] = "__inmem"
-        defaults["REDIS_URI"] = ""
 
     for key, value in defaults.items():
         os.environ.setdefault(key, value)

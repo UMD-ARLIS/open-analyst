@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     aws_secret_access_key: SecretStr | None = None
 
     semantic_scholar_api_key: SecretStr | None = None
+    tavily_api_key: SecretStr | None = Field(default_factory=lambda: SecretStr(os.getenv("TAVILY_API_KEY", "")) if os.getenv("TAVILY_API_KEY") else None)
 
     arxiv_base_url: str = "https://export.arxiv.org/api/query"
     openalex_base_url: str = "https://api.openalex.org"

@@ -461,10 +461,16 @@ def list_mcp_servers() -> list[dict[str, Any]]:
 
 
 def derive_api_base_url(*, origin: str | None = None, fallback_host: str | None = None) -> str:
-    if _trimmed(origin):
-        return _trimmed(origin).rstrip("/")
+    """Derive the webapp API base URL for server-to-server calls.
+
+    Prefers OPEN_ANALYST_WEB_URL (internal service URL) over the browser
+    origin to avoid TLS/hostname issues when the public URL differs from
+    the in-cluster service address.
+    """
     if _trimmed(settings.open_analyst_web_url):
         return _trimmed(settings.open_analyst_web_url).rstrip("/")
+    if _trimmed(origin):
+        return _trimmed(origin).rstrip("/")
     host = _trimmed_or_none(fallback_host)
     if not host:
         return ""

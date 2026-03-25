@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import mimetypes
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -25,6 +26,8 @@ from .models import (
 from .paper_store import LocalPaperStore, PostgresPaperStore
 from .providers import ArxivProvider, OpenAlexProvider, ProviderRegistry, SemanticScholarProvider
 from .request_context import get_request_context
+
+logger = logging.getLogger(__name__)
 
 ARTIFACT_SUFFIXES = {
     ".pdf",
@@ -379,6 +382,131 @@ class DownloadService:
             return "text/plain; charset=utf-8"
         return "application/octet-stream"
 
+    async def download_paper(
+        self,
+        paper: PaperRecord,
+        preferred_formats: list[str] | None = None,
+        *,
+        tavily_api_key: str = "",
+    ) -> list[dict[str, Any]]:
+        """Download a paper's content and store it as artifacts.
+
+        Strategy per provider:
+        1. If pdf_url is available, fetch the PDF directly from the source API.
+        2. If no PDF, try Tavily Extract on the paper landing page for content.
+        3. Fall back to the abstract as a .txt artifact.
+
+        Returns a list of download result dicts compatible with the webapp's
+        importLiteratureItem expectations.
+        """
+        # Check if we already have artifacts stored
+        existing = await self.available_artifacts(paper)
+        if existing:
+            pdf = next((a for a in existing if a["kind"] == "pdf"), None)
+            text = next((a for a in existing if a["kind"] == "text"), None)
+            best = pdf or text or existing[0]
+            return [
+                {
+                    "path": best["path"],
+                    "mime_type": best["mime_type"],
+                    "bytes_written": 0,
+                    "extracted_text_path": text["path"] if text else None,
+                    "provider": paper.provider,
+                    "canonical_id": paper.canonical_id,
+                }
+            ]
+
+        downloads: list[dict[str, Any]] = []
+        scope = self._storage_scopes()[0]
+        store = self._object_store(scope)
+
+        # Strategy 1: Direct PDF fetch from source API
+        pdf_stored = False
+        if paper.pdf_url:
+            try:
+                resp = await self.client.get(
+                    paper.pdf_url,
+                    headers={"User-Agent": "open-analyst/1.0 (research tool)"},
+                    timeout=60.0,
+                    follow_redirects=True,
+                )
+                content_type = resp.headers.get("content-type", "")
+                if resp.status_code == 200 and self._is_artifact_response(paper.pdf_url, content_type):
+                    suffix = self._artifact_suffix(paper.pdf_url, content_type)
+                    relative = self._scoped_relative_path(scope, self._artifact_leaf_path(paper, suffix))
+                    uri = await store.put_bytes(relative, resp.content)
+                    if not isinstance(uri, str):
+                        uri = store.uri_for(relative)
+                    downloads.append(
+                        {
+                            "path": uri,
+                            "mime_type": content_type.split(";")[0].strip() or "application/pdf",
+                            "bytes_written": len(resp.content),
+                            "extracted_text_path": None,
+                            "provider": paper.provider,
+                            "canonical_id": paper.canonical_id,
+                        }
+                    )
+                    pdf_stored = True
+                    logger.info("Downloaded PDF for %s from %s (%d bytes)", paper.canonical_id, paper.pdf_url, len(resp.content))
+                else:
+                    logger.warning(
+                        "PDF fetch for %s returned status=%d content-type=%s",
+                        paper.canonical_id, resp.status_code, content_type,
+                    )
+            except (httpx.HTTPError, httpx.TimeoutException) as exc:
+                logger.warning("PDF fetch failed for %s: %s", paper.canonical_id, exc)
+
+        # Strategy 2: Tavily Extract on the paper landing page
+        tavily_text: str | None = None
+        if not pdf_stored and paper.url and tavily_api_key:
+            try:
+                resp = await self.client.post(
+                    "https://api.tavily.com/extract",
+                    json={"urls": [paper.url], "format": "markdown"},
+                    headers={"Authorization": f"Bearer {tavily_api_key}"},
+                    timeout=30.0,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    results = data.get("results", [])
+                    if results and results[0].get("raw_content"):
+                        tavily_text = results[0]["raw_content"]
+                        logger.info("Tavily extracted %d chars for %s", len(tavily_text), paper.canonical_id)
+            except (httpx.HTTPError, httpx.TimeoutException) as exc:
+                logger.warning("Tavily extract failed for %s: %s", paper.canonical_id, exc)
+
+        # Store extracted text (from Tavily or abstract fallback)
+        text_content = tavily_text or (paper.abstract or "").strip()
+        if text_content:
+            text_relative = self._scoped_relative_path(scope, self._artifact_leaf_path(paper, ".txt"))
+            text_bytes = text_content.encode("utf-8")
+            text_uri = await store.put_bytes(text_relative, text_bytes)
+            if not isinstance(text_uri, str):
+                text_uri = store.uri_for(text_relative)
+
+            if pdf_stored and downloads:
+                downloads[0]["extracted_text_path"] = text_uri
+            else:
+                downloads.append(
+                    {
+                        "path": text_uri,
+                        "mime_type": "text/plain; charset=utf-8",
+                        "bytes_written": len(text_bytes),
+                        "extracted_text_path": text_uri,
+                        "provider": paper.provider,
+                        "canonical_id": paper.canonical_id,
+                    }
+                )
+
+        if not downloads:
+            raise FileNotFoundError(
+                f"No downloadable content for {paper.canonical_id}: "
+                f"no pdf_url, no extractable landing page, and no abstract."
+            )
+
+        return downloads
+
 
 class AnalystService:
     def __init__(self, settings: Settings) -> None:
@@ -516,6 +644,25 @@ class AnalystService:
             artifact_storage_backend=self.settings.storage_backend.lower(),
             artifact_storage_detail=(await self.downloads.storage_health()).detail,
         )
+
+    async def download_paper(
+        self,
+        identifier: str,
+        provider: str | None = None,
+        preferred_formats: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Download paper content, store artifacts, return download results."""
+        paper = await self.get_paper(identifier, provider=provider)
+        if paper is None:
+            raise FileNotFoundError(f"Paper not found: {identifier}")
+
+        tavily_key = self.settings.tavily_api_key.get_secret_value() if self.settings.tavily_api_key else ""
+        results = await self.downloads.download_paper(
+            paper,
+            preferred_formats=preferred_formats,
+            tavily_api_key=tavily_key,
+        )
+        return {"downloads": results, "paper": paper.model_dump(mode="json")}
 
     async def storage_health(self) -> StorageHealthResponse:
         return await self.downloads.storage_health()

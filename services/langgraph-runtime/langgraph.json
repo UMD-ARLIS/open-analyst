@@ -2,9 +2,16 @@
   "graphs": {
     "open-analyst": "./src/graph.py:make_graph"
   },
-  "dependencies": ["./pyproject.toml"],
+  "dependencies": ["."],
   "env": "../../.env",
   "http": {
     "app": "./src/webapp.py:app"
+  },
+  "checkpointer": {
+    "backend": "custom",
+    "path": "./src/pg_checkpointer.py:create_checkpointer"
+  },
+  "store": {
+    "path": "./src/pg_store.py:create_store"
   }
 }

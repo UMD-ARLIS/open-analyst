@@ -141,6 +141,36 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="paper_not_found")
         return detail.model_dump(mode="json")
 
+    @app.post("/api/papers/{identifier}/download")
+    async def api_download_paper(
+        identifier: str,
+        request: Request,
+        provider: str | None = None,
+    ):
+        """Download paper content from source APIs and store as artifacts.
+
+        Tries in order:
+        1. Direct PDF fetch from provider (arXiv, S2, OpenAlex pdf_url)
+        2. Tavily Extract on the paper landing page
+        3. Abstract fallback as .txt
+        """
+        analyst_service: AnalystService = app.state.service
+        body = {}
+        try:
+            body = await request.json()
+        except Exception:
+            pass
+        preferred_formats = body.get("preferred_formats", ["pdf"])
+        try:
+            result = await analyst_service.download_paper(
+                identifier,
+                provider=provider,
+                preferred_formats=preferred_formats,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return result
+
     @app.get("/api/papers/{identifier}/artifacts")
     async def api_list_artifacts(identifier: str, provider: str | None = None):
         analyst_service: AnalystService = app.state.service
