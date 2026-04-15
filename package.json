@@ -19,6 +19,8 @@
     "validate:inventory": "node scripts/validation/inventory.mjs --check",
     "knowledge:reindex": "node scripts/reindex-knowledge.mjs",
     "reset:chat-state": "node scripts/reset-chat-state.mjs",
+    "local:k8s:bootstrap": "bash scripts/local-k8s/bootstrap.sh",
+    "local:k8s:e2e": "node scripts/local-k8s/e2e-workflow.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },

@@ -1,8 +1,9 @@
 import { getProjectProfile } from '~/lib/db/queries/workspace.server';
 import { env } from '~/lib/env.server';
 import { getMcpStatus, getMcpTools, listMcpServers } from '~/lib/mcp.server';
-import { listActiveSkills } from '~/lib/skills.server';
+import { listRuntimeSkills } from '~/lib/runtime-skills.server';
 import { listAvailableTools } from '~/lib/tools.server';
+import { getSettings } from '~/lib/db/queries/settings.server';
 
 const RUNTIME_URL = env.LANGGRAPH_RUNTIME_URL;
 
@@ -46,6 +47,13 @@ export interface WorkspaceContextData {
     memoryProfile: Record<string, unknown>;
     agentPolicies: Record<string, unknown>;
     defaultConnectorIds: string[];
+    defaultSkillIds: string[];
+  };
+  diagnostics: {
+    model: string;
+    runtimeReachable: boolean;
+    activeConnectorCount: number;
+    pinnedSkillCount: number;
   };
   taskContext: Record<string, unknown>;
   memories: {
@@ -66,7 +74,36 @@ export interface WorkspaceContextData {
   };
 }
 
-export async function buildWorkspaceContext(projectId: string): Promise<WorkspaceContextData> {
+function extractDefaultSkillIds(agentPolicies: Record<string, unknown> | null | undefined): string[] {
+  const raw =
+    agentPolicies && typeof agentPolicies === 'object'
+      ? (agentPolicies.defaultSkillIds ??
+          (agentPolicies.default_skill_ids as unknown) ??
+          agentPolicies.pinnedSkillIds)
+      : null;
+  return Array.isArray(raw) ? raw.map((value) => String(value)).filter(Boolean) : [];
+}
+
+export async function buildWorkspaceContext(
+  projectId: string,
+  userId: string
+): Promise<WorkspaceContextData> {
+  const checkRuntimeHealth = async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5_000);
+    try {
+      const response = await fetch(`${RUNTIME_URL}/health`, {
+        headers: { Accept: 'application/json' },
+        signal: controller.signal,
+      });
+      return response.ok;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
   const fetchStoreMemories = async () => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10_000);
@@ -90,14 +127,25 @@ export async function buildWorkspaceContext(projectId: string): Promise<Workspac
     }
   };
 
-  const [profile, serverConfigs, statuses, discoveredTools, storeMemories, activeSkills] =
+  const [
+    profile,
+    settings,
+    serverConfigs,
+    statuses,
+    discoveredTools,
+    storeMemories,
+    skills,
+    runtimeReachable,
+  ] =
     await Promise.all([
       getProjectProfile(projectId),
-      Promise.resolve(listMcpServers()),
-      getMcpStatus(),
-      getMcpTools(),
+      getSettings(userId),
+      Promise.resolve(listMcpServers(userId)),
+      getMcpStatus(userId),
+      getMcpTools(userId),
       fetchStoreMemories(),
-      Promise.resolve(listActiveSkills()),
+      listRuntimeSkills({ userId, projectId }),
+      checkRuntimeHealth(),
     ]);
 
   const allMemories = storeMemories.map((item: Record<string, unknown>) => {
@@ -123,10 +171,7 @@ export async function buildWorkspaceContext(projectId: string): Promise<Workspac
   const activeConnectorIds = Array.isArray(profile?.defaultConnectorIds)
     ? profile.defaultConnectorIds.map((value) => String(value))
     : enabledConnectorIds;
-  const enabledSkillIds = activeSkills
-    .filter((skill) => skill.enabled)
-    .map((skill) => String(skill.id));
-  const pinnedSkillIds = enabledSkillIds;
+  const pinnedSkillIds = extractDefaultSkillIds(profile?.agentPolicies);
   const activeConnectorSet = new Set(activeConnectorIds);
   const pinnedSkillSet = new Set(pinnedSkillIds);
   const statusById = new Map(statuses.map((status) => [status.id, status]));
@@ -167,7 +212,7 @@ export async function buildWorkspaceContext(projectId: string): Promise<Workspac
     pinnedSkillIds,
     connectors,
     tools,
-    skills: activeSkills
+    skills: skills
       .filter((skill) => skill.id !== 'repo-skill-skill-creator')
       .map((skill) => ({
         id: skill.id,
@@ -195,6 +240,13 @@ export async function buildWorkspaceContext(projectId: string): Promise<Workspac
       defaultConnectorIds: Array.isArray(profile?.defaultConnectorIds)
         ? profile.defaultConnectorIds.map((value) => String(value))
         : [],
+      defaultSkillIds: pinnedSkillIds,
+    },
+    diagnostics: {
+      model: settings.model || '',
+      runtimeReachable,
+      activeConnectorCount: connectors.filter((connector) => connector.active).length,
+      pinnedSkillCount: pinnedSkillIds.length,
     },
     taskContext: {},
     memories: {

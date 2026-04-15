@@ -20,6 +20,9 @@ interface SourceItem {
 
 interface InterruptValue {
   type: string;
+  current_mode?: string;
+  target_mode?: string;
+  reason?: string;
   query?: string;
   total_found?: number;
   total_candidates?: number;
@@ -44,6 +47,51 @@ interface InterruptCardProps {
   interrupt: { id?: string; value: InterruptValue };
   onResume: (value: Record<string, unknown>) => void;
   isProcessing?: boolean;
+}
+
+function ModeSwitchCard({
+  interrupt,
+  onResume,
+  isProcessing,
+}: {
+  interrupt: InterruptValue;
+  onResume: (value: Record<string, unknown>) => void;
+  isProcessing?: boolean;
+}) {
+  const currentMode = String(interrupt.current_mode || 'chat');
+  const targetMode = String(interrupt.target_mode || 'research');
+  const reason = String(interrupt.reason || interrupt.message || '').trim();
+
+  return (
+    <div className="rounded-xl border border-sky-500/30 bg-sky-900/10 p-4 space-y-3">
+      <h3 className="text-sm font-semibold text-sky-300">
+        Switch thread from {currentMode} to {targetMode}?
+      </h3>
+      <div className="rounded-lg border border-sky-500/20 bg-sky-950/30 p-3 text-sm text-sky-100">
+        {reason || 'The agent is requesting a mode change to continue the workflow.'}
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onResume({ approved: true, target_mode: targetMode })}
+          disabled={isProcessing}
+          className="flex items-center gap-1.5 rounded-lg bg-green-600 px-4 py-1.5 text-sm text-white transition-colors hover:bg-green-500 disabled:opacity-50"
+        >
+          <CheckCircle className="h-3.5 w-3.5" />
+          Approve switch
+        </button>
+        <button
+          type="button"
+          onClick={() => onResume({ approved: false, target_mode: targetMode })}
+          disabled={isProcessing}
+          className="flex items-center gap-1.5 rounded-lg bg-red-600/80 px-4 py-1.5 text-sm text-white transition-colors hover:bg-red-500 disabled:opacity-50"
+        >
+          <XCircle className="h-3.5 w-3.5" />
+          Stay in {currentMode}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function SourceCollectionCard({
@@ -526,6 +574,10 @@ function ToolApprovalCard({
 
 export function InterruptCard({ interrupt, onResume, isProcessing }: InterruptCardProps) {
   const value = interrupt.value;
+
+  if (value.type === 'mode_switch_approval') {
+    return <ModeSwitchCard interrupt={value} onResume={onResume} isProcessing={isProcessing} />;
+  }
 
   if (
     value.type === 'source_collection_approval' ||

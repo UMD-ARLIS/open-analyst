@@ -1,6 +1,8 @@
 import { getDocument } from '~/lib/db/queries/documents.server';
 import { readArtifact } from '~/lib/artifacts.server';
 import { inferMimeType } from '~/lib/file-utils';
+import { requireProjectApiAccess } from '~/lib/project-access.server';
+import { resolveProjectArtifactConfig } from '~/lib/project-storage.server';
 
 function getMetadataValue(metadata: unknown, key: string): string | undefined {
   if (!metadata || typeof metadata !== 'object') return undefined;
@@ -31,6 +33,7 @@ export async function loader({
   params: { projectId: string; documentId: string };
   request: Request;
 }) {
+  const { project } = await requireProjectApiAccess(request, params.projectId);
   const document = await getDocument(params.projectId, params.documentId);
   if (!document) {
     return Response.json({ error: 'Document not found' }, { status: 404 });
@@ -41,12 +44,15 @@ export async function loader({
 
   const filename = getMetadataValue(document.metadata, 'filename') || document.title || 'artifact';
   const mimeType = getMetadataValue(document.metadata, 'mimeType') || 'application/octet-stream';
+  const storage = resolveProjectArtifactConfig(project);
 
   try {
     const artifact = await readArtifact({
       storageUri: document.storageUri,
       filename,
       mimeType,
+      region: storage.region,
+      endpoint: storage.endpoint,
     });
     const url = new URL(request.url);
     const disposition = url.searchParams.get('download') === '1' ? 'attachment' : 'inline';

@@ -5,6 +5,8 @@ build
 test-results
 playwright-report
 services/
+!services/langgraph-runtime/
+!services/langgraph-runtime/**
 infra/
 k8s/
 docs/

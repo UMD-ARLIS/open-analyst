@@ -99,7 +99,7 @@ export function ThreadContextPanel({ projectId, workspaceContext }: ThreadContex
       <section className="rounded-xl border border-border bg-background-secondary p-4">
         <div className="flex items-center gap-2 mb-3">
           <Sparkles className="w-4 h-4 text-accent" />
-          <h3 className="text-sm font-semibold">Active skills</h3>
+          <h3 className="text-sm font-semibold">Skills</h3>
         </div>
         <div className="space-y-2">
           {workspaceContext.skills.map((skill) => (
@@ -116,9 +116,12 @@ export function ThreadContextPanel({ projectId, workspaceContext }: ThreadContex
                     </div>
                   ) : null}
                 </div>
-                {pinnedSkillSet.has(skill.id) ? (
-                  <span className="tag text-[11px]">Pinned</span>
-                ) : null}
+                <div className="flex items-center gap-2">
+                  {skill.enabled ? <span className="tag text-[11px]">Enabled</span> : null}
+                  {pinnedSkillSet.has(skill.id) ? (
+                    <span className="tag text-[11px]">Pinned</span>
+                  ) : null}
+                </div>
               </div>
             </div>
           ))}

@@ -101,4 +101,4 @@ Open Analyst uses four evidence channels:
 
 ## Design Rule
 
-The browser is a product shell around a direct Agent Server client. The runtime is the source of truth for execution state. The client should send routing metadata, not reconstruct the full runtime context on its own.
+The browser is a product shell around app-owned APIs, including the same-origin runtime proxy routes under `/api/runtime/*`. The runtime is the source of truth for execution state. The client should send routing metadata, not reconstruct the full runtime context on its own.

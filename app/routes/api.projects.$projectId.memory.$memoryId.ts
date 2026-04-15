@@ -1,13 +1,16 @@
+import { env } from '~/lib/env.server';
+import { requireProjectApiAccess } from '~/lib/project-access.server';
 import { parseJsonBody } from '~/lib/request-utils';
 import type { Route } from './+types/api.projects.$projectId.memory.$memoryId';
 
-const RUNTIME_URL = process.env.RUNTIME_URL || 'http://localhost:8081';
+const RUNTIME_URL = env.LANGGRAPH_RUNTIME_URL;
 
 function memoryNamespace(projectId: string): string[] {
   return ['open-analyst', 'projects', projectId, 'memories'];
 }
 
-export async function loader({ params }: Route.LoaderArgs) {
+export async function loader({ params, request }: Route.LoaderArgs) {
+  await requireProjectApiAccess(request, params.projectId);
   const res = await fetch(`${RUNTIME_URL}/store/items/search`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -43,6 +46,7 @@ export async function loader({ params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
+  await requireProjectApiAccess(request, params.projectId);
   if (request.method === 'PATCH') {
     // Fetch existing value first
     const getRes = await fetch(`${RUNTIME_URL}/store/items/search`, {

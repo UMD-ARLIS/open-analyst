@@ -1,7 +1,5 @@
 import { mkdir } from 'node:fs/promises';
-import { requireApiUser } from '~/lib/auth/require-user.server';
 import {
-  getProject,
   updateProject,
   deleteProject,
   listProjects,
@@ -9,19 +7,17 @@ import {
 import { upsertSettings } from '~/lib/db/queries/settings.server';
 import { upsertProjectProfile } from '~/lib/db/queries/workspace.server';
 import { resolveProjectWorkspace } from '~/lib/project-storage.server';
+import { requireProjectApiAccess } from '~/lib/project-access.server';
 import { parseJsonBody } from '~/lib/request-utils';
 import type { Route } from './+types/api.projects.$projectId';
 
-export async function loader({ params }: Route.LoaderArgs) {
-  const project = await getProject(params.projectId);
-  if (!project) {
-    return Response.json({ error: `Project not found: ${params.projectId}` }, { status: 404 });
-  }
+export async function loader({ params, request }: Route.LoaderArgs) {
+  const { project } = await requireProjectApiAccess(request, params.projectId);
   return Response.json({ project });
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const { userId } = await requireApiUser(request);
+  const { user } = await requireProjectApiAccess(request, params.projectId);
   const projectId = params.projectId;
 
   if (request.method === 'PATCH') {
@@ -34,15 +30,26 @@ export async function action({ request, params }: Route.ActionArgs) {
         memoryProfile,
         agentPolicies,
         defaultConnectorIds,
+        defaultSkillIds,
         ...projectUpdates
       } = body as Record<string, unknown>;
-      const project = await updateProject(projectId, projectUpdates);
+      const normalizedAgentPolicies =
+        agentPolicies && typeof agentPolicies === 'object'
+          ? ({ ...(agentPolicies as Record<string, unknown>) } as Record<string, unknown>)
+          : {};
+      if (defaultSkillIds !== undefined) {
+        normalizedAgentPolicies.defaultSkillIds = Array.isArray(defaultSkillIds)
+          ? defaultSkillIds.map((value) => String(value))
+          : [];
+      }
+      const project = await updateProject(projectId, user.userId, projectUpdates);
       if (
         brief !== undefined ||
         retrievalPolicy !== undefined ||
         memoryProfile !== undefined ||
         agentPolicies !== undefined ||
-        defaultConnectorIds !== undefined
+        defaultConnectorIds !== undefined ||
+        defaultSkillIds !== undefined
       ) {
         await upsertProjectProfile(projectId, {
           brief: typeof brief === 'string' ? brief : undefined,
@@ -55,8 +62,8 @@ export async function action({ request, params }: Route.ActionArgs) {
               ? (memoryProfile as Record<string, unknown>)
               : undefined,
           agentPolicies:
-            agentPolicies && typeof agentPolicies === 'object'
-              ? (agentPolicies as Record<string, unknown>)
+            agentPolicies !== undefined || defaultSkillIds !== undefined
+              ? normalizedAgentPolicies
               : undefined,
           defaultConnectorIds: Array.isArray(defaultConnectorIds)
             ? defaultConnectorIds.map((value) => String(value))
@@ -75,10 +82,10 @@ export async function action({ request, params }: Route.ActionArgs) {
 
   if (request.method === 'DELETE') {
     try {
-      const deleted = await deleteProject(projectId);
-      const projects = await listProjects(userId);
+      const deleted = await deleteProject(projectId, user.userId);
+      const projects = await listProjects(user.userId);
       const newActiveId = projects[0]?.id || null;
-      await upsertSettings({ activeProjectId: newActiveId }, userId);
+      await upsertSettings({ activeProjectId: newActiveId }, user.userId);
       return Response.json({
         ...deleted,
         activeProjectId: newActiveId ?? '',

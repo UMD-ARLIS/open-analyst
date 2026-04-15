@@ -109,6 +109,8 @@ export async function readArtifact(input: {
   storageUri: string;
   filename?: string;
   mimeType?: string;
+  region?: string;
+  endpoint?: string;
 }): Promise<{ body: Buffer; filename: string; mimeType: string; size: number }> {
   const storageUri = String(input.storageUri || '').trim();
   if (!storageUri) throw new Error('storageUri is required');
@@ -116,8 +118,8 @@ export async function readArtifact(input: {
   if (storageUri.startsWith('s3://')) {
     const { bucket, key } = parseS3Uri(storageUri);
     const client = getS3Client({
-      region: env.ARTIFACT_S3_REGION,
-      endpoint: env.ARTIFACT_S3_ENDPOINT,
+      region: input.region || env.ARTIFACT_S3_REGION,
+      endpoint: input.endpoint || env.ARTIFACT_S3_ENDPOINT,
     });
     const result = await client.send(
       new GetObjectCommand({
@@ -146,15 +148,19 @@ export async function readArtifact(input: {
   return { body, filename, mimeType, size: body.length };
 }
 
-export async function deleteArtifact(storageUri: string): Promise<void> {
-  const uri = String(storageUri || '').trim();
+export async function deleteArtifact(input: {
+  storageUri: string;
+  region?: string;
+  endpoint?: string;
+}): Promise<void> {
+  const uri = String(input.storageUri || '').trim();
   if (!uri) return;
 
   if (uri.startsWith('s3://')) {
     const { bucket, key } = parseS3Uri(uri);
     const client = getS3Client({
-      region: env.ARTIFACT_S3_REGION,
-      endpoint: env.ARTIFACT_S3_ENDPOINT,
+      region: input.region || env.ARTIFACT_S3_REGION,
+      endpoint: input.endpoint || env.ARTIFACT_S3_ENDPOINT,
     });
     await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
     return;

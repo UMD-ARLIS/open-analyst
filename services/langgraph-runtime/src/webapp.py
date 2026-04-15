@@ -173,7 +173,7 @@ def build_runtime_system_prompt(runtime_context: dict[str, Any], analysis_mode: 
                 "Chat mode is active.",
                 "Stay conversational and lightweight.",
                 "You may inspect existing project context read-only, but do not create visible plans, delegate to subagents, stage retrieval workflows, or publish artifacts in this mode.",
-                "If the user asks for structured evidence gathering or deliverable production, recommend switching to Research or Product mode.",
+                "If the user asks for structured evidence gathering or deliverable production, call request_mode_switch to ask the user for approval before escalating into Research or Product mode.",
             ]
         )
     elif mode == "research":

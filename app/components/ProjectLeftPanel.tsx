@@ -91,6 +91,7 @@ export function ProjectLeftPanel() {
     | 'retrieval'
     | 'storage'
     | 'credentials'
+    | 'skills'
     | 'diagnostics';
 
   return (

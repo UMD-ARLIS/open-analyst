@@ -1,4 +1,5 @@
 import { ensureCollection } from '~/lib/db/queries/documents.server';
+import { requireProjectApiAccess } from '~/lib/project-access.server';
 import { parseJsonBody } from '~/lib/request-utils';
 import type { Route } from './+types/api.projects.$projectId.collections.ensure';
 
@@ -6,6 +7,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method not allowed' }, { status: 405 });
   }
+  await requireProjectApiAccess(request, params.projectId);
 
   const body = await parseJsonBody(request);
   if (body instanceof Response) return body;

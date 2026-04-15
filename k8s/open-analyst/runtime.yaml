@@ -18,7 +18,7 @@ spec:
       serviceAccountName: open-analyst
       containers:
         - name: runtime
-          image: 718277288702.dkr.ecr.us-east-1.amazonaws.com/open-analyst/runtime:v3
+          image: 718277288702.dkr.ecr.us-east-1.amazonaws.com/open-analyst/runtime:20260415-132401
           ports:
             - containerPort: 8081
           envFrom:
@@ -27,18 +27,10 @@ spec:
             - secretRef:
                 name: open-analyst-secrets
           env:
-            # Runtime-specific overrides
             - name: HOST
               value: "0.0.0.0"
             - name: PORT
               value: "8081"
-            # Use the same DATABASE_URL for LangGraph checkpoint storage
-            - name: DATABASE_URI
-              valueFrom:
-                secretKeyRef:
-                  name: open-analyst-secrets
-                  key: DATABASE_URL
-            # CORS — allow the public URL
             - name: CORS_ALLOWED_ORIGINS
               value: "https://analyst.insights.arlis.umd.edu"
           resources:

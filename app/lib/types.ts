@@ -244,44 +244,6 @@ export type ClientEvent =
   | { type: 'workdir.set'; payload: { path: string; sessionId?: string } }
   | { type: 'workdir.select'; payload: { sessionId?: string } };
 
-// Sandbox setup types
-export type SandboxSetupPhase =
-  | 'checking'
-  | 'creating'
-  | 'starting'
-  | 'installing_node'
-  | 'installing_python'
-  | 'installing_pip'
-  | 'installing_deps'
-  | 'ready'
-  | 'skipped'
-  | 'error';
-
-export interface SandboxSetupProgress {
-  phase: SandboxSetupPhase;
-  message: string;
-  detail?: string;
-  progress?: number;
-  error?: string;
-}
-
-// Sandbox sync types
-export type SandboxSyncPhase =
-  | 'starting_agent'
-  | 'syncing_files'
-  | 'syncing_skills'
-  | 'ready'
-  | 'error';
-
-export interface SandboxSyncStatus {
-  sessionId: string;
-  phase: SandboxSyncPhase;
-  message: string;
-  detail?: string;
-  fileCount?: number;
-  totalSize?: number;
-}
-
 export type ServerEvent =
   | { type: 'stream.message'; payload: { sessionId: string; message: Message } }
   | { type: 'stream.partial'; payload: { sessionId: string; delta: string } }
@@ -300,8 +262,6 @@ export type ServerEvent =
     }
   | { type: 'folder.selected'; payload: { path: string } }
   | { type: 'config.status'; payload: { isConfigured: boolean; config: AppConfig | null } }
-  | { type: 'sandbox.progress'; payload: SandboxSetupProgress }
-  | { type: 'sandbox.sync'; payload: SandboxSyncStatus }
   | { type: 'workdir.changed'; payload: { path: string } }
   | { type: 'error'; payload: { message: string } };
 
@@ -352,7 +312,6 @@ export interface AppConfig {
   openaiMode?: 'responses' | 'chat';
   claudeCodePath?: string;
   defaultWorkdir?: string;
-  sandboxEnabled?: boolean;
   enableThinking?: boolean;
   isConfigured: boolean;
 }

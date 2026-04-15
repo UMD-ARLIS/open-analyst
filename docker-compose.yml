@@ -54,7 +54,9 @@ services:
       retries: 3
 
   runtime:
-    build: services/langgraph-runtime
+    build:
+      context: .
+      dockerfile: services/langgraph-runtime/Dockerfile
     ports:
       - "8081:8081"
     depends_on:

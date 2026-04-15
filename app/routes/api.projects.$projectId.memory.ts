@@ -1,14 +1,17 @@
 import { v4 as uuidv4 } from 'uuid';
+import { env } from '~/lib/env.server';
+import { requireProjectApiAccess } from '~/lib/project-access.server';
 import { parseJsonBody } from '~/lib/request-utils';
 import type { Route } from './+types/api.projects.$projectId.memory';
 
-const RUNTIME_URL = process.env.RUNTIME_URL || 'http://localhost:8081';
+const RUNTIME_URL = env.LANGGRAPH_RUNTIME_URL;
 
 function memoryNamespace(projectId: string): string[] {
   return ['open-analyst', 'projects', projectId, 'memories'];
 }
 
 export async function loader({ request, params }: Route.LoaderArgs) {
+  await requireProjectApiAccess(request, params.projectId);
   const url = new URL(request.url);
   const status = url.searchParams.get('status') || undefined;
 
@@ -49,6 +52,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method not allowed' }, { status: 405 });
   }
+  await requireProjectApiAccess(request, params.projectId);
 
   const body = await parseJsonBody(request);
   if (body instanceof Response) return body;

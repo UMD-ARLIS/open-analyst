@@ -42,7 +42,7 @@ export async function getSessionUser(request: Request): Promise<SessionUser | nu
   if (!cookieUser?.userId) return null;
 
   // Hydrate tokens from server-side store
-  const tokens = getTokens(cookieUser.userId);
+  const tokens = await getTokens(cookieUser.userId);
   return {
     userId: cookieUser.userId,
     email: cookieUser.email,

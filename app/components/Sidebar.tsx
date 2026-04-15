@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useMatches, useNavigate, useParams, useRevalidator, useSearchParams } from 'react-router';
+import { useNavigate, useParams, useRevalidator, useSearchParams } from 'react-router';
 import { useAppStore } from '~/lib/store';
 import { BrainCircuit, MessageSquare, Pencil, Settings, Trash2 } from 'lucide-react';
 import { AlertDialog } from './AlertDialog';
@@ -32,7 +32,6 @@ function buildWorkspacePath(projectId: string, threadId: string | null): string 
 export function Sidebar({ threads, collections, documentCounts }: SidebarProps) {
   const { sidebarCollapsed, isConfigured } = useAppStore();
   const navigate = useNavigate();
-  const matches = useMatches();
   const { revalidate } = useRevalidator();
   const params = useParams();
   const [searchParams] = useSearchParams();
@@ -44,13 +43,7 @@ export function Sidebar({ threads, collections, documentCounts }: SidebarProps) 
   const activePanel = searchParams.get('panel');
   const isSourcesView = activePanel === 'sources';
   const isWorkspaceHome = !activeThreadId && !isSourcesView;
-  const runtimeConfig = matches.find((match) => match.id === 'routes/_app')?.data as
-    | { langgraphRuntimeUrl?: unknown }
-    | undefined;
-  const runtimeUrl =
-    typeof runtimeConfig?.langgraphRuntimeUrl === 'string'
-      ? runtimeConfig.langgraphRuntimeUrl.replace(/\/+$/g, '')
-      : 'http://localhost:8081';
+  const runtimeUrl = '/api/runtime';
 
   // Determine active IDs from URL
   const activeCollectionId = searchParams.get('collection') || null;

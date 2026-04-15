@@ -5,9 +5,29 @@ const KEYCLOAK_REALM = process.env.KEYCLOAK_REALM || 'open-analyst';
 const KEYCLOAK_CLIENT_ID = process.env.KEYCLOAK_CLIENT_ID || 'open-analyst-web';
 const KEYCLOAK_CLIENT_SECRET = process.env.KEYCLOAK_CLIENT_SECRET || '';
 const APP_URL = process.env.OPEN_ANALYST_WEB_URL || 'http://localhost:5173';
+const KEYCLOAK_PUBLIC_URL = resolvePublicKeycloakUrl();
+
+function resolvePublicKeycloakUrl(): string {
+  const explicit = String(process.env.KEYCLOAK_PUBLIC_URL || '').trim();
+  if (explicit) return explicit.replace(/\/+$/g, '');
+
+  if (process.env.KUBERNETES_SERVICE_HOST) {
+    return APP_URL.replace(/\/+$/g, '');
+  }
+
+  try {
+    const parsed = new URL(KEYCLOAK_URL);
+    if (parsed.hostname === 'keycloak' || parsed.hostname === '0.0.0.0') {
+      parsed.hostname = 'localhost';
+    }
+    return parsed.toString().replace(/\/+$/g, '');
+  } catch {
+    return 'http://localhost:8080';
+  }
+}
 
 // The browser-facing issuer URL (goes through ALB)
-const PUBLIC_ISSUER_URL = `${APP_URL}/realms/${KEYCLOAK_REALM}`;
+const PUBLIC_ISSUER_URL = `${KEYCLOAK_PUBLIC_URL}/realms/${KEYCLOAK_REALM}`;
 // The server-side issuer URL (in-cluster)
 const INTERNAL_ISSUER_URL = `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}`;
 

@@ -4,6 +4,7 @@ import { getConfigDir } from './helpers.server';
 import type { Project } from './db/schema';
 
 type ProjectArtifactBackendSetting = 'env' | 'local' | 's3';
+export const DEFAULT_ARTIFACT_S3_PREFIX = 'open-analyst-vnext';
 
 export type ResolvedProjectArtifactConfig = {
   backend: 'local' | 's3';
@@ -84,7 +85,7 @@ export function resolveProjectArtifactConfig(project: Project): ResolvedProjectA
     const basePrefix =
       trimOrNull(project.artifactS3Prefix) ||
       trimOrNull(env.ARTIFACT_S3_PREFIX) ||
-      'open-analyst-artifacts';
+      DEFAULT_ARTIFACT_S3_PREFIX;
     return {
       backend: 's3',
       workspaceSlug,

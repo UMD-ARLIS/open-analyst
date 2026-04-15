@@ -1,6 +1,8 @@
 import { readArtifact } from '~/lib/artifacts.server';
 import { inferMimeType } from '~/lib/file-utils';
 import { getArtifact } from '~/lib/db/queries/workspace.server';
+import { requireProjectApiAccess } from '~/lib/project-access.server';
+import { resolveProjectArtifactConfig } from '~/lib/project-storage.server';
 
 function encodeDispositionFilename(filename: string): string {
   return filename.replace(/["\\]/g, '_');
@@ -23,6 +25,7 @@ export async function loader({
   params: { projectId: string; artifactId: string };
   request: Request;
 }) {
+  const { project } = await requireProjectApiAccess(request, params.projectId);
   const artifact = await getArtifact(params.projectId, params.artifactId);
   if (!artifact) {
     return Response.json({ error: 'Artifact not found' }, { status: 404 });
@@ -36,11 +39,14 @@ export async function loader({
       : {};
   const filename =
     (typeof metadata.filename === 'string' && metadata.filename) || artifact.title || 'artifact';
+  const storage = resolveProjectArtifactConfig(project);
   try {
     const file = await readArtifact({
       storageUri: artifact.storageUri,
       filename,
       mimeType: artifact.mimeType,
+      region: storage.region,
+      endpoint: storage.endpoint,
     });
     const disposition =
       new URL(request.url).searchParams.get('download') === '1' ? 'attachment' : 'inline';

@@ -3,6 +3,7 @@ import {
   listCanvasDocuments,
   updateCanvasDocument,
 } from '~/lib/db/queries/workspace.server';
+import { requireProjectApiAccess } from '~/lib/project-access.server';
 import { parseJsonBody } from '~/lib/request-utils';
 import type { Route } from './+types/api.projects.$projectId.canvas-documents';
 
@@ -19,12 +20,14 @@ function normalizeCanvasContent(
   return {};
 }
 
-export async function loader({ params }: Route.LoaderArgs) {
+export async function loader({ params, request }: Route.LoaderArgs) {
+  await requireProjectApiAccess(request, params.projectId);
   const documents = await listCanvasDocuments(params.projectId);
   return Response.json({ documents });
 }
 
 export async function action({ params, request }: Route.ActionArgs) {
+  await requireProjectApiAccess(request, params.projectId);
   if (request.method === 'POST') {
     const body = await parseJsonBody(request);
     if (body instanceof Response) return body;

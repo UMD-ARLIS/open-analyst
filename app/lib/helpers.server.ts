@@ -8,8 +8,28 @@ export function getConfigDir(): string {
   return path.join(os.homedir(), '.config', 'open-analyst');
 }
 
+function sanitizeUserId(userId: string): string {
+  return String(userId || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+export function getUserConfigDir(userId: string, baseDir?: string): string {
+  const sanitized = sanitizeUserId(userId) || 'anonymous';
+  return path.join(baseDir ?? getConfigDir(), 'users', sanitized);
+}
+
 export function ensureConfigDir(configDir?: string): string {
   const dir = configDir ?? getConfigDir();
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  return dir;
+}
+
+export function ensureUserConfigDir(userId: string, baseDir?: string): string {
+  const dir = getUserConfigDir(userId, baseDir);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }

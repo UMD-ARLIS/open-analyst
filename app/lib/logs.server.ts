@@ -1,24 +1,24 @@
 import fs from 'fs';
 import path from 'path';
-import { getConfigDir } from './helpers.server';
+import { getUserConfigDir } from './helpers.server';
 import { getSettings, upsertSettings } from './db/queries/settings.server';
 
 const LOGS_DIRNAME = 'logs';
 const HEADLESS_LOG_FILENAME = 'headless.log';
 
-function getLogsDir(configDir?: string): string {
-  return path.join(configDir ?? getConfigDir(), LOGS_DIRNAME);
+function getLogsDir(userId: string, configDir?: string): string {
+  return path.join(configDir ?? getUserConfigDir(userId), LOGS_DIRNAME);
 }
 
-function ensureLogsDir(configDir?: string): string {
-  const dir = getLogsDir(configDir);
+function ensureLogsDir(userId: string, configDir?: string): string {
+  const dir = getLogsDir(userId, configDir);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
   return dir;
 }
 
-export function listLogs(configDir?: string): {
+export function listLogs(userId: string, configDir?: string): {
   files: Array<{
     name: string;
     path: string;
@@ -27,7 +27,7 @@ export function listLogs(configDir?: string): {
   }>;
   directory: string;
 } {
-  const dir = ensureLogsDir(configDir);
+  const dir = ensureLogsDir(userId, configDir);
   const files = fs
     .readdirSync(dir)
     .map((name) => path.join(dir, name))
@@ -58,8 +58,8 @@ export async function setLogsEnabled(
   return { success: true, enabled };
 }
 
-export function exportLogs(configDir?: string): { success: boolean; path: string } {
-  const dir = ensureLogsDir(configDir);
+export function exportLogs(userId: string, configDir?: string): { success: boolean; path: string } {
+  const dir = ensureLogsDir(userId, configDir);
   const exportPath = path.join(dir, `open-analyst-logs-${Date.now()}.txt`);
   const files = fs
     .readdirSync(dir)
@@ -76,8 +76,11 @@ export function exportLogs(configDir?: string): { success: boolean; path: string
   return { success: true, path: exportPath };
 }
 
-export function clearLogs(configDir?: string): { success: boolean; deletedCount: number } {
-  const dir = ensureLogsDir(configDir);
+export function clearLogs(
+  userId: string,
+  configDir?: string
+): { success: boolean; deletedCount: number } {
+  const dir = ensureLogsDir(userId, configDir);
   const files = fs
     .readdirSync(dir)
     .map((name) => path.join(dir, name))
@@ -97,9 +100,10 @@ export async function appendLog(
   userId?: string
 ): Promise<void> {
   try {
-    const settings = await getSettings(userId ?? 'dev-user');
+    const resolvedUserId = userId ?? 'dev-user';
+    const settings = await getSettings(resolvedUserId);
     if (settings.devLogsEnabled === false) return;
-    const dir = ensureLogsDir();
+    const dir = ensureLogsDir(resolvedUserId);
     const logPath = path.join(dir, HEADLESS_LOG_FILENAME);
     const line = JSON.stringify({
       ts: new Date().toISOString(),

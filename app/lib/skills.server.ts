@@ -1,14 +1,24 @@
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
-import { ensureConfigDir, getConfigDir, loadJsonArray, saveJsonArray } from './helpers.server';
+import {
+  getConfigDir,
+  ensureUserConfigDir,
+  getUserConfigDir,
+  loadJsonArray,
+  saveJsonArray,
+} from './helpers.server';
 import type { Skill, SkillCatalogEntry, SkillConfig } from './types';
 import { parseSkillManifest, validateParsedSkill } from './skill-manifest.server';
 
 const SKILLS_FILENAME = 'skills.json';
 const REPO_SKILLS_DIR = path.resolve(process.cwd(), 'skills');
 
-function getSkillsPath(configDir?: string): string {
+function getSkillsPath(userId: string, configDir?: string): string {
+  return path.join(configDir ?? getUserConfigDir(userId), SKILLS_FILENAME);
+}
+
+function getLegacySkillsPath(configDir?: string): string {
   return path.join(configDir ?? getConfigDir(), SKILLS_FILENAME);
 }
 
@@ -49,17 +59,23 @@ function defaultSkillRecords(): SkillConfig[] {
   ];
 }
 
-function getStoredSkills(configDir?: string): SkillConfig[] {
-  ensureConfigDir(configDir);
-  const existing = loadJsonArray<SkillConfig>(getSkillsPath(configDir));
+function getStoredSkills(userId: string, configDir?: string): SkillConfig[] {
+  ensureUserConfigDir(userId, configDir);
+  const userPath = getSkillsPath(userId, configDir);
+  const existing = loadJsonArray<SkillConfig>(userPath);
   if (existing.length) return existing;
+  const legacy = loadJsonArray<SkillConfig>(getLegacySkillsPath(configDir));
+  if (legacy.length) {
+    saveJsonArray(userPath, legacy);
+    return legacy;
+  }
   const defaults = defaultSkillRecords();
-  saveJsonArray(getSkillsPath(configDir), defaults);
+  saveJsonArray(userPath, defaults);
   return defaults;
 }
 
-function saveStoredSkills(skills: SkillConfig[], configDir?: string): void {
-  saveJsonArray(getSkillsPath(configDir), skills);
+function saveStoredSkills(skills: SkillConfig[], userId: string, configDir?: string): void {
+  saveJsonArray(getSkillsPath(userId, configDir), skills);
 }
 
 function builtinRuntimeSkills(): Skill[] {
@@ -226,8 +242,8 @@ function resolveCustomSkill(record: SkillConfig): Skill {
   }
 }
 
-export function listSkills(configDir?: string): Skill[] {
-  const stored = getStoredSkills(configDir);
+export function listSkills(userId: string, configDir?: string): Skill[] {
+  const stored = getStoredSkills(userId, configDir);
   const storedById = new Map(stored.map((skill) => [skill.id, skill]));
   const builtins = builtinRuntimeSkills().map((skill) => mergeWithStored(skill, storedById));
   const repoSkills = discoverRepositorySkills(storedById);
@@ -238,8 +254,8 @@ export function listSkills(configDir?: string): Skill[] {
   return [...customSkills, ...repoSkills, ...builtins].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function listActiveSkills(configDir?: string): Skill[] {
-  return listSkills(configDir).filter((skill) => skill.enabled);
+export function listActiveSkills(userId: string, configDir?: string): Skill[] {
+  return listSkills(userId, configDir).filter((skill) => skill.enabled);
 }
 
 function normalizeText(value: string | undefined): string {
@@ -442,7 +458,7 @@ export function validateSkillPath(folderPath: string): { valid: boolean; errors:
   }
 }
 
-export function installSkill(folderPath: string, configDir?: string): Skill {
+export function installSkill(folderPath: string, userId: string, configDir?: string): Skill {
   const skillPath = path.resolve(folderPath);
   const skill = parseSkillManifest(skillPath, {
     id: `skill-${randomUUID()}`,
@@ -452,36 +468,42 @@ export function installSkill(folderPath: string, configDir?: string): Skill {
     source: { kind: 'custom', path: skillPath },
     config: { folderPath: skillPath },
   });
-  const stored = getStoredSkills(configDir);
+  const stored = getStoredSkills(userId, configDir);
   stored.unshift(serializeSkill(skill));
-  saveStoredSkills(stored, configDir);
+  saveStoredSkills(stored, userId, configDir);
   return skill;
 }
 
-export function deleteSkill(id: string, configDir?: string): { success: boolean } {
-  const skills = getStoredSkills(configDir);
+export function deleteSkill(id: string, userId: string, configDir?: string): { success: boolean } {
+  const skills = getStoredSkills(userId, configDir);
   saveStoredSkills(
     skills.filter((item) => item.id !== id),
+    userId,
     configDir
   );
   return { success: true };
 }
 
-export function setSkillEnabled(id: string, enabled: boolean, configDir?: string): Skill | null {
-  const stored = getStoredSkills(configDir);
+export function setSkillEnabled(
+  id: string,
+  enabled: boolean,
+  userId: string,
+  configDir?: string
+): Skill | null {
+  const stored = getStoredSkills(userId, configDir);
   const idx = stored.findIndex((item) => item.id === id);
 
   if (idx !== -1) {
     stored[idx] = { ...stored[idx], enabled };
-    saveStoredSkills(stored, configDir);
-    return listSkills(configDir).find((item) => item.id === id) || null;
+    saveStoredSkills(stored, userId, configDir);
+    return listSkills(userId, configDir).find((item) => item.id === id) || null;
   }
 
-  const discovered = listSkills(configDir).find((item) => item.id === id);
+  const discovered = listSkills(userId, configDir).find((item) => item.id === id);
   if (!discovered) return null;
 
   const next = { ...discovered, enabled };
   stored.unshift(serializeSkill(next));
-  saveStoredSkills(stored, configDir);
+  saveStoredSkills(stored, userId, configDir);
   return next;
 }

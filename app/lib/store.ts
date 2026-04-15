@@ -5,8 +5,6 @@ import type {
   UserQuestionRequest,
   Settings,
   AppConfig,
-  SandboxSetupProgress,
-  SandboxSyncStatus,
 } from '~/lib/types';
 
 interface ProjectSummary {
@@ -53,13 +51,6 @@ interface AppState {
   activeProjectId: string | null;
   activeCollectionByProject: Record<string, string>;
 
-  // Sandbox setup
-  sandboxSetupProgress: SandboxSetupProgress | null;
-  isSandboxSetupComplete: boolean;
-
-  // Sandbox sync (per-session)
-  sandboxSyncStatus: SandboxSyncStatus | null;
-
   // File viewer
   fileViewerArtifact: ArtifactMeta | null;
 
@@ -87,13 +78,6 @@ interface AppState {
   removeProject: (projectId: string) => void;
   setActiveProjectId: (projectId: string | null) => void;
   setProjectActiveCollection: (projectId: string, collectionId: string) => void;
-
-  // Sandbox setup actions
-  setSandboxSetupProgress: (progress: SandboxSetupProgress | null) => void;
-  setSandboxSetupComplete: (complete: boolean) => void;
-
-  // Sandbox sync actions
-  setSandboxSyncStatus: (status: SandboxSyncStatus | null) => void;
 
   // File viewer actions
   openFileViewer: (artifact: ArtifactMeta) => void;
@@ -143,9 +127,6 @@ export const useAppStore = create<AppState>((set) => ({
   projects: [],
   activeProjectId: null,
   activeCollectionByProject: {},
-  sandboxSetupProgress: null,
-  isSandboxSetupComplete: false,
-  sandboxSyncStatus: null,
   fileViewerArtifact: null,
 
   // UI actions
@@ -208,13 +189,6 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => ({
       activeCollectionByProject: { ...state.activeCollectionByProject, [projectId]: collectionId },
     })),
-
-  // Sandbox setup actions
-  setSandboxSetupProgress: (progress) => set({ sandboxSetupProgress: progress }),
-  setSandboxSetupComplete: (complete) => set({ isSandboxSetupComplete: complete }),
-
-  // Sandbox sync actions
-  setSandboxSyncStatus: (status) => set({ sandboxSyncStatus: status }),
 
   // File viewer actions
   openFileViewer: (artifact) => set({ fileViewerArtifact: artifact }),

@@ -64,6 +64,7 @@ Common local defaults:
 
 - `LANGGRAPH_RUNTIME_URL=http://localhost:8081`
 - `ANALYST_MCP_BASE_URL=http://localhost:8000`
+- `AUTH_ENABLED=false` unless you are also running Keycloak locally
 - blank `ARTIFACT_STORAGE_BACKEND` for local file storage
 - `ARTIFACT_STORAGE_BACKEND=s3` for S3-backed storage
 
@@ -122,6 +123,8 @@ curl -H "x-api-key: $ANALYST_MCP_API_KEY" http://localhost:8000/api/capabilities
 - [Architecture](/home/ubuntu/code/ARLIS/open-analyst/docs/ARCHITECTURE.md)
 - [Agent Architecture](/home/ubuntu/code/ARLIS/open-analyst/docs/AGENT_ARCHITECTURE.md)
 - [Deployment](/home/ubuntu/code/ARLIS/open-analyst/docs/DEPLOYMENT.md)
+- [Workspace Settings](/home/ubuntu/code/ARLIS/open-analyst/docs/WORKSPACE_SETTINGS.md)
+- [Persistence Map](/home/ubuntu/code/ARLIS/open-analyst/docs/PERSISTENCE.md)
 - [Repository Map](/home/ubuntu/code/ARLIS/open-analyst/docs/REPOSITORY_MAP.md)
 - [Analyst MCP README](/home/ubuntu/code/ARLIS/open-analyst/services/analyst-mcp/README.md)
 

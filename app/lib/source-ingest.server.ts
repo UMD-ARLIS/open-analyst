@@ -7,7 +7,6 @@ import {
   updateDocument,
   updateDocumentMetadata,
 } from '~/lib/db/queries/documents.server';
-import { getProject } from '~/lib/db/queries/projects.server';
 import {
   createSourceIngestBatch,
   getSourceIngestBatch,
@@ -16,8 +15,9 @@ import {
   updateSourceIngestItem,
   type SourceIngestBatchWithItems,
 } from '~/lib/db/queries/source-ingest.server';
+import type { Project } from '~/lib/db/schema';
 import { refreshDocumentKnowledgeIndex } from '~/lib/knowledge-index.server';
-import { buildProjectArtifactUrls } from '~/lib/project-storage.server';
+import { buildProjectArtifactUrls, resolveProjectArtifactConfig } from '~/lib/project-storage.server';
 import { sanitizeFilename, inferExtension } from '~/lib/file-utils';
 import { tavilyExtract } from '~/lib/tavily.server';
 import { normalizeUuid } from '~/lib/uuid';
@@ -59,8 +59,8 @@ function buildWebMarkdown(input: {
   ].join('\n');
 }
 
-function getAnalystApiBaseUrl(): string {
-  const configured = getAnalystMcpServer();
+function getProjectAnalystApiBaseUrl(project: Project): string {
+  const configured = getAnalystMcpServer(project.userId);
   const rawUrl =
     configured?.url ||
     `http://${process.env.ANALYST_MCP_HOST || 'localhost'}:${process.env.ANALYST_MCP_PORT || '8000'}/mcp/`;
@@ -68,14 +68,12 @@ function getAnalystApiBaseUrl(): string {
 }
 
 async function fetchAnalystJson<T>(
-  projectId: string,
+  project: Project,
   requestOrigin: string,
   pathName: string,
   init: RequestInit = {}
 ): Promise<T> {
-  const project = await getProject(projectId);
-  if (!project) throw new Error('Project not found');
-  const analystServer = getAnalystMcpServer();
+  const analystServer = getAnalystMcpServer(project.userId);
   const headers: Record<string, string> = {
     'content-type': 'application/json',
     'x-api-key': String(
@@ -87,7 +85,7 @@ async function fetchAnalystJson<T>(
   const timeout = setTimeout(() => controller.abort(), 30_000);
   let response: Response;
   try {
-    response = await fetch(`${getAnalystApiBaseUrl()}${pathName}`, {
+    response = await fetch(`${getProjectAnalystApiBaseUrl(project)}${pathName}`, {
       ...init,
       signal: controller.signal,
       headers: {
@@ -239,7 +237,7 @@ export async function stageSourceIngestBatch(
 }
 
 export async function stageLiteratureCollectionBatch(
-  projectId: string,
+  project: Project,
   requestOrigin: string,
   input: {
     query: string;
@@ -263,9 +261,9 @@ export async function stageLiteratureCollectionBatch(
     results?: Array<Record<string, unknown>>;
     sources_used?: string[];
     current_date?: string;
-  }>(projectId, requestOrigin, `/api/search?${params.toString()}`);
+  }>(project, requestOrigin, `/api/search?${params.toString()}`);
   const results = Array.isArray(payload.results) ? payload.results : [];
-  return stageSourceIngestBatch(projectId, {
+  return stageSourceIngestBatch(project.id, {
     collectionId: input.collectionId || null,
     collectionName: input.collectionName || null,
     origin: 'literature',
@@ -340,10 +338,9 @@ async function upsertSourceDocument(
 async function importLiteratureItem(
   batch: SourceIngestBatchWithItems,
   item: SourceIngestBatchWithItems['items'][number],
-  requestOrigin: string
+  requestOrigin: string,
+  project: Project
 ) {
-  const project = await getProject(batch.projectId);
-  if (!project) throw new Error('Project not found');
   const metadata =
     item.normalizedMetadata && typeof item.normalizedMetadata === 'object'
       ? { ...(item.normalizedMetadata as Record<string, unknown>) }
@@ -361,7 +358,7 @@ async function importLiteratureItem(
       provider?: string;
       canonical_id?: string;
     }>;
-  }>(batch.projectId, requestOrigin, `/api/papers/${encodeURIComponent(canonicalId)}/download`, {
+  }>(project, requestOrigin, `/api/papers/${encodeURIComponent(canonicalId)}/download`, {
     method: 'POST',
     body: JSON.stringify({ preferred_formats: ['pdf'] }),
   });
@@ -372,10 +369,13 @@ async function importLiteratureItem(
   let extractedText = String(metadata.abstract || '').trim();
   if (download.extracted_text_path) {
     try {
+      const storage = resolveProjectArtifactConfig(project);
       const extracted = await readArtifact({
         storageUri: download.extracted_text_path,
         filename: `${sanitizeFilename(item.title)}.txt`,
         mimeType: 'text/plain; charset=utf-8',
+        region: storage.region,
+        endpoint: storage.endpoint,
       });
       extractedText = extracted.body.toString('utf8').trim() || extractedText;
     } catch {
@@ -414,10 +414,9 @@ async function importLiteratureItem(
 
 async function importWebItem(
   batch: SourceIngestBatchWithItems,
-  item: SourceIngestBatchWithItems['items'][number]
+  item: SourceIngestBatchWithItems['items'][number],
+  project: Project
 ) {
-  const project = await getProject(batch.projectId);
-  if (!project) throw new Error('Project not found');
   const url = String(item.sourceUrl || '').trim();
   if (!url) throw new Error('Web source is missing a URL');
   const fetchedAt = new Date().toISOString();
@@ -494,11 +493,46 @@ async function importWebItem(
   };
 }
 
+async function runWithConcurrency<T, TResult>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<TResult>
+): Promise<Array<PromiseSettledResult<TResult>>> {
+  if (items.length === 0) return [];
+
+  const concurrency = Math.max(1, Math.min(limit, items.length));
+  const results: Array<PromiseSettledResult<TResult>> = new Array(items.length);
+  let nextIndex = 0;
+
+  await Promise.all(
+    Array.from({ length: concurrency }, async () => {
+      while (nextIndex < items.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        try {
+          results[currentIndex] = {
+            status: 'fulfilled',
+            value: await worker(items[currentIndex], currentIndex),
+          };
+        } catch (error) {
+          results[currentIndex] = {
+            status: 'rejected',
+            reason: error,
+          };
+        }
+      }
+    })
+  );
+
+  return results;
+}
+
 export async function approveSourceIngestBatch(
-  projectId: string,
+  project: Project,
   batchId: string,
   requestOrigin: string
 ) {
+  const projectId = project.id;
   const batch = await getSourceIngestBatch(projectId, batchId);
   if (!batch) throw new Error('Source ingest batch not found');
   await updateSourceIngestBatch(projectId, batchId, {
@@ -508,23 +542,24 @@ export async function approveSourceIngestBatch(
   let importedCount = 0;
   let failureCount = 0;
   try {
-    const results = await Promise.allSettled(
-      batch.items
-        .filter((item) => item.status !== 'completed')
-        .map(async (item) => {
-          const result =
-            batch.origin === 'web'
-              ? await importWebItem(batch, item)
-              : await importLiteratureItem(batch, item, requestOrigin);
-          await updateSourceIngestItem(projectId, item.id, {
-            documentId: result.document.id,
-            storageUri: result.storageUri,
-            status: 'completed',
-            error: null,
-            importedAt: new Date(),
-          });
-          return result;
-        })
+    const pendingItems = batch.items.filter((item) => item.status !== 'completed');
+    const results = await runWithConcurrency(
+      pendingItems,
+      batch.origin === 'literature' ? 4 : 8,
+      async (item) => {
+        const result =
+          batch.origin === 'web'
+            ? await importWebItem(batch, item, project)
+            : await importLiteratureItem(batch, item, requestOrigin, project);
+        await updateSourceIngestItem(projectId, item.id, {
+          documentId: result.document.id,
+          storageUri: result.storageUri,
+          status: 'completed',
+          error: null,
+          importedAt: new Date(),
+        });
+        return result;
+      }
     );
     const alreadyCompleted = batch.items.filter((item) => item.status === 'completed').length;
     for (let i = 0; i < results.length; i++) {
@@ -533,7 +568,7 @@ export async function approveSourceIngestBatch(
         importedCount += 1;
       } else {
         failureCount += 1;
-        const item = batch.items.filter((item) => item.status !== 'completed')[i];
+        const item = pendingItems[i];
         if (item) {
           await updateSourceIngestItem(projectId, item.id, {
             status: 'failed',
@@ -544,7 +579,7 @@ export async function approveSourceIngestBatch(
       }
     }
     importedCount += alreadyCompleted;
-  } catch (error) {
+  } catch {
     // Unexpected crash during import loop
     failureCount = batch.items.length - importedCount;
   }

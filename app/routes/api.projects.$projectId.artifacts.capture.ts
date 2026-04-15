@@ -6,7 +6,6 @@ import {
   updateDocumentMetadata,
 } from '~/lib/db/queries/documents.server';
 import { createArtifact, createArtifactVersion } from '~/lib/db/queries/workspace.server';
-import { getProject } from '~/lib/db/queries/projects.server';
 import { storeArtifact } from '~/lib/artifacts.server';
 import { resolveInWorkspace } from '~/lib/filesystem.server';
 import {
@@ -15,6 +14,7 @@ import {
 } from '~/lib/project-storage.server';
 import { refreshDocumentKnowledgeIndex } from '~/lib/knowledge-index.server';
 import { sanitizeFilename, inferMimeType, inferExtension } from '~/lib/file-utils';
+import { requireProjectApiAccess } from '~/lib/project-access.server';
 import { parseJsonBody } from '~/lib/request-utils';
 import { normalizeUuid } from '~/lib/uuid';
 import type { Route } from './+types/api.projects.$projectId.artifacts.capture';
@@ -67,16 +67,13 @@ export async function action({ request, params }: Route.ActionArgs) {
   const body = await parseJsonBody(request);
   if (body instanceof Response) return body;
   const projectId = params.projectId;
-  const project = await getProject(projectId);
-  if (!project) {
-    return Response.json({ error: 'Project not found' }, { status: 404 });
-  }
+  const { project } = await requireProjectApiAccess(request, projectId);
   const relativePath = String(body.relativePath || body.path || '').trim();
   if (!relativePath) {
     return Response.json({ error: 'relativePath is required' }, { status: 400 });
   }
 
-  const workspacePath = await resolveInWorkspace(projectId, relativePath);
+  const workspacePath = await resolveInWorkspace(projectId, relativePath, project);
   const stat = await fs.stat(workspacePath).catch(() => null);
   if (!stat || !stat.isFile()) {
     return Response.json(

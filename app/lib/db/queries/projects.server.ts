@@ -80,20 +80,22 @@ export async function listProjects(userId: string): Promise<Project[]> {
   );
 }
 
-export async function getProject(projectId: string): Promise<Project | undefined> {
+export async function getProject(projectId: string, userId: string): Promise<Project | undefined> {
   return queryRow<Project>(
     `
       SELECT *
       FROM projects
       WHERE id = $1
+        AND user_id = $2
       LIMIT 1
     `,
-    [projectId]
+    [projectId, userId]
   );
 }
 
 export async function updateProject(
   projectId: string,
+  userId: string,
   updates: {
     name?: string;
     description?: string;
@@ -161,22 +163,24 @@ export async function updateProject(
       UPDATE projects
       SET ${clauses.join(', ')}
       WHERE id = $${params.length}
+        AND user_id = $${params.length + 1}
       RETURNING *
     `,
-    params
+    [...params, userId]
   );
   if (!project) throw new Error(`Project not found: ${projectId}`);
   return project;
 }
 
-export async function deleteProject(projectId: string): Promise<{ success: boolean }> {
+export async function deleteProject(projectId: string, userId: string): Promise<{ success: boolean }> {
   const deleted = await queryRow<{ id: string }>(
     `
       DELETE FROM projects
       WHERE id = $1
+        AND user_id = $2
       RETURNING id
     `,
-    [projectId]
+    [projectId, userId]
   );
   if (!deleted) throw new Error(`Project not found: ${projectId}`);
   return { success: true };

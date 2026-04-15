@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { getProject } from './db/queries/projects.server';
+import type { Project } from './db/schema';
 import { getDefaultWorkspaceRoot, resolveProjectWorkspace } from './project-storage.server';
 
 function getLegacyProjectWorkspace(projectId: string): string {
@@ -21,9 +21,8 @@ function validateProjectId(projectId: string): void {
   }
 }
 
-export async function getProjectWorkspace(projectId: string): Promise<string> {
+export async function getProjectWorkspace(projectId: string, project?: Project): Promise<string> {
   validateProjectId(projectId);
-  const project = await getProject(projectId);
   const workspaceDir = project
     ? resolveProjectWorkspace(project)
     : getLegacyProjectWorkspace(projectId);
@@ -33,9 +32,13 @@ export async function getProjectWorkspace(projectId: string): Promise<string> {
   return workspaceDir;
 }
 
-export async function resolveInWorkspace(projectId: string, relativePath: string): Promise<string> {
+export async function resolveInWorkspace(
+  projectId: string,
+  relativePath: string,
+  project?: Project
+): Promise<string> {
   validateProjectId(projectId);
-  const workspaceDir = await getProjectWorkspace(projectId);
+  const workspaceDir = await getProjectWorkspace(projectId, project);
   const input = String(relativePath || '.').trim();
 
   // Block absolute paths outside workspace

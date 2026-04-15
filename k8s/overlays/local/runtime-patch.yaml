@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: runtime
+  namespace: open-analyst
+spec:
+  template:
+    spec:
+      containers:
+        - name: runtime
+          image: open-analyst-runtime:local
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: HOST
+              value: "0.0.0.0"
+            - name: PORT
+              value: "8081"
+            - name: DATABASE_URI
+              valueFrom:
+                secretKeyRef:
+                  name: open-analyst-secrets
+                  key: DATABASE_URL
+            - name: CHECKPOINT_POSTGRES_URI
+              valueFrom:
+                secretKeyRef:
+                  name: open-analyst-secrets
+                  key: CHECKPOINT_POSTGRES_URI
+            - name: CORS_ALLOWED_ORIGINS
+              value: "http://open-analyst.localtest.me,http://localhost:8081"

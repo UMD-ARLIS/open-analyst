@@ -16,6 +16,8 @@ from uuid import uuid4
 import httpx
 
 from config import settings
+from langchain_core.runnables import RunnableConfig
+from langgraph_sdk.runtime import ServerRuntime
 from models import RuntimeProjectContext
 from retrieval import retrieval_service
 from telemetry import get_tracer
@@ -88,6 +90,10 @@ CONSOLIDATED_BRANCH_PREVIEW_LIMIT = 3
 CONSOLIDATED_IMPORT_CHUNK_SIZE = 25
 _MODEL_CONCURRENCY_SEMAPHORE: asyncio.Semaphore | None = None
 _MODEL_RATE_LIMITER: Any | None = None
+
+
+def _json_object(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def _iter_exception_chain(exc: Exception) -> list[Exception]:
@@ -265,7 +271,7 @@ class ModeToolGuard(AgentMiddleware if AgentMiddleware is not None else object):
                 (
                     f"{tool_name} is disabled in Chat mode. "
                     "Chat mode is conversational and read-only. Switch to Research mode for structured retrieval "
-                    "or Product mode for drafting and publication."
+                    "or Product mode for drafting and publication. Use request_mode_switch to ask the user for approval."
                 ),
             )
         return handler(request)
@@ -278,7 +284,7 @@ class ModeToolGuard(AgentMiddleware if AgentMiddleware is not None else object):
                 (
                     f"{tool_name} is disabled in Chat mode. "
                     "Chat mode is conversational and read-only. Switch to Research mode for structured retrieval "
-                    "or Product mode for drafting and publication."
+                    "or Product mode for drafting and publication. Use request_mode_switch to ask the user for approval."
                 ),
             )
         return await handler(request)
@@ -1099,6 +1105,7 @@ def _system_prompt() -> str:
         "- Chat mode: conversational, lightweight, and read-only. Do not create plans or delegate.\n"
         "- Research mode: structured retrieval and synthesis.\n"
         "- Product mode: structured planning, drafting, packaging, and publication.\n\n"
+        "If the current mode is too restrictive for the user's request, call request_mode_switch instead of merely telling the user to toggle it manually.\n\n"
         "## Delegation\n"
         "Use the `task` tool to delegate specialized work to subagents:\n"
         "- subagent_type='reviewer': request clarification, branch analysis, and numbered user choices when the task is ambiguous\n"
@@ -1609,7 +1616,11 @@ async def _stage_source_ingest_api(
     api_base_url = str(api_base_url or "").rstrip("/")
     if not api_base_url:
         logger.error("Stage source ingest skipped: api_base_url is empty")
-        return {}
+        return {
+            "status": "error",
+            "error": "Stage source ingest skipped because the runtime API base URL is empty.",
+            "details": {"reason": "missing_api_base_url"},
+        }
     url = f"{api_base_url}/api/projects/{project_id}/source-ingest"
     try:
         async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
@@ -1622,19 +1633,46 @@ async def _stage_source_ingest_api(
                 list(body.keys()) if isinstance(body, dict) else type(body).__name__,
                 str(body)[:500],
             )
-            return {}
+            return {
+                "status": "error",
+                "error": "Stage source ingest returned an unexpected response payload.",
+                "details": {
+                    "reason": "unexpected_payload",
+                    "payload_type": type(body).__name__,
+                    "payload_preview": _clean_text(str(body), limit=300),
+                },
+            }
         return body
     except httpx.HTTPStatusError as exc:
+        response_text = _clean_text(exc.response.text, limit=300)
         logger.error(
             "Stage source ingest HTTP %s from %s: %s",
             exc.response.status_code,
             url,
             exc.response.text[:500],
         )
-        return {}
+        return {
+            "status": "error",
+            "error": (
+                f"Stage source ingest failed with HTTP {exc.response.status_code}"
+                + (f": {response_text}" if response_text else ".")
+            ),
+            "details": {
+                "reason": "http_error",
+                "status_code": exc.response.status_code,
+                "response_body": response_text,
+            },
+        }
     except Exception as exc:
         logger.error("Stage source ingest API call failed: %s", exc, exc_info=True)
-        return {}
+        return {
+            "status": "error",
+            "error": f"Stage source ingest request failed: {_clean_text(str(exc), limit=260)}",
+            "details": {
+                "reason": "request_error",
+                "exception_type": exc.__class__.__name__,
+            },
+        }
 
 
 async def _approve_source_batch_api(
@@ -1650,25 +1688,62 @@ async def _approve_source_batch_api(
             api_base_url,
             batch_id,
         )
-        return {}
+        return {
+            "status": "error",
+            "error": "Approve source batch skipped because the runtime API base URL or batch id is missing.",
+            "details": {
+                "reason": "missing_inputs",
+                "missing_api_base_url": not bool(api_base_url),
+                "missing_batch_id": not bool(batch_id),
+            },
+        }
     url = f"{api_base_url}/api/projects/{project_id}/source-ingest/{batch_id}/approve"
     try:
         async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
             response = await client.post(url)
             response.raise_for_status()
             body = response.json()
-        return body if isinstance(body, dict) else {}
+        if isinstance(body, dict):
+            return body
+        return {
+            "status": "error",
+            "error": "Approve source batch returned an unexpected response payload.",
+            "details": {
+                "reason": "unexpected_payload",
+                "payload_type": type(body).__name__,
+                "payload_preview": _clean_text(str(body), limit=300),
+            },
+        }
     except httpx.HTTPStatusError as exc:
+        response_text = _clean_text(exc.response.text, limit=300)
         logger.error(
             "Approve source batch HTTP %s from %s: %s",
             exc.response.status_code,
             url,
             exc.response.text[:500],
         )
-        return {}
+        return {
+            "status": "error",
+            "error": (
+                f"Approve source batch failed with HTTP {exc.response.status_code}"
+                + (f": {response_text}" if response_text else ".")
+            ),
+            "details": {
+                "reason": "http_error",
+                "status_code": exc.response.status_code,
+                "response_body": response_text,
+            },
+        }
     except Exception as exc:
         logger.error("Approve source batch API call failed: %s", exc, exc_info=True)
-        return {}
+        return {
+            "status": "error",
+            "error": f"Approve source batch request failed: {_clean_text(str(exc), limit=260)}",
+            "details": {
+                "reason": "request_error",
+                "exception_type": exc.__class__.__name__,
+            },
+        }
 
 
 def _workspace_root(workspace_path: str) -> Path:
@@ -1898,11 +1973,18 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         project_id = cfg.get("project_id", "")
         if not project_id:
             return "[]"
+        retrieval_policy = _json_object(cfg.get("retrieval_policy"))
+        policy_limit = retrieval_policy.get("limit")
+        policy_min_score = retrieval_policy.get("minScore")
+        effective_limit = max(1, min(int(limit or 6), 8))
+        if isinstance(policy_limit, (int, float)) and int(policy_limit) > 0:
+            effective_limit = min(effective_limit, max(1, min(int(policy_limit), 8)))
         results = await retrieval_service.search_project_documents(
             project_id,
             query,
             collection_id=cfg.get("collection_id"),
-            limit=max(1, min(int(limit or 6), 8)),
+            limit=effective_limit,
+            min_score=float(policy_min_score) if isinstance(policy_min_score, (int, float)) else None,
         )
         return json.dumps(results)
 
@@ -1927,10 +2009,18 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         project_id = cfg.get("project_id", "")
         if not project_id:
             return "[]"
+        retrieval_policy = _json_object(cfg.get("retrieval_policy"))
+        if retrieval_policy.get("includeProjectMemories") is False:
+            return "[]"
+        memory_profile = _json_object(cfg.get("memory_profile"))
+        configured_limit = memory_profile.get("maxEntries")
+        effective_limit = max(1, min(int(limit or 6), 8))
+        if isinstance(configured_limit, (int, float)) and int(configured_limit) > 0:
+            effective_limit = min(effective_limit, max(1, min(int(configured_limit), 20)))
         results = await retrieval_service.search_project_memories(
             project_id,
             query,
-            limit=max(1, min(int(limit or 6), 8)),
+            limit=effective_limit,
             store=getattr(runtime, "store", None),
         )
         return json.dumps(results)
@@ -2039,9 +2129,27 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
                     if isinstance(approved_batch, dict) and approved_batch.get("status") == "completed":
                         web_completed.append({"title": web_item.get("title"), "url": web_url})
                     else:
-                        web_failed.append({"title": web_item.get("title"), "error": "Import failed"})
+                        web_failed.append(
+                            {
+                                "title": web_item.get("title"),
+                                "error": _clean_text(
+                                    approval_result.get("error") if isinstance(approval_result, dict) else "Import failed",
+                                    limit=240,
+                                )
+                                or "Import failed",
+                            }
+                        )
                 else:
-                    web_failed.append({"title": web_item.get("title"), "error": "Staging failed"})
+                    web_failed.append(
+                        {
+                            "title": web_item.get("title"),
+                            "error": _clean_text(
+                                web_payload.get("error") if isinstance(web_payload, dict) else "Staging failed",
+                                limit=240,
+                            )
+                            or "Staging failed",
+                        }
+                    )
             except Exception as exc:
                 web_failed.append({"title": web_item.get("title"), "error": str(exc)})
 
@@ -2080,7 +2188,15 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
                 list(stage_payload.keys()) if isinstance(stage_payload, dict) else None,
                 batch,
             )
-            return {"status": "error", "error": "Failed to stage source ingest batch"}
+            return {
+                "status": "error",
+                "error": _clean_text(
+                    stage_payload.get("error") if isinstance(stage_payload, dict) else "Failed to stage source ingest batch",
+                    limit=280,
+                )
+                or "Failed to stage source ingest batch",
+                "details": stage_payload.get("details") if isinstance(stage_payload, dict) else None,
+            }
 
         approval_payload = await _approve_source_batch_api(api_base_url, project_id, batch_id)
         approved_batch = approval_payload.get("batch") if isinstance(approval_payload, dict) else None
@@ -2088,7 +2204,14 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
             return {
                 "status": "error",
                 "batch_id": batch_id,
-                "error": "Source ingest approval failed before import results were returned.",
+                "error": _clean_text(
+                    approval_payload.get("error")
+                    if isinstance(approval_payload, dict)
+                    else "Source ingest approval failed before import results were returned.",
+                    limit=280,
+                )
+                or "Source ingest approval failed before import results were returned.",
+                "details": approval_payload.get("details") if isinstance(approval_payload, dict) else None,
             }
 
         items_payload = approved_batch.get("items") if isinstance(approved_batch.get("items"), list) else []
@@ -2719,7 +2842,19 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
                 list(stage_payload.keys()) if isinstance(stage_payload, dict) else None,
                 batch,
             )
-            return json.dumps({"status": "error", "error": "Failed to stage source ingest batch"})
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": _clean_text(
+                        stage_payload.get("error")
+                        if isinstance(stage_payload, dict)
+                        else "Failed to stage source ingest batch",
+                        limit=280,
+                    )
+                    or "Failed to stage source ingest batch",
+                    "details": stage_payload.get("details") if isinstance(stage_payload, dict) else None,
+                }
+            )
 
         approval_payload = await _approve_source_batch_api(api_base_url, project_id, batch_id)
         approved_batch = approval_payload.get("batch") if isinstance(approval_payload, dict) else None
@@ -2728,7 +2863,14 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
                 {
                     "status": "error",
                     "batch_id": batch_id,
-                    "error": "Source ingest approval failed before import results were returned.",
+                    "error": _clean_text(
+                        approval_payload.get("error")
+                        if isinstance(approval_payload, dict)
+                        else "Source ingest approval failed before import results were returned.",
+                        limit=280,
+                    )
+                    or "Source ingest approval failed before import results were returned.",
+                    "details": approval_payload.get("details") if isinstance(approval_payload, dict) else None,
                 }
             )
 
@@ -2935,6 +3077,57 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         return json.dumps(_runtime_capabilities_payload(cfg))
 
     @tool
+    async def request_mode_switch(
+        target_mode: str,
+        reason: str = "",
+        runtime: ToolRuntime = None,
+    ) -> str:
+        """Request user approval to switch the current thread into a different interaction mode."""
+        normalized_target = _normalize_analysis_mode(target_mode)
+        cfg = _get_project_config(runtime)
+        current_mode = _normalize_analysis_mode(cfg.get("analysis_mode"))
+        if normalized_target == current_mode:
+            return json.dumps(
+                {
+                    "status": "already_active",
+                    "current_mode": current_mode,
+                    "target_mode": normalized_target,
+                }
+            )
+        if interrupt is None:
+            return _approval_unavailable("request_mode_switch")
+        approval = interrupt(
+            {
+                "type": "mode_switch_approval",
+                "current_mode": current_mode,
+                "target_mode": normalized_target,
+                "reason": _clean_text(reason, limit=400)
+                or f"Switch to {normalized_target} mode to continue this workflow.",
+                "message": (
+                    f"The agent needs {normalized_target} mode to continue. "
+                    "Approve to update this thread and resume on the same conversation."
+                ),
+            }
+        )
+        if not isinstance(approval, dict) or not approval.get("approved"):
+            return json.dumps(
+                {
+                    "status": "rejected",
+                    "current_mode": current_mode,
+                    "target_mode": normalized_target,
+                    "message": "The requested mode switch was declined by the user.",
+                }
+            )
+        return json.dumps(
+            {
+                "status": "approved",
+                "current_mode": current_mode,
+                "target_mode": normalized_target,
+                "message": f"Approved mode switch to {normalized_target}.",
+            }
+        )
+
+    @tool
     async def list_canvas_documents(runtime: ToolRuntime = None) -> str:
         """List existing canvas documents for the current project."""
         cfg = _get_project_config(runtime)
@@ -3073,6 +3266,7 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         "list_active_connectors": list_active_connectors,
         "list_active_skills": list_active_skills,
         "describe_runtime_capabilities": describe_runtime_capabilities,
+        "request_mode_switch": request_mode_switch,
         "list_canvas_documents": list_canvas_documents,
         "save_canvas_markdown": save_canvas_markdown,
         "publish_canvas_document": publish_canvas_document,
@@ -3088,6 +3282,7 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         search_project_memories,    # Recall prior findings
         list_active_skills,         # Answer "what can you do?"
         describe_runtime_capabilities,  # Answer tool/connector questions
+        request_mode_switch,        # Escalate from chat into research/product with approval
         list_canvas_documents,      # Check current canvas state
         approve_collected_literature,  # One consolidated approval after parallel retrieval
         propose_project_memory,     # Persist findings across threads
@@ -3491,12 +3686,12 @@ def _build_subagent_middleware() -> list[Any]:
     return [ResilientModelMiddleware(fallback_models=fallback_models)]
 
 
-def make_graph() -> Any:
-    """Entry point for the LangGraph Agent Server (referenced in langgraph.json).
-
-    Returns a compiled deep agent graph. The Agent Server handles
-    checkpointing, store, streaming, thread management, and run lifecycle.
-    """
+def build_runtime_graph(
+    *,
+    checkpointer: Any | None = None,
+    store: Any | None = None,
+) -> Any:
+    """Build the compiled deep agent graph for the standalone runtime."""
     if create_deep_agent is None:
         raise RuntimeError("deepagents is not installed")
 
@@ -3513,6 +3708,8 @@ def make_graph() -> Any:
         subagents=_build_subagents(model, all_tools),
         backend=_build_backend(),
         context_schema=RuntimeProjectContext,
+        checkpointer=checkpointer,
+        store=store,
         interrupt_on={
             "publish_canvas_document": True,
             "publish_workspace_file": True,
@@ -3520,3 +3717,18 @@ def make_graph() -> Any:
         },
     )
     return agent
+
+
+def make_graph(
+    config: RunnableConfig | None = None,
+    runtime: ServerRuntime[RuntimeProjectContext] | None = None,
+) -> Any:
+    """Entry point for the LangGraph Agent Server (referenced in langgraph.json).
+
+    The Agent Server now only passes RunnableConfig and/or ServerRuntime into
+    graph factories. Persistence and store resources are owned by the server,
+    so the factory should consume them from the provided runtime instead of
+    requesting custom keyword parameters.
+    """
+    del config
+    return build_runtime_graph(store=getattr(runtime, "store", None))

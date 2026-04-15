@@ -27,9 +27,6 @@ data:
   ANALYST_MCP_LITELLM_CHAT_MODEL: "bedrock-claude-sonnet-4"
   ANALYST_MCP_LITELLM_EMBEDDING_MODEL: "bedrock-titan-embed-text"
 
-  # Runtime config — inmem edition (langgraph-runtime-postgres not yet on PyPI)
-  LANGGRAPH_RUNTIME_EDITION: "inmem"
-
   # Auth (Keycloak)
   AUTH_ENABLED: "true"
   KEYCLOAK_URL: "http://keycloak:8080"

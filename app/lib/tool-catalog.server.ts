@@ -36,6 +36,7 @@ export function isToolCatalogQuestion(input: {
 export async function buildToolCatalogText(input: {
   activeToolNames?: string[];
   mcpServers?: McpServerConfig[];
+  userId?: string;
 }): Promise<string> {
   const activeToolNames = new Set([
     ...CORE_TOOL_NAMES,
@@ -47,7 +48,7 @@ export async function buildToolCatalogText(input: {
 
   const selectedServers = input.mcpServers || [];
   const selectedServerIds = new Set(selectedServers.map((server) => server.id));
-  const allMcpTools = await getMcpTools();
+  const allMcpTools = input.userId ? await getMcpTools(input.userId) : [];
   const mcpTools =
     selectedServerIds.size > 0
       ? allMcpTools.filter((tool) => selectedServerIds.has(tool.serverId))

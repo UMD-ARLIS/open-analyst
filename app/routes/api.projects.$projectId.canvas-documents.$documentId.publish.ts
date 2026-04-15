@@ -12,13 +12,13 @@ import {
   createDocument,
   updateDocumentMetadata,
 } from '~/lib/db/queries/documents.server';
-import { getProject } from '~/lib/db/queries/projects.server';
 import { storeArtifact } from '~/lib/artifacts.server';
 import { refreshDocumentKnowledgeIndex } from '~/lib/knowledge-index.server';
 import {
   buildProjectArtifactUrls,
   buildProjectStandaloneArtifactUrls,
 } from '~/lib/project-storage.server';
+import { requireProjectApiAccess } from '~/lib/project-access.server';
 import { sanitizeFilename } from '~/lib/file-utils';
 
 function getMarkdown(content: unknown): string {
@@ -38,10 +38,7 @@ export async function action({
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method not allowed' }, { status: 405 });
   }
-  const project = await getProject(params.projectId);
-  if (!project) {
-    return Response.json({ error: 'Project not found' }, { status: 404 });
-  }
+  const { project } = await requireProjectApiAccess(request, params.projectId);
   const canvasDocument = await getCanvasDocument(params.projectId, params.documentId);
   if (!canvasDocument) {
     return Response.json({ error: 'Canvas document not found' }, { status: 404 });

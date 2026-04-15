@@ -18,7 +18,7 @@ spec:
       serviceAccountName: open-analyst
       containers:
         - name: analyst-mcp
-          image: 718277288702.dkr.ecr.us-east-1.amazonaws.com/open-analyst/analyst-mcp:v1
+          image: 718277288702.dkr.ecr.us-east-1.amazonaws.com/open-analyst/analyst-mcp:v2
           ports:
             - containerPort: 8000
           envFrom:

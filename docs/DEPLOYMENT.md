@@ -5,7 +5,7 @@
 Run three services:
 
 - web app
-- LangGraph runtime
+- runtime API
 - Analyst MCP
 
 All three should share access to:
@@ -63,30 +63,26 @@ The app uses Keycloak for OIDC authentication. Required env vars:
 - `AUTH_ENABLED` — `true` to enforce login, `false` for local dev without auth
 - `SESSION_SECRET` — random string for signing session cookies
 - `KEYCLOAK_URL` — internal Keycloak URL (e.g., `http://keycloak:8080`)
+- `KEYCLOAK_PUBLIC_URL` — browser-facing Keycloak base URL. In EKS this can stay unset and route through the app domain; for local auth use `http://localhost:8080`.
 - `KEYCLOAK_REALM` — Keycloak realm name (default: `open-analyst`)
 - `KEYCLOAK_CLIENT_ID` — OIDC client ID (default: `open-analyst-web`)
 - `KEYCLOAK_CLIENT_SECRET` — OIDC client secret
 
 The browser-facing Keycloak endpoints (`/realms/*`) must be routable from the user's browser at the same domain as the app.
 
-Auth tokens (access, refresh, ID) are stored server-side in memory, not in the session cookie. Only minimal user info (userId, email, name) is stored in the cookie to stay within browser cookie size limits. This means sessions are lost on webapp pod restarts.
+Auth tokens (access, refresh, ID) are stored server-side in PostgreSQL, not in the session cookie. Only minimal user info (userId, email, name) is stored in the cookie to stay within browser cookie size limits. This keeps sessions stable across webapp pod restarts and multi-replica routing as long as the app shares the same database.
 
-### Persistence Architecture
+### Runtime Architecture
 
-The runtime uses the **inmem edition** with custom PostgreSQL checkpointer and store to avoid requiring a LangSmith license. This is configured in `langgraph.json`:
+The runtime is a first-party FastAPI service. It keeps:
 
-- **Checkpointer**: `./src/pg_checkpointer.py:create_checkpointer` — Uses `AsyncPostgresSaver` from `langgraph-checkpoint-postgres`
-- **Store**: `./src/pg_store.py:create_store` — Uses `AsyncPostgresStore` for durable key-value/memory persistence
+- LangGraph + DeepAgents for execution
+- PostgreSQL-backed runtime tables for threads, runs, events, and interrupts
+- PostgreSQL checkpointer/store for graph durability and project memory
 
-Both connect to a dedicated `langgraph_runtime` database (set via `CHECKPOINT_POSTGRES_URI` env var on the runtime deployment) to avoid migration conflicts with the app's own schema.
+This removes the old Agent Server in-memory thread index problem. Thread listing, sidebar state, interrupts, and replayable stream events now come from the runtime's own Postgres-backed API.
 
-**What persists across restarts:**
-- Checkpoint state (graph execution snapshots, interrupt/resume state)
-- Store data (project memories)
-
-**What does NOT persist (known limitation):**
-- Thread listing / sidebar — the inmem runtime's thread index lives in SQLite `:memory:`. After a pod restart, old threads won't appear in the sidebar even though their checkpoint data is intact in Postgres.
-- TODO: Fix thread persistence by either customizing the inmem runtime's thread storage or migrating to a fully custom FastAPI server that uses Postgres for thread CRUD.
+The browser should talk only to the web app. The web app exposes same-origin runtime proxy routes under `/api/runtime/*` and forwards those requests to the internal runtime service.
 
 ## EKS Deployment
 
@@ -179,6 +175,40 @@ docker compose up -d
 
 All services read `.env` directly. Set `DATABASE_URL`, `LANGGRAPH_RUNTIME_URL`, and `ANALYST_MCP_BASE_URL` to match your environment. The postgres service in `docker-compose.yml` is optional — omit it if using an external database.
 
+### Local Kubernetes Parity
+
+The repo includes a `kind`-based local overlay in `k8s/overlays/local/` that mirrors the EKS topology with:
+
+- webapp
+- runtime
+- analyst-mcp
+- keycloak
+- local Postgres
+- local MinIO (S3-compatible storage)
+- nginx ingress at `http://open-analyst.localtest.me`
+
+Bootstrap the cluster with:
+
+```bash
+pnpm local:k8s:bootstrap
+```
+
+This script expects `docker`, `kubectl`, and `kind` to be installed locally. It builds the local images, loads them into the cluster, creates the required secrets, installs ingress-nginx, and applies the local overlay.
+
+Run the workflow validation with:
+
+```bash
+OPEN_ANALYST_BASE_URL=http://open-analyst.localtest.me pnpm local:k8s:e2e
+```
+
+If auth is enabled on the local cluster, pass a valid app session cookie:
+
+```bash
+OPEN_ANALYST_COOKIE='__oa_session=...' \
+OPEN_ANALYST_BASE_URL=http://open-analyst.localtest.me \
+pnpm local:k8s:e2e
+```
+
 ### Production-style web app
 
 ```bash
@@ -190,12 +220,13 @@ pnpm dev:runtime
 pnpm dev:analyst-mcp
 ```
 
-### Testing
+Workflow-first validation commands:
 
 ```bash
-pnpm test                                              # TypeScript (Vitest)
-cd services/analyst-mcp && uv run pytest               # Analyst MCP (pytest)
-cd services/langgraph-runtime && uv run pytest          # Runtime (pytest)
+kubectl kustomize k8s/overlays/local
+node --check scripts/local-k8s/e2e-workflow.mjs
+pnpm local:k8s:bootstrap
+OPEN_ANALYST_BASE_URL=http://open-analyst.localtest.me pnpm local:k8s:e2e
 ```
 
 ## Health Checks
@@ -209,12 +240,12 @@ curl -H "x-api-key: $ANALYST_MCP_API_KEY" http://localhost:8000/api/health/detai
 
 ## Browser To Runtime Connectivity
 
-The browser talks directly to Agent Server for threads, runs, streaming, interrupts, and resume.
+The browser talks directly to the runtime API for threads, runs, streaming, interrupts, and resume.
 
 That means:
 
-- `LANGGRAPH_RUNTIME_URL` must point the web app at the reachable Agent Server origin
-- Agent Server must allow the web app origin through CORS
+- `LANGGRAPH_RUNTIME_URL` must point the web app at the reachable runtime origin
+- the runtime API must allow the web app origin through CORS
 - `OPEN_ANALYST_WEB_URL` should point the runtime back to the web app origin for product API callbacks
 
 Default local assumptions:

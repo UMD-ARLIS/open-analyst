@@ -9,7 +9,6 @@ import { ConfigModal } from '~/components/ConfigModal';
 import { TopNav } from '~/components/TopNav';
 import { ProjectContextPanel } from '~/components/ProjectContextPanel';
 import type { AppConfig } from '~/lib/types';
-import { getBrowserConfig, saveBrowserConfig } from '~/lib/browser-config';
 import { headlessSaveConfig } from '~/lib/headless-api';
 
 export { loader } from './_app.loader.server';
@@ -34,6 +33,17 @@ export default function AppLayout() {
   const { revalidate } = useRevalidator();
   const location = useLocation();
 
+  const buildAppConfig = useCallback(
+    (model: string): AppConfig => ({
+      provider: 'openrouter',
+      apiKey: '',
+      baseUrl: '',
+      model,
+      isConfigured: Boolean(model),
+    }),
+    []
+  );
+
   // Bridge: sync loader data into Zustand
   const hydrated = Boolean(loaderData);
   useEffect(() => {
@@ -42,15 +52,9 @@ export default function AppLayout() {
       setActiveProjectId(loaderData.activeProjectId);
       setWorkingDir(loaderData.workingDir);
       setIsConfigured(loaderData.isConfigured);
-      // Keep appConfig.model in sync with the server-resolved model
-      if (loaderData.model) {
-        const current = useAppStore.getState().appConfig;
-        if (current && current.model !== loaderData.model) {
-          setAppConfig({ ...current, model: loaderData.model });
-        }
-      }
+      setAppConfig(buildAppConfig(loaderData.model || ''));
     }
-  }, [loaderData, setProjects, setActiveProjectId, setWorkingDir, setIsConfigured, setAppConfig]);
+  }, [loaderData, setProjects, setActiveProjectId, setWorkingDir, setIsConfigured, setAppConfig, buildAppConfig]);
 
   // Revalidate loader data on navigation (handles popstate/back-nav)
   useEffect(() => {
@@ -67,13 +71,8 @@ export default function AppLayout() {
       updateSettings({ theme: persisted });
     }
 
-    const browserConfig = getBrowserConfig();
-    // Loader resolves model against LiteLLM — always use it over browser config
-    setAppConfig({
-      ...browserConfig,
-      model: loaderData?.model || browserConfig.model,
-    });
-  }, []);
+    setAppConfig(buildAppConfig(loaderData?.model || ''));
+  }, [buildAppConfig, loaderData?.model, setAppConfig]);
 
   useEffect(() => {
     const resolved = settings.theme === 'system' ? 'light' : settings.theme;
@@ -83,12 +82,11 @@ export default function AppLayout() {
 
   const handleConfigSave = useCallback(
     async (newConfig: Partial<AppConfig>) => {
-      const saved = saveBrowserConfig(newConfig);
       await headlessSaveConfig(newConfig);
-      setAppConfig(saved);
+      setAppConfig(buildAppConfig(String(newConfig.model || loaderData?.model || '')));
       revalidate();
     },
-    [setAppConfig, revalidate]
+    [buildAppConfig, loaderData?.model, setAppConfig, revalidate]
   );
 
   const handleConfigClose = useCallback(() => {

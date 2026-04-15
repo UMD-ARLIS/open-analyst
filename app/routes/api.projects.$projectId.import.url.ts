@@ -1,5 +1,6 @@
 import { createDocument } from '~/lib/db/queries/documents.server';
 import { refreshDocumentKnowledgeIndex } from '~/lib/knowledge-index.server';
+import { requireProjectApiAccess } from '~/lib/project-access.server';
 import { parseJsonBody } from '~/lib/request-utils';
 import { tavilyExtract } from '~/lib/tavily.server';
 import type { Route } from './+types/api.projects.$projectId.import.url';
@@ -34,6 +35,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method not allowed' }, { status: 405 });
   }
+  await requireProjectApiAccess(request, params.projectId);
   const body = await parseJsonBody(request);
   if (body instanceof Response) return body;
   const url = validateHttpUrl(body.url);

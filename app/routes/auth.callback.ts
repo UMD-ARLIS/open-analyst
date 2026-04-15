@@ -20,7 +20,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const result = await handleCallback(request.url, { state });
 
     // Store tokens server-side to avoid cookie size limits
-    setTokens(result.userId, {
+    await setTokens(result.userId, {
       accessToken: result.accessToken,
       refreshToken: result.refreshToken,
       idToken: result.idToken,

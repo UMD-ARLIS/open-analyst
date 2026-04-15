@@ -7,10 +7,18 @@ import {
   Settings2,
   SlidersHorizontal,
   Activity,
+  Package,
 } from 'lucide-react';
 import { useAppStore } from '~/lib/store';
 import type { SettingsInitialData } from './SettingsPanel';
-import { APISettingsTab, Banner, ConnectorsTab, CredentialsTab, LogsTab } from './SettingsPanel';
+import {
+  Banner,
+  ConnectorsSection,
+  CredentialsSection,
+  DiagnosticsSection,
+  RuntimeSettingsSection,
+  SkillsSection,
+} from './SettingsPanel';
 import type { WorkspaceContextData } from '~/lib/workspace-context.server';
 
 type SettingsSection =
@@ -20,6 +28,7 @@ type SettingsSection =
   | 'retrieval'
   | 'storage'
   | 'credentials'
+  | 'skills'
   | 'diagnostics';
 
 const SECTIONS: Array<{
@@ -65,6 +74,12 @@ const SECTIONS: Array<{
     icon: Key,
   },
   {
+    id: 'skills',
+    label: 'Skills',
+    description: 'Enable and pin capabilities',
+    icon: Package,
+  },
+  {
     id: 'diagnostics',
     label: 'Diagnostics',
     description: 'Logs and runtime inspection',
@@ -103,6 +118,9 @@ export function WorkspaceSettingsPanel({
   const [defaultConnectorIds, setDefaultConnectorIds] = useState<string[]>(
     workspaceContext.profile.defaultConnectorIds
   );
+  const [defaultSkillIds, setDefaultSkillIds] = useState<string[]>(
+    workspaceContext.profile.defaultSkillIds
+  );
   const [storageDraft, setStorageDraft] = useState({
     workspaceLocalRoot: activeProject?.workspaceLocalRoot || '',
     artifactBackend: activeProject?.artifactBackend || 'env',
@@ -121,6 +139,7 @@ export function WorkspaceSettingsPanel({
     setRetrievalPolicy(workspaceContext.profile.retrievalPolicy);
     setProjectBrief(workspaceContext.profile.brief);
     setDefaultConnectorIds(workspaceContext.profile.defaultConnectorIds);
+    setDefaultSkillIds(workspaceContext.profile.defaultSkillIds);
   }, [workspaceContext]);
 
   useEffect(() => {
@@ -206,7 +225,7 @@ export function WorkspaceSettingsPanel({
 
         {activeSection === 'runtime' ? (
           <div className="space-y-4">
-            <APISettingsTab currentModel={initialData?.currentModel} />
+            <RuntimeSettingsSection currentModel={initialData?.currentModel} />
             <div className="rounded-xl border border-border bg-background-secondary p-4 space-y-3">
               <h3 className="text-sm font-semibold">Project brief</h3>
               <textarea
@@ -278,7 +297,7 @@ export function WorkspaceSettingsPanel({
               </button>
             </div>
 
-            <ConnectorsTab
+            <ConnectorsSection
               initialServers={initialData?.mcpServers}
               initialPresets={initialData?.mcpPresets}
             />
@@ -521,11 +540,122 @@ export function WorkspaceSettingsPanel({
         ) : null}
 
         {activeSection === 'credentials' ? (
-          <CredentialsTab initialItems={initialData?.credentials} />
+          <CredentialsSection initialItems={initialData?.credentials} />
+        ) : null}
+
+        {activeSection === 'skills' ? (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-border bg-background-secondary p-4">
+              <h3 className="text-sm font-semibold mb-3">Project skill defaults</h3>
+              <p className="mb-3 text-sm text-text-secondary">
+                Pin enabled skills to this project so the runtime can prefer them automatically.
+              </p>
+              <div className="space-y-2">
+                {workspaceContext.skills.map((skill) => (
+                  <label key={`default-skill-${skill.id}`} className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={defaultSkillIds.includes(skill.id)}
+                      disabled={!skill.enabled}
+                      onChange={() => {
+                        setDefaultSkillIds((current) =>
+                          current.includes(skill.id)
+                            ? current.filter((value) => value !== skill.id)
+                            : [...current, skill.id]
+                        );
+                      }}
+                    />
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium">{skill.name}</div>
+                      <div className="text-xs text-text-muted">
+                        {skill.enabled ? 'Enabled in registry' : 'Disabled in registry'}
+                        {skill.sourceKind ? ` · ${skill.sourceKind}` : ''}
+                      </div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary text-sm mt-4"
+                onClick={() =>
+                  void withStatus(
+                    () => saveProfile({ defaultSkillIds }),
+                    'Project default skills saved.'
+                  )
+                }
+              >
+                Save project defaults
+              </button>
+            </div>
+            <SkillsSection
+              initialSkills={initialData?.skills}
+              pinnedSkillIds={defaultSkillIds}
+              onPinnedSkillIdsChange={setDefaultSkillIds}
+            />
+          </div>
         ) : null}
 
         {activeSection === 'diagnostics' ? (
-          <LogsTab initialEnabled={initialData?.logsEnabled} />
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              <div className="rounded-xl border border-border bg-background-secondary p-4">
+                <div className="text-xs uppercase tracking-[0.16em] text-text-muted mb-2">
+                  Effective Runtime
+                </div>
+                <div className="space-y-2 text-sm">
+                  <div>
+                    <span className="text-text-muted">Model:</span>{' '}
+                    <span className="font-medium">
+                      {workspaceContext.diagnostics.model || 'Not configured'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-text-muted">Runtime:</span>{' '}
+                    <span className="font-medium">
+                      {workspaceContext.diagnostics.runtimeReachable ? 'Reachable' : 'Unavailable'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-text-muted">Active connectors:</span>{' '}
+                    <span className="font-medium">
+                      {workspaceContext.diagnostics.activeConnectorCount}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-text-muted">Pinned skills:</span>{' '}
+                    <span className="font-medium">
+                      {workspaceContext.diagnostics.pinnedSkillCount}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-xl border border-border bg-background-secondary p-4">
+                <div className="text-xs uppercase tracking-[0.16em] text-text-muted mb-2">
+                  Capability Snapshot
+                </div>
+                <div className="space-y-2 text-sm text-text-secondary">
+                  <p>
+                    {workspaceContext.connectors.length} connectors registered,{' '}
+                    {workspaceContext.tools.filter((tool) => tool.source === 'mcp').length} MCP
+                    tools discovered.
+                  </p>
+                  <p>
+                    {workspaceContext.skills.filter((skill) => skill.enabled).length} skills
+                    enabled, {workspaceContext.profile.defaultSkillIds.length} pinned to this
+                    project.
+                  </p>
+                  <p>
+                    {workspaceContext.memories.active.length} promoted memories and{' '}
+                    {workspaceContext.memories.proposed.length} pending proposals are visible from
+                    diagnostics.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <DiagnosticsSection initialEnabled={initialData?.logsEnabled} />
+          </div>
         ) : null}
       </div>
     </div>

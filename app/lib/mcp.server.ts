@@ -1,5 +1,11 @@
 import path from 'path';
-import { ensureConfigDir, getConfigDir, loadJsonArray, saveJsonArray } from './helpers.server';
+import {
+  getConfigDir,
+  ensureUserConfigDir,
+  getUserConfigDir,
+  loadJsonArray,
+  saveJsonArray,
+} from './helpers.server';
 import { inspectMcpServer, type McpServerInspection } from './mcp-client.server';
 import type { McpPreset, McpServerConfig } from './types';
 import type { Project } from './db/schema';
@@ -11,6 +17,8 @@ const ANALYST_MCP_DEFAULT_HOST = 'localhost';
 const ANALYST_MCP_DEFAULT_PORT = '8000';
 const ANALYST_MCP_DEFAULT_API_KEY = 'change-me';
 const ANALYST_MCP_DEFAULT_PATH = '/mcp/';
+const ANALYST_MCP_LOCAL_HOSTS = new Set(['0.0.0.0', '127.0.0.1', 'localhost']);
+const ANALYST_MCP_SERVICE_HOSTS = new Set(['analyst-mcp']);
 
 type CachedInspection = {
   expiresAt: number;
@@ -41,7 +49,11 @@ export type McpDiscoveredTool = {
 
 const inspectionCache = new Map<string, CachedInspection>();
 
-function getServersPath(configDir?: string): string {
+function getServersPath(userId: string, configDir?: string): string {
+  return path.join(configDir ?? getUserConfigDir(userId), MCP_SERVERS_FILENAME);
+}
+
+function getLegacyServersPath(configDir?: string): string {
   return path.join(configDir ?? getConfigDir(), MCP_SERVERS_FILENAME);
 }
 
@@ -87,6 +99,7 @@ function defaultMcpServers(): McpServerConfig[] {
 }
 
 function getAnalystMcpDefaults(): { url: string; apiKey: string } {
+  const explicitBaseUrl = String(process.env.ANALYST_MCP_BASE_URL || '').trim();
   const host =
     String(process.env.ANALYST_MCP_HOST || ANALYST_MCP_DEFAULT_HOST).trim() ||
     ANALYST_MCP_DEFAULT_HOST;
@@ -95,10 +108,46 @@ function getAnalystMcpDefaults(): { url: string; apiKey: string } {
     ANALYST_MCP_DEFAULT_PORT;
   const apiKey =
     String(process.env.ANALYST_MCP_API_KEY || '').trim() || ANALYST_MCP_DEFAULT_API_KEY;
+  if (explicitBaseUrl) {
+    return {
+      url: `${explicitBaseUrl.replace(/\/+$/g, '')}${ANALYST_MCP_DEFAULT_PATH}`,
+      apiKey,
+    };
+  }
+  const clientHost = ANALYST_MCP_LOCAL_HOSTS.has(host)
+    ? host === '0.0.0.0'
+      ? '127.0.0.1'
+      : host
+    : host;
   return {
-    url: `http://${host}:${port}${ANALYST_MCP_DEFAULT_PATH}`,
+    url: `http://${clientHost}:${port}${ANALYST_MCP_DEFAULT_PATH}`,
     apiKey,
   };
+}
+
+function isManagedAnalystMcpUrl(value: string): boolean {
+  const raw = String(value || '').trim();
+  if (!raw) return true;
+  try {
+    const parsed = new URL(raw);
+    const pathname = parsed.pathname.replace(/\/+$/g, '');
+    const hostname = parsed.hostname.trim().toLowerCase();
+    return pathname === '/mcp' && (ANALYST_MCP_LOCAL_HOSTS.has(hostname) || ANALYST_MCP_SERVICE_HOSTS.has(hostname));
+  } catch {
+    return false;
+  }
+}
+
+function isDefaultAnalystMcpUrl(value: string): boolean {
+  const raw = String(value || '').trim();
+  if (!raw) return true;
+  try {
+    const parsed = new URL(raw);
+    const pathname = parsed.pathname.replace(/\/+$/g, '');
+    return pathname === '/mcp' && ANALYST_MCP_LOCAL_HOSTS.has(parsed.hostname);
+  } catch {
+    return false;
+  }
 }
 
 const LOCAL_RESEARCH_TOOL_NAMES = new Set([
@@ -125,13 +174,12 @@ export function isAnalystMcpServer(server: Partial<McpServerConfig>): boolean {
     name === 'analyst mcp' ||
     alias === 'analyst' ||
     id.includes('analystmcp') ||
-    url === 'http://localhost:8000/mcp' ||
-    url === 'http://localhost:8000/mcp/'
+    isDefaultAnalystMcpUrl(url)
   );
 }
 
-export function getAnalystMcpServer(configDir?: string): McpServerConfig | null {
-  const servers = listMcpServers(configDir);
+export function getAnalystMcpServer(userId: string, configDir?: string): McpServerConfig | null {
+  const servers = listMcpServers(userId, configDir);
   return servers.find((server) => isAnalystMcpServer(server)) || null;
 }
 
@@ -143,7 +191,7 @@ export function buildProjectMcpHeaders(
   const headers: Record<string, string> = {
     'x-open-analyst-project-id': project.id,
     'x-open-analyst-project-name': project.name,
-    'x-open-analyst-workspace-slug': project.workspaceSlug,
+    'x-open-analyst-workspace-slug': artifact.workspaceSlug,
     'x-open-analyst-api-base-url': apiBaseUrl.replace(/\/+$/g, ''),
     'x-open-analyst-artifact-backend': artifact.backend,
   };
@@ -182,9 +230,7 @@ function normalizeMcpServer(server: McpServerConfig): McpServerConfig {
     ...server,
     alias: server.alias || 'analyst',
     url:
-      !server.url ||
-      server.url === 'http://localhost:8000/mcp' ||
-      server.url === 'http://localhost:8000/mcp/'
+      isDefaultAnalystMcpUrl(server.url || '') || isManagedAnalystMcpUrl(server.url || '')
         ? analystDefaults.url
         : server.url,
     headers: nextHeaders,
@@ -341,27 +387,35 @@ export function getMcpPresets(): Record<string, McpPreset> {
   };
 }
 
-export function listMcpServers(configDir?: string): McpServerConfig[] {
-  ensureConfigDir(configDir);
-  const existing = loadJsonArray<McpServerConfig>(getServersPath(configDir));
+export function listMcpServers(userId: string, configDir?: string): McpServerConfig[] {
+  ensureUserConfigDir(userId, configDir);
+  const userPath = getServersPath(userId, configDir);
+  const existing = loadJsonArray<McpServerConfig>(userPath);
   if (existing.length) {
     const normalized = existing.map((server) => normalizeMcpServer(server));
     const changed = JSON.stringify(existing) !== JSON.stringify(normalized);
     if (changed) {
-      saveJsonArray(getServersPath(configDir), normalized);
+      saveJsonArray(userPath, normalized);
     }
     return normalized;
   }
+  const legacy = loadJsonArray<McpServerConfig>(getLegacyServersPath(configDir));
+  if (legacy.length) {
+    const normalized = legacy.map((server) => normalizeMcpServer(server));
+    saveJsonArray(userPath, normalized);
+    return normalized;
+  }
   const defaults = defaultMcpServers();
-  saveJsonArray(getServersPath(configDir), defaults);
+  saveJsonArray(userPath, defaults);
   return defaults;
 }
 
 export function saveMcpServer(
   input: Partial<McpServerConfig> & { id?: string },
+  userId: string,
   configDir?: string
 ): McpServerConfig {
-  const servers = listMcpServers(configDir);
+  const servers = listMcpServers(userId, configDir);
   const normalizedType = input.type === 'sse' ? 'sse' : input.type === 'http' ? 'http' : 'stdio';
   const serverConfig: McpServerConfig = {
     id: String(input.id || '').trim() || `mcp-${Date.now()}`,
@@ -388,15 +442,15 @@ export function saveMcpServer(
   } else {
     servers[idx] = normalizedServerConfig;
   }
-  saveJsonArray(getServersPath(configDir), servers);
+  saveJsonArray(getServersPath(userId, configDir), servers);
   inspectionCache.delete(getCacheKey(normalizedServerConfig));
   return normalizedServerConfig;
 }
 
-export function deleteMcpServer(id: string, configDir?: string): { success: boolean } {
-  const servers = listMcpServers(configDir);
+export function deleteMcpServer(id: string, userId: string, configDir?: string): { success: boolean } {
+  const servers = listMcpServers(userId, configDir);
   const next = servers.filter((item) => item.id !== id);
-  saveJsonArray(getServersPath(configDir), next);
+  saveJsonArray(getServersPath(userId, configDir), next);
   return { success: true };
 }
 
@@ -447,8 +501,8 @@ async function inspectServerCached(server: McpServerConfig): Promise<CachedInspe
   }
 }
 
-export async function getMcpStatus(configDir?: string): Promise<McpServerStatus[]> {
-  const servers = listMcpServers(configDir);
+export async function getMcpStatus(userId: string, configDir?: string): Promise<McpServerStatus[]> {
+  const servers = listMcpServers(userId, configDir);
   const inspections = await Promise.all(
     servers.map(async (server) => {
       if (!server.enabled) {
@@ -479,8 +533,8 @@ export async function getMcpStatus(configDir?: string): Promise<McpServerStatus[
   return inspections;
 }
 
-export async function getMcpTools(configDir?: string): Promise<McpDiscoveredTool[]> {
-  const servers = listMcpServers(configDir).filter((server) => server.enabled);
+export async function getMcpTools(userId: string, configDir?: string): Promise<McpDiscoveredTool[]> {
+  const servers = listMcpServers(userId, configDir).filter((server) => server.enabled);
   const inspections = await Promise.all(
     servers.map(async (server) => ({
       server,
@@ -502,6 +556,7 @@ export async function getMcpTools(configDir?: string): Promise<McpDiscoveredTool
 
 export async function getSelectedMcpServers(
   input: {
+    userId: string;
     prompt?: string;
     messages?: Array<{ role?: string; content?: unknown }>;
     pinnedServerIds?: string[];
@@ -509,7 +564,7 @@ export async function getSelectedMcpServers(
   },
   configDir?: string
 ): Promise<McpServerConfig[]> {
-  const enabledServers = listMcpServers(configDir).filter((server) => server.enabled);
+  const enabledServers = listMcpServers(input.userId, configDir).filter((server) => server.enabled);
   if (enabledServers.length === 0) return [];
 
   const pinned = new Set((input.pinnedServerIds || []).map((id) => String(id)));

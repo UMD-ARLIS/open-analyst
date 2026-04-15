@@ -1,4 +1,5 @@
 import { listSourceIngestBatches } from '~/lib/db/queries/source-ingest.server';
+import { requireProjectApiAccess } from '~/lib/project-access.server';
 import { parseJsonBody } from '~/lib/request-utils';
 import {
   stageLiteratureCollectionBatch,
@@ -13,6 +14,7 @@ export async function loader({
   params: { projectId: string };
   request: Request;
 }) {
+  await requireProjectApiAccess(request, params.projectId);
   const url = new URL(request.url);
   const statuses = url.searchParams.getAll('status');
   const batches = await listSourceIngestBatches(params.projectId, {
@@ -31,6 +33,7 @@ export async function action({
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method not allowed' }, { status: 405 });
   }
+  const { project } = await requireProjectApiAccess(request, params.projectId);
   const body = await parseJsonBody(request);
   if (body instanceof Response) return body;
   const origin = String(body.origin || '').trim();
@@ -60,7 +63,7 @@ export async function action({
   }
 
   if (origin === 'literature' && typeof body.query === 'string' && body.query.trim()) {
-    const batch = await stageLiteratureCollectionBatch(params.projectId, requestOrigin, {
+    const batch = await stageLiteratureCollectionBatch(project, requestOrigin, {
       query: body.query.trim(),
       collectionId: typeof body.collectionId === 'string' ? body.collectionId : null,
       collectionName: typeof body.collectionName === 'string' ? body.collectionName : null,

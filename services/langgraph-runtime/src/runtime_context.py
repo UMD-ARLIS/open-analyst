@@ -177,6 +177,16 @@ def get_config_dir() -> Path:
     return Path.home() / ".config" / "open-analyst"
 
 
+def _sanitize_user_id(value: Any) -> str:
+    trimmed = _trimmed(value)
+    sanitized = re.sub(r"[^a-zA-Z0-9._-]+", "-", trimmed).strip("-")
+    return sanitized or "anonymous"
+
+
+def get_user_config_dir(user_id: Any) -> Path:
+    return get_config_dir() / "users" / _sanitize_user_id(user_id)
+
+
 def _load_json_array(path: Path, fallback: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not path.exists():
         return [dict(item) for item in fallback]
@@ -323,8 +333,9 @@ def _discover_repository_skills(stored_by_id: dict[str, dict[str, Any]]) -> list
     # (services/langgraph-runtime/src/runtime_context.py → repo/skills/).
     # In Docker the path is shorter (/app/src/runtime_context.py), so fall
     # back to an env var or silently skip when the directory doesn't exist.
-    skills_root = Path(os.environ.get("SKILLS_DIR", ""))
-    if not skills_root.is_dir():
+    configured_skills_dir = _trimmed_or_none(os.environ.get("SKILLS_DIR"))
+    skills_root = Path(configured_skills_dir) if configured_skills_dir else None
+    if skills_root is None or not skills_root.is_dir():
         try:
             skills_root = Path(__file__).resolve().parents[3] / "skills"
         except IndexError:
@@ -358,8 +369,20 @@ def _discover_repository_skills(stored_by_id: dict[str, dict[str, Any]]) -> list
     return discovered
 
 
-def _list_skills_catalog() -> list[dict[str, Any]]:
-    stored = _load_json_array(get_config_dir() / "skills.json", DEFAULT_SKILL_RECORDS)
+def _extract_default_skill_ids(agent_policies: Any) -> list[str]:
+    if not isinstance(agent_policies, dict):
+        return []
+    raw = (
+        agent_policies.get("defaultSkillIds")
+        or agent_policies.get("default_skill_ids")
+        or agent_policies.get("pinnedSkillIds")
+    )
+    return _string_list(raw)
+
+
+def _list_skills_catalog(user_id: str | None = None) -> list[dict[str, Any]]:
+    config_root = get_user_config_dir(user_id) if user_id else get_config_dir()
+    stored = _load_json_array(config_root / "skills.json", DEFAULT_SKILL_RECORDS)
     stored_by_id = {str(item.get("id") or ""): item for item in stored}
     builtin = [_merge_skill(dict(item), stored_by_id) for item in DEFAULT_SKILL_RECORDS]
     repository = _discover_repository_skills(stored_by_id)
@@ -435,8 +458,8 @@ def _match_relevant_repository_skills(
     return [item[2] for item in scored[:4]]
 
 
-def list_active_skills() -> list[dict[str, Any]]:
-    skills = _list_skills_catalog()
+def list_active_skills(user_id: str | None = None) -> list[dict[str, Any]]:
+    skills = _list_skills_catalog(user_id)
     active: list[dict[str, Any]] = []
     for skill in skills:
         if not skill.get("enabled"):
@@ -445,8 +468,17 @@ def list_active_skills() -> list[dict[str, Any]]:
     return active
 
 
-def list_mcp_servers() -> list[dict[str, Any]]:
-    servers = _load_json_array(get_config_dir() / "mcp-servers.json", DEFAULT_MCP_SERVERS)
+def list_skills_catalog(user_id: str | None = None) -> list[dict[str, Any]]:
+    return [
+        _skill_runtime_summary(skill)
+        for skill in _list_skills_catalog(user_id)
+        if _trimmed(skill.get("id")) != "repo-skill-skill-creator"
+    ]
+
+
+def list_mcp_servers(user_id: str | None = None) -> list[dict[str, Any]]:
+    config_root = get_user_config_dir(user_id) if user_id else get_config_dir()
+    servers = _load_json_array(config_root / "mcp-servers.json", DEFAULT_MCP_SERVERS)
     normalized: list[dict[str, Any]] = []
     for server in servers:
         normalized.append(
@@ -503,16 +535,25 @@ class RuntimeContextService:
         if not project:
             raise ValueError(f"Project not found: {project_id}")
         profile = await self._load_project_profile(project_id)
-        server_configs = list_mcp_servers()
+        user_id = _trimmed(project.get("user_id"))
+        server_configs = list_mcp_servers(user_id)
         raw_skills = [
             skill
-            for skill in _list_skills_catalog()
+            for skill in _list_skills_catalog(user_id)
             if _trimmed(skill.get("id")) != "repo-skill-skill-creator"
         ]
         all_skills = [_skill_runtime_summary(skill) for skill in raw_skills]
         active_skills = [skill for skill in all_skills if skill.get("enabled")]
         matched_skills = _match_relevant_repository_skills(raw_skills, prompt=prompt, messages=messages)
-        pinned_skill_ids = [skill["id"] for skill in active_skills]
+        configured_default_skill_ids = _extract_default_skill_ids(profile.get("agent_policies"))
+        enabled_skill_ids = {
+            _trimmed(skill.get("id"))
+            for skill in active_skills
+            if _trimmed(skill.get("id"))
+        }
+        pinned_skill_ids = [
+            skill_id for skill_id in configured_default_skill_ids if skill_id in enabled_skill_ids
+        ]
         matched_skill_ids = [
             _trimmed(skill.get("id"))
             for skill in matched_skills
@@ -571,6 +612,7 @@ class RuntimeContextService:
             SELECT
                 id,
                 name,
+                user_id,
                 workspace_slug,
                 workspace_local_root,
                 artifact_backend,

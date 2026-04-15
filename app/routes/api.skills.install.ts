@@ -1,10 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 import { installSkill } from '~/lib/skills.server';
+import { requireApiUser } from '~/lib/auth/require-user.server';
 import { parseJsonBody } from '~/lib/request-utils';
 import type { Route } from './+types/api.skills.install';
 
 export async function action({ request }: Route.ActionArgs) {
+  const { userId } = await requireApiUser(request);
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method not allowed' }, { status: 405 });
   }
@@ -21,6 +23,6 @@ export async function action({ request }: Route.ActionArgs) {
   if (!fs.existsSync(path.join(skillPath, 'SKILL.md'))) {
     return Response.json({ error: 'SKILL.md not found in folderPath' }, { status: 400 });
   }
-  const skill = installSkill(folderPath);
+  const skill = installSkill(folderPath, userId);
   return Response.json({ success: true, skill });
 }

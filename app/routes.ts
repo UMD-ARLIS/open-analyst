@@ -19,6 +19,22 @@ export default [
   ]),
 
   ...prefix('api', [
+    ...prefix('runtime', [
+      route('threads', 'routes/api.runtime.threads.ts'),
+      route('threads/search', 'routes/api.runtime.threads.search.ts'),
+      route('threads/:threadId', 'routes/api.runtime.threads.$threadId.ts'),
+      route('threads/:threadId/state', 'routes/api.runtime.threads.$threadId.state.ts'),
+      route('threads/:threadId/runs', 'routes/api.runtime.threads.$threadId.runs.ts'),
+      route('threads/:threadId/runs/:runId', 'routes/api.runtime.threads.$threadId.runs.$runId.ts'),
+      route(
+        'threads/:threadId/runs/:runId/cancel',
+        'routes/api.runtime.threads.$threadId.runs.$runId.cancel.ts'
+      ),
+      route(
+        'threads/:threadId/runs/:runId/events/stream',
+        'routes/api.runtime.threads.$threadId.runs.$runId.events.stream.ts'
+      ),
+    ]),
     route('health', 'routes/api.health.ts'),
     route('config', 'routes/api.config.ts'),
     route('workdir', 'routes/api.workdir.ts'),

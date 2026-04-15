@@ -1,11 +1,5 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  useLocation,
-  useMatches,
-  useNavigate,
-  useRevalidator,
-  useSearchParams,
-} from 'react-router';
+import { useLocation, useNavigate, useRevalidator, useSearchParams } from 'react-router';
 import {
   BookOpen,
   Bot,
@@ -251,7 +245,6 @@ export function AssistantWorkspaceView({
   threadMetadata,
 }: AssistantWorkspaceViewProps) {
   const location = useLocation();
-  const matches = useMatches();
   const navigate = useNavigate();
   const { revalidate } = useRevalidator();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -267,12 +260,7 @@ export function AssistantWorkspaceView({
     (state) => state.activeCollectionByProject[projectId] || null
   );
   const setProjectActiveCollection = useAppStore((state) => state.setProjectActiveCollection);
-  const appLayoutMatch = matches.find((match) => match.id === 'routes/_app');
-  const runtimeConfig = appLayoutMatch?.data as { langgraphRuntimeUrl?: unknown } | undefined;
-  const agentServerUrl =
-    typeof runtimeConfig?.langgraphRuntimeUrl === 'string'
-      ? runtimeConfig.langgraphRuntimeUrl.replace(/\/+$/g, '')
-      : 'http://localhost:8081';
+  const agentServerUrl = '/api/runtime';
 
   const navigateToThread = useCallback(
     (threadId: string) => {
@@ -329,11 +317,12 @@ export function AssistantWorkspaceView({
   const messageTimestampCacheRef = useRef<Map<string, number>>(new Map());
   const contextSummary = useMemo(() => {
     const connectorCount = workspaceContext.activeConnectorIds.length;
-    const skillCount = workspaceContext.skills.filter(
+    const enabledSkillCount = workspaceContext.skills.filter(
       (skill) => skill.pinned || skill.enabled
     ).length;
+    const availableSkillCount = workspaceContext.skills.length;
     const memoryCount = workspaceContext.memories.active.length;
-    return `${connectorCount} connectors, ${skillCount} skills, ${memoryCount} memories active in project context`;
+    return `${connectorCount} connectors, ${availableSkillCount} skills available (${enabledSkillCount} enabled), ${memoryCount} memories active in project context`;
   }, [workspaceContext]);
   const [selectedMode, setSelectedMode] = useState<AnalysisMode>(
     normalizeAnalysisMode(threadMetadata?.analysisMode)
@@ -566,13 +555,50 @@ export function AssistantWorkspaceView({
 
   const handleInterruptResume = async (
     resumeValue: Record<string, unknown>,
-    interruptId?: string
+    interrupt?: { id?: string; value: Record<string, unknown> }
   ) => {
+    const interruptId = interrupt?.id;
     setResumingInterruptId(interruptId || '__next__');
     try {
-      stream.submit(null, {
-        command: { resume: interruptId ? { [interruptId]: resumeValue } : resumeValue },
-        metadata: requestMetadata,
+      let nextMetadata = requestMetadata;
+      const interruptType = String(interrupt?.value?.type || '').trim();
+      if (
+        interruptType === 'mode_switch_approval' &&
+        resumeValue.approved === true &&
+        initialAgentThreadId
+      ) {
+        const targetMode = normalizeAnalysisMode(
+          resumeValue.target_mode || interrupt?.value?.target_mode || selectedMode
+        );
+        nextMetadata = {
+          ...requestMetadata,
+          analysis_mode: targetMode,
+        };
+        setSelectedMode(targetMode);
+        const response = await fetch(`${agentServerUrl}/threads/${initialAgentThreadId}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({
+            metadata: {
+              project_id: projectId,
+              collection_id: resolvedCollectionId,
+              analysis_mode: targetMode,
+            },
+          }),
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to switch mode to ${targetMode}.`);
+        }
+        revalidate();
+      }
+      const normalizedResume =
+        interruptId && pendingInterrupts.length > 1 ? { [interruptId]: resumeValue } : resumeValue;
+      await stream.submit(null, {
+        command: { resume: normalizedResume },
+        metadata: nextMetadata,
         streamSubgraphs: true,
         onDisconnect: 'continue',
         streamResumable: true,
@@ -665,7 +691,7 @@ export function AssistantWorkspaceView({
     }
 
     try {
-      stream.submit({ messages: [{ role: 'human', content: nextPrompt }] }, {
+      await stream.submit({ messages: [{ role: 'human', content: nextPrompt }] }, {
         optimisticValues: (previous: Record<string, unknown>) => ({
           ...previous,
           messages: [
@@ -697,24 +723,33 @@ export function AssistantWorkspaceView({
     if (hasAutoSubmittedPendingPromptRef.current) return;
     if (stream.isLoading || stream.isThreadLoading) return;
     hasAutoSubmittedPendingPromptRef.current = true;
-    stream.submit({ messages: [{ role: 'human', content: pendingPromptFromNavigation }] }, {
-      optimisticValues: (previous: Record<string, unknown>) => ({
-        ...previous,
-        messages: [
-          ...(Array.isArray(previous.messages) ? previous.messages : []),
-          {
-            id: `optimistic-${Date.now()}`,
-            type: 'human',
-            content: pendingPromptFromNavigation,
-          },
-        ],
-      }),
-      metadata: requestMetadata,
-      streamSubgraphs: true,
-      onDisconnect: 'continue',
-      streamResumable: true,
-    } as StreamSubmitOptions);
-    navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+    void (async () => {
+      try {
+        await stream.submit({ messages: [{ role: 'human', content: pendingPromptFromNavigation }] }, {
+          optimisticValues: (previous: Record<string, unknown>) => ({
+            ...previous,
+            messages: [
+              ...(Array.isArray(previous.messages) ? previous.messages : []),
+              {
+                id: `optimistic-${Date.now()}`,
+                type: 'human',
+                content: pendingPromptFromNavigation,
+              },
+            ],
+          }),
+          metadata: requestMetadata,
+          streamSubgraphs: true,
+          onDisconnect: 'continue',
+          streamResumable: true,
+        } as StreamSubmitOptions);
+        navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+      } catch (error) {
+        hasAutoSubmittedPendingPromptRef.current = false;
+        const message = error instanceof Error ? error.message : String(error);
+        setErrorMessage(message);
+        console.error('[AssistantWorkspaceView] auto submit failed', error);
+      }
+    })();
   }, [
     initialAgentThreadId,
     location.pathname,
@@ -976,7 +1011,7 @@ export function AssistantWorkspaceView({
                 <InterruptCard
                   key={interrupt.id || `${String(interrupt.value.type || 'approval')}-${index}`}
                   interrupt={{ id: interrupt.id, value: interrupt.value }}
-                  onResume={(resumeValue) => void handleInterruptResume(resumeValue, interrupt.id)}
+                  onResume={(resumeValue) => void handleInterruptResume(resumeValue, interrupt)}
                   isProcessing={resumingInterruptId !== null}
                 />
               ))}

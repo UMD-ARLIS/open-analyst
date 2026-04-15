@@ -1,14 +1,16 @@
 import { updateCredential, deleteCredential } from '~/lib/credentials.server';
+import { requireApiUser } from '~/lib/auth/require-user.server';
 import { parseJsonBody } from '~/lib/request-utils';
 import type { Route } from './+types/api.credentials.$id';
 
 export async function action({ request, params }: Route.ActionArgs) {
+  const { userId } = await requireApiUser(request);
   const id = params.id;
 
   if (request.method === 'PATCH') {
     const body = await parseJsonBody(request);
     if (body instanceof Response) return body;
-    const credential = updateCredential(id, body);
+    const credential = updateCredential(id, body, userId);
     if (!credential) {
       return Response.json({ error: `Credential not found: ${id}` }, { status: 404 });
     }
@@ -16,7 +18,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   }
 
   if (request.method === 'DELETE') {
-    deleteCredential(id);
+    deleteCredential(id, userId);
     return Response.json({ success: true });
   }
 

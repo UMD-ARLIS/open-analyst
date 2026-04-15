@@ -1,10 +1,10 @@
 import path from 'path';
 import { createDocument, updateDocumentMetadata } from '~/lib/db/queries/documents.server';
-import { getProject } from '~/lib/db/queries/projects.server';
 import { storeArtifact } from '~/lib/artifacts.server';
 import { buildProjectArtifactUrls } from '~/lib/project-storage.server';
 import { refreshDocumentKnowledgeIndex } from '~/lib/knowledge-index.server';
 import { sanitizeFilename, inferExtension } from '~/lib/file-utils';
+import { requireProjectApiAccess } from '~/lib/project-access.server';
 import { parseJsonBody } from '~/lib/request-utils';
 import type { Route } from './+types/api.projects.$projectId.import.file';
 
@@ -52,13 +52,10 @@ export async function action({ request, params }: Route.ActionArgs) {
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method not allowed' }, { status: 405 });
   }
+  const { project } = await requireProjectApiAccess(request, params.projectId);
   const body = await parseJsonBody(request);
   if (body instanceof Response) return body;
   const projectId = params.projectId;
-  const project = await getProject(projectId);
-  if (!project) {
-    return Response.json({ error: 'Project not found' }, { status: 404 });
-  }
   const filename = String(body.filename || 'uploaded-file').trim();
   const mimeType = String(body.mimeType || 'application/octet-stream').trim();
   const base64 = String(body.contentBase64 || '').trim();

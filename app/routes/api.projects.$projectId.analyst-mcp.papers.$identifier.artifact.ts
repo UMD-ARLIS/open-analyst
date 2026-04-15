@@ -1,5 +1,5 @@
-import { getProject } from '~/lib/db/queries/projects.server';
 import { buildProjectMcpHeaders, getAnalystMcpServer } from '~/lib/mcp.server';
+import { requireProjectApiAccess } from '~/lib/project-access.server';
 
 function copyContentHeaders(source: Headers, target: Headers) {
   for (const key of [
@@ -22,12 +22,9 @@ export async function loader({
   params: { projectId: string; identifier: string };
   request: Request;
 }) {
-  const project = await getProject(params.projectId);
-  if (!project) {
-    return Response.json({ error: 'Project not found' }, { status: 404 });
-  }
+  const { project } = await requireProjectApiAccess(request, params.projectId);
 
-  const server = getAnalystMcpServer();
+  const server = getAnalystMcpServer(project.userId);
   if (!server?.url) {
     return Response.json({ error: 'Analyst MCP is not configured' }, { status: 503 });
   }

@@ -103,7 +103,6 @@ export async function loader({ request }: { request: Request }) {
     activeProjectId,
     workingDir: settings.workingDir || '',
     model: resolvedModel,
-    langgraphRuntimeUrl: env.LANGGRAPH_RUNTIME_PUBLIC_URL || env.LANGGRAPH_RUNTIME_URL,
     isConfigured: true,
     sidebarThreads,
     sidebarCollections,

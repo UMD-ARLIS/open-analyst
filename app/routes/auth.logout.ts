@@ -9,11 +9,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const session = await getSession(request);
   const idToken = user?.idToken || '';
 
-  // Clean up server-side tokens
-  if (user?.userId) deleteTokens(user.userId);
-
   const headers = new Headers();
   headers.set('Set-Cookie', await destroySession(session));
+
+  if (user?.userId) {
+    await deleteTokens(user.userId);
+  }
 
   if (idToken) {
     return redirect(getLogoutUrl(idToken), { headers });

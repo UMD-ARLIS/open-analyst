@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFetcher, useRevalidator, useSearchParams } from 'react-router';
-import { BookOpen, Check, FileText, GripVertical, Link2, Loader2, X } from 'lucide-react';
+import { BookOpen, FileText, GripVertical, Link2, Loader2, X } from 'lucide-react';
 import { useAppStore } from '~/lib/store';
 import type { ArtifactMeta } from '~/lib/types';
 import type { HeadlessDocument } from '~/lib/headless-api';
@@ -77,7 +77,6 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
   const [isSubmittingUrl, setIsSubmittingUrl] = useState(false);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [listWidth, setListWidth] = useState(() => getInitialListWidth());
-  const [busyBatchId, setBusyBatchId] = useState<string | null>(null);
   const isDragging = useRef(false);
   const startX = useRef(0);
   const startWidth = useRef(0);
@@ -196,28 +195,22 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
       if (!response.ok) {
         throw new Error('Failed to stage URL');
       }
+      const body = (await response.json().catch(() => ({}))) as { batch?: { id?: string } };
+      const batchId = String(body.batch?.id || '').trim();
+      if (batchId) {
+        const approveResponse = await fetch(
+          `/api/projects/${encodeURIComponent(projectId)}/source-ingest/${encodeURIComponent(batchId)}/approve`,
+          { method: 'POST' }
+        );
+        if (!approveResponse.ok) {
+          throw new Error('Failed to import staged URL');
+        }
+      }
       setSourceUrl('');
       reload();
       revalidate();
     } finally {
       setIsSubmittingUrl(false);
-    }
-  };
-
-  const handleBatchAction = async (batchId: string, action: 'approve' | 'reject') => {
-    setBusyBatchId(batchId);
-    try {
-      const response = await fetch(
-        `/api/projects/${encodeURIComponent(projectId)}/source-ingest/${encodeURIComponent(batchId)}/${action}`,
-        { method: 'POST' }
-      );
-      if (!response.ok) {
-        throw new Error(`Failed to ${action} batch`);
-      }
-      reload();
-      revalidate();
-    } finally {
-      setBusyBatchId(null);
     }
   };
 
@@ -257,12 +250,12 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
           <div className="flex-1 overflow-y-auto px-2 py-2 space-y-3">
             <div>
               <div className="px-2 pb-1 text-[11px] uppercase tracking-[0.18em] text-text-muted">
-                Pending collection
+                Source ingest status
               </div>
               <div className="space-y-2">
                 {sourceIngestBatches.length === 0 ? (
                   <div className="px-2 py-2 text-xs text-text-muted rounded-lg border border-dashed border-border">
-                    No staged research batches.
+                    No recent source ingest batches.
                   </div>
                 ) : (
                   sourceIngestBatches.map((batch) => (
@@ -280,9 +273,6 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
                             {batch.requestedCount === 1 ? '' : 's'}
                           </div>
                         </div>
-                        {busyBatchId === batch.id ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin text-text-muted" />
-                        ) : null}
                       </div>
                       <div className="text-xs text-text-secondary line-clamp-3">
                         {batch.summary || batch.query || 'Staged source collection'}
@@ -298,25 +288,6 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
                             +{batch.items.length - 3} more
                           </div>
                         ) : null}
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          className="btn btn-primary text-xs px-2 py-1"
-                          disabled={busyBatchId === batch.id}
-                          onClick={() => void handleBatchAction(batch.id, 'approve')}
-                        >
-                          <Check className="w-3.5 h-3.5" />
-                          Approve
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-secondary text-xs px-2 py-1"
-                          disabled={busyBatchId === batch.id}
-                          onClick={() => void handleBatchAction(batch.id, 'reject')}
-                        >
-                          Reject
-                        </button>
                       </div>
                     </div>
                   ))

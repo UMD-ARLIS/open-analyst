@@ -1,25 +1,20 @@
-/**
- * Server-side in-memory token store.
- * Keeps JWTs out of cookies to avoid exceeding browser cookie size limits.
- */
+import {
+  deleteStoredAuthTokens,
+  getStoredAuthTokens,
+  upsertStoredAuthTokens,
+  type StoredAuthTokens,
+} from '~/lib/db/queries/auth-sessions.server';
 
-interface StoredTokens {
-  accessToken: string;
-  refreshToken: string;
-  idToken: string;
-  expiresAt: number;
+export type { StoredAuthTokens };
+
+export async function setTokens(userId: string, tokens: StoredAuthTokens): Promise<void> {
+  await upsertStoredAuthTokens(userId, tokens);
 }
 
-const store = new Map<string, StoredTokens>();
-
-export function setTokens(userId: string, tokens: StoredTokens): void {
-  store.set(userId, tokens);
+export async function getTokens(userId: string): Promise<StoredAuthTokens | undefined> {
+  return getStoredAuthTokens(userId);
 }
 
-export function getTokens(userId: string): StoredTokens | undefined {
-  return store.get(userId);
-}
-
-export function deleteTokens(userId: string): void {
-  store.delete(userId);
+export async function deleteTokens(userId: string): Promise<void> {
+  await deleteStoredAuthTokens(userId);
 }
