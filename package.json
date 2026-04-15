@@ -82,7 +82,7 @@
     "esbuild": "^0.27.4",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
-    "happy-dom": "^18.0.1",
+    "happy-dom": "^20.8.9",
     "postcss": "^8.4.49",
     "prettier": "^3.4.2",
     "tailwindcss": "^3.4.16",
