@@ -8,7 +8,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method not allowed' }, { status: 405 });
   }
-  await requireProjectApiAccess(request, params.projectId);
+  await requireProjectApiAccess(request, params.projectId, { minimumRole: 'viewer' });
   const body = await parseJsonBody(request);
   if (body instanceof Response) return body;
   const query = String(body.query || '').trim();

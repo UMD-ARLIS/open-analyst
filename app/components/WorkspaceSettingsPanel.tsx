@@ -133,6 +133,7 @@ export function WorkspaceSettingsPanel({
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const defaultSet = useMemo(() => new Set(defaultConnectorIds), [defaultConnectorIds]);
+  const canManageProject = Boolean(activeProject?.isOwner);
 
   useEffect(() => {
     setMemoryProfile(workspaceContext.profile.memoryProfile);
@@ -222,6 +223,12 @@ export function WorkspaceSettingsPanel({
 
         {error ? <Banner tone="error" text={error} /> : null}
         {success ? <Banner tone="success" text={success} /> : null}
+        {!canManageProject ? (
+          <Banner
+            tone="info"
+            text="Project-level defaults are owner-managed. Your personal connectors, credentials, skills, and diagnostics remain editable."
+          />
+        ) : null}
 
         {activeSection === 'runtime' ? (
           <div className="space-y-4">
@@ -230,6 +237,7 @@ export function WorkspaceSettingsPanel({
               <h3 className="text-sm font-semibold">Project brief</h3>
               <textarea
                 className="input min-h-[140px]"
+                disabled={!canManageProject}
                 value={projectBrief}
                 onChange={(event) => setProjectBrief(event.target.value)}
                 placeholder="Describe the analyst's standing mandate, audience, and constraints for this project."
@@ -237,6 +245,7 @@ export function WorkspaceSettingsPanel({
               <button
                 type="button"
                 className="btn btn-primary text-sm"
+                disabled={!canManageProject}
                 onClick={() =>
                   void withStatus(
                     () => saveProfile({ brief: projectBrief }),
@@ -261,6 +270,7 @@ export function WorkspaceSettingsPanel({
                       type="checkbox"
                       className="mt-1"
                       checked={defaultSet.has(connector.id)}
+                      disabled={!canManageProject}
                       onChange={() => {
                         setDefaultConnectorIds((current) =>
                           defaultSet.has(connector.id)
@@ -286,6 +296,7 @@ export function WorkspaceSettingsPanel({
               <button
                 type="button"
                 className="btn btn-primary text-sm mt-4"
+                disabled={!canManageProject}
                 onClick={() =>
                   void withStatus(
                     () => saveProfile({ defaultConnectorIds }),
@@ -311,6 +322,7 @@ export function WorkspaceSettingsPanel({
                 Memory strategy
                 <select
                   className="input mt-1"
+                  disabled={!canManageProject}
                   value={String(memoryProfile.strategy || 'explicit')}
                   onChange={(event) =>
                     setMemoryProfile((current) => ({
@@ -327,6 +339,7 @@ export function WorkspaceSettingsPanel({
               <label className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"
+                  disabled={!canManageProject}
                   checked={Boolean(memoryProfile.includeInChatContext ?? true)}
                   onChange={(event) =>
                     setMemoryProfile((current) => ({
@@ -344,6 +357,7 @@ export function WorkspaceSettingsPanel({
                   min={1}
                   max={20}
                   className="input mt-1"
+                  disabled={!canManageProject}
                   value={String(memoryProfile.maxEntries || 6)}
                   onChange={(event) =>
                     setMemoryProfile((current) => ({
@@ -356,6 +370,7 @@ export function WorkspaceSettingsPanel({
               <button
                 type="button"
                 className="btn btn-primary text-sm"
+                disabled={!canManageProject}
                 onClick={() =>
                   void withStatus(() => saveProfile({ memoryProfile }), 'Memory policy saved.')
                 }
@@ -376,6 +391,7 @@ export function WorkspaceSettingsPanel({
                 min={1}
                 max={20}
                 className="input mt-1"
+                disabled={!canManageProject}
                 value={String(retrievalPolicy.limit || 6)}
                 onChange={(event) =>
                   setRetrievalPolicy((current) => ({
@@ -393,6 +409,7 @@ export function WorkspaceSettingsPanel({
                 max={1}
                 step="0.05"
                 className="input mt-1"
+                disabled={!canManageProject}
                 value={String(retrievalPolicy.minScore || 0.2)}
                 onChange={(event) =>
                   setRetrievalPolicy((current) => ({
@@ -405,6 +422,7 @@ export function WorkspaceSettingsPanel({
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
+                disabled={!canManageProject}
                 checked={Boolean(retrievalPolicy.includeProjectMemories ?? true)}
                 onChange={(event) =>
                   setRetrievalPolicy((current) => ({
@@ -418,6 +436,7 @@ export function WorkspaceSettingsPanel({
             <button
               type="button"
               className="btn btn-primary text-sm"
+              disabled={!canManageProject}
               onClick={() =>
                 void withStatus(() => saveProfile({ retrievalPolicy }), 'Retrieval policy saved.')
               }
@@ -433,6 +452,7 @@ export function WorkspaceSettingsPanel({
               Workspace root override
               <input
                 className="input mt-1"
+                disabled={!canManageProject}
                 value={storageDraft.workspaceLocalRoot}
                 onChange={(event) =>
                   setStorageDraft((current) => ({
@@ -447,6 +467,7 @@ export function WorkspaceSettingsPanel({
               Artifact backend
               <select
                 className="input mt-1"
+                disabled={!canManageProject}
                 value={storageDraft.artifactBackend}
                 onChange={(event) =>
                   setStorageDraft((current) => ({
@@ -464,6 +485,7 @@ export function WorkspaceSettingsPanel({
               Local artifact root override
               <input
                 className="input mt-1"
+                disabled={!canManageProject}
                 value={storageDraft.artifactLocalRoot}
                 onChange={(event) =>
                   setStorageDraft((current) => ({
@@ -476,9 +498,10 @@ export function WorkspaceSettingsPanel({
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <label className="text-sm">
                 S3 bucket override
-                <input
-                  className="input mt-1"
-                  value={storageDraft.artifactS3Bucket}
+                  <input
+                    className="input mt-1"
+                    disabled={!canManageProject}
+                    value={storageDraft.artifactS3Bucket}
                   onChange={(event) =>
                     setStorageDraft((current) => ({
                       ...current,
@@ -489,9 +512,10 @@ export function WorkspaceSettingsPanel({
               </label>
               <label className="text-sm">
                 S3 region override
-                <input
-                  className="input mt-1"
-                  value={storageDraft.artifactS3Region}
+                  <input
+                    className="input mt-1"
+                    disabled={!canManageProject}
+                    value={storageDraft.artifactS3Region}
                   onChange={(event) =>
                     setStorageDraft((current) => ({
                       ...current,
@@ -502,9 +526,10 @@ export function WorkspaceSettingsPanel({
               </label>
               <label className="text-sm">
                 S3 endpoint override
-                <input
-                  className="input mt-1"
-                  value={storageDraft.artifactS3Endpoint}
+                  <input
+                    className="input mt-1"
+                    disabled={!canManageProject}
+                    value={storageDraft.artifactS3Endpoint}
                   onChange={(event) =>
                     setStorageDraft((current) => ({
                       ...current,
@@ -515,9 +540,10 @@ export function WorkspaceSettingsPanel({
               </label>
               <label className="text-sm">
                 S3 prefix override
-                <input
-                  className="input mt-1"
-                  value={storageDraft.artifactS3Prefix}
+                  <input
+                    className="input mt-1"
+                    disabled={!canManageProject}
+                    value={storageDraft.artifactS3Prefix}
                   onChange={(event) =>
                     setStorageDraft((current) => ({
                       ...current,
@@ -530,6 +556,7 @@ export function WorkspaceSettingsPanel({
             <button
               type="button"
               className="btn btn-primary text-sm"
+              disabled={!canManageProject}
               onClick={() =>
                 void withStatus(() => saveProfile(storageDraft), 'Project storage settings saved.')
               }
@@ -557,7 +584,7 @@ export function WorkspaceSettingsPanel({
                       type="checkbox"
                       className="mt-1"
                       checked={defaultSkillIds.includes(skill.id)}
-                      disabled={!skill.enabled}
+                      disabled={!skill.enabled || !canManageProject}
                       onChange={() => {
                         setDefaultSkillIds((current) =>
                           current.includes(skill.id)
@@ -579,6 +606,7 @@ export function WorkspaceSettingsPanel({
               <button
                 type="button"
                 className="btn btn-primary text-sm mt-4"
+                disabled={!canManageProject}
                 onClick={() =>
                   void withStatus(
                     () => saveProfile({ defaultSkillIds }),

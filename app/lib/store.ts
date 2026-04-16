@@ -11,6 +11,8 @@ interface ProjectSummary {
   id: string;
   name: string;
   description?: string | null;
+  accessRole?: 'owner' | 'editor' | 'viewer';
+  isOwner?: boolean;
   workspaceSlug?: string | null;
   workspaceLocalRoot?: string | null;
   artifactBackend?: string | null;

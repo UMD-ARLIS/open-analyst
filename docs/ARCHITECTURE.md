@@ -50,6 +50,8 @@ The runtime expands that metadata into the full server-owned runtime context for
 Key product records:
 
 - `projects`: workspace boundary
+- `project_members`: shared access control for editors and viewers
+- `app_users`: app-known identities seen through successful login
 - `threads`: chat and workflow boundary
 - `documents`: imported or published project documents
 - `canvas_documents`: editable working documents

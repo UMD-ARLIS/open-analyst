@@ -17,7 +17,9 @@ export async function loader({ params, request }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const { user } = await requireProjectApiAccess(request, params.projectId);
+  const { user } = await requireProjectApiAccess(request, params.projectId, {
+    minimumRole: 'owner',
+  });
   const projectId = params.projectId;
 
   if (request.method === 'PATCH') {
@@ -71,7 +73,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         });
       }
       await mkdir(resolveProjectWorkspace(project), { recursive: true });
-      return Response.json({ project });
+      return Response.json({ project: { ...project, accessRole: 'owner', isOwner: true } });
     } catch (err) {
       return Response.json(
         { error: err instanceof Error ? err.message : String(err) },

@@ -49,6 +49,8 @@ export interface HeadlessProject {
   id: string;
   name: string;
   description: string;
+  accessRole?: 'owner' | 'editor' | 'viewer';
+  isOwner?: boolean;
   workspaceSlug?: string | null;
   workspaceLocalRoot?: string | null;
   artifactBackend?: string | null;
@@ -59,6 +61,19 @@ export interface HeadlessProject {
   artifactS3Prefix?: string | null;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface HeadlessProjectMember {
+  projectId: string;
+  userId: string;
+  role: 'owner' | 'editor' | 'viewer';
+  email?: string | null;
+  name?: string | null;
+  username?: string | null;
+  createdAt?: number | string | Date | null;
+  updatedAt?: number | string | Date | null;
+  lastSeenAt?: number | string | Date | null;
+  isOwner: boolean;
 }
 
 export interface HeadlessCollection {

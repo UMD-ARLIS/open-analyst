@@ -13,7 +13,7 @@ export async function action({ request }: Route.ActionArgs) {
   if (!projectId) {
     return Response.json({ error: 'projectId is required' }, { status: 400 });
   }
-  const { user } = await requireProjectApiAccess(request, projectId);
+  const { user } = await requireProjectApiAccess(request, projectId, { minimumRole: 'viewer' });
   await upsertSettings({ activeProjectId: projectId }, user.userId);
   return Response.json({ success: true, activeProjectId: projectId });
 }

@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { queryRow, queryRows } from '../index.server';
 import { type Project } from '../schema';
 import { buildProjectWorkspaceSlug } from '~/lib/project-storage.server';
+import { ensureProjectMembersTable } from './project-members.server';
 
 function trimOrNull(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null;
@@ -69,11 +70,22 @@ export async function createProject(
 }
 
 export async function listProjects(userId: string): Promise<Project[]> {
+  await ensureProjectMembersTable();
   return queryRows<Project>(
     `
-      SELECT *
+      SELECT
+        projects.*,
+        CASE
+          WHEN projects.user_id = $1 THEN 'owner'
+          ELSE project_members.role
+        END AS access_role,
+        (projects.user_id = $1) AS is_owner
       FROM projects
-      WHERE user_id = $1
+      LEFT JOIN project_members
+        ON project_members.project_id = projects.id
+       AND project_members.user_id = $1
+      WHERE projects.user_id = $1
+         OR project_members.user_id = $1
       ORDER BY updated_at DESC
     `,
     [userId]
@@ -81,12 +93,25 @@ export async function listProjects(userId: string): Promise<Project[]> {
 }
 
 export async function getProject(projectId: string, userId: string): Promise<Project | undefined> {
+  await ensureProjectMembersTable();
   return queryRow<Project>(
     `
-      SELECT *
+      SELECT
+        projects.*,
+        CASE
+          WHEN projects.user_id = $2 THEN 'owner'
+          ELSE project_members.role
+        END AS access_role,
+        (projects.user_id = $2) AS is_owner
       FROM projects
-      WHERE id = $1
-        AND user_id = $2
+      LEFT JOIN project_members
+        ON project_members.project_id = projects.id
+       AND project_members.user_id = $2
+      WHERE projects.id = $1
+        AND (
+          projects.user_id = $2
+          OR project_members.user_id = $2
+        )
       LIMIT 1
     `,
     [projectId, userId]

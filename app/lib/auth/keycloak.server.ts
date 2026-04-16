@@ -80,6 +80,7 @@ export async function handleCallback(
   userId: string;
   email: string;
   name: string;
+  username: string;
 }> {
   const client = await getClient();
   const params = client.callbackParams(callbackUrl);
@@ -96,10 +97,9 @@ export async function handleCallback(
     expiresAt: tokenSet.expires_at || 0,
     userId: claims.sub || '',
     email: (claims.email as string) || '',
+    username: (claims.preferred_username as string) || '',
     name:
-      (claims.preferred_username as string) ||
-      (claims.name as string) ||
-      (claims.email as string) ||
+      (claims.name as string) || (claims.preferred_username as string) || (claims.email as string) ||
       '',
   };
 }

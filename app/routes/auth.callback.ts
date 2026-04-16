@@ -7,6 +7,7 @@ import {
 } from '~/lib/auth/session.server';
 import { handleCallback } from '~/lib/auth/keycloak.server';
 import { setTokens } from '~/lib/auth/token-store.server';
+import { upsertAppUser } from '~/lib/db/queries/app-users.server';
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const session = await getSession(request);
@@ -25,6 +26,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       refreshToken: result.refreshToken,
       idToken: result.idToken,
       expiresAt: result.expiresAt,
+    });
+    await upsertAppUser({
+      userId: result.userId,
+      email: result.email,
+      name: result.name,
+      username: result.username,
     });
 
     // Only store minimal user info in the cookie

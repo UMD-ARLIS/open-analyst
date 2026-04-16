@@ -20,7 +20,7 @@ export async function action({ request }: { request: Request }) {
     return Response.json({ error: 'metadata.project_id is required' }, { status: 400 });
   }
 
-  await requireRuntimeProjectAccess(request, projectId);
+  await requireRuntimeProjectAccess(request, projectId, 'viewer');
   const payload = await runtimeJson<RuntimeThreadSummary[]>('/threads/search', {
     method: 'POST',
     headers: runtimeRequestHeaders(request, { 'Content-Type': 'application/json' }),

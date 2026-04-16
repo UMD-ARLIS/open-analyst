@@ -36,6 +36,7 @@ export function TopNav() {
 
   const activeProjectId = params.projectId || null;
   const activeProject = projects.find((p) => p.id === activeProjectId);
+  const canManageActiveProject = Boolean(activeProject?.isOwner);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -131,7 +132,7 @@ export function TopNav() {
     artifactS3Endpoint: string;
     artifactS3Prefix: string;
   }) => {
-    if (!activeProject) return;
+    if (!activeProject || !canManageActiveProject) return;
     projectMutationFetcher.submit(values, {
       method: 'PATCH',
       action: `/api/projects/${activeProject.id}`,
@@ -198,34 +199,40 @@ export function TopNav() {
                     >
                       <div className="text-sm font-medium truncate">{project.name}</div>
                     </button>
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        className="w-6 h-6 rounded hover:bg-surface-active text-text-muted text-xs"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setRenameDialog({
-                            projectId: project.id,
-                            currentName: project.name,
-                          });
-                        }}
-                        aria-label={`Rename project ${project.name}`}
-                      >
-                        ✎
-                      </button>
-                      <button
-                        className="w-6 h-6 rounded hover:bg-surface-active text-error text-xs"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDeleteDialog({
-                            projectId: project.id,
-                            projectName: project.name,
-                          });
-                        }}
-                        aria-label={`Delete project ${project.name}`}
-                      >
-                        ✕
-                      </button>
-                    </div>
+                    {project.isOwner ? (
+                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          className="w-6 h-6 rounded hover:bg-surface-active text-text-muted text-xs"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRenameDialog({
+                              projectId: project.id,
+                              currentName: project.name,
+                            });
+                          }}
+                          aria-label={`Rename project ${project.name}`}
+                        >
+                          ✎
+                        </button>
+                        <button
+                          className="w-6 h-6 rounded hover:bg-surface-active text-error text-xs"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteDialog({
+                              projectId: project.id,
+                              projectName: project.name,
+                            });
+                          }}
+                          aria-label={`Delete project ${project.name}`}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="rounded-full border border-border px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-text-muted">
+                        {project.accessRole || 'viewer'}
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
@@ -267,7 +274,7 @@ export function TopNav() {
             <button
               onClick={() => setProjectSettingsOpen(true)}
               className="h-8 px-2 rounded-lg flex items-center gap-1.5 hover:bg-surface-hover text-text-secondary text-sm"
-              aria-label="Project storage settings"
+              aria-label="Project settings"
             >
               <PackageOpen className="w-4 h-4" />
               <span className="hidden md:inline">Project</span>
@@ -311,6 +318,7 @@ export function TopNav() {
         open={projectSettingsOpen}
         project={activeProject || null}
         isSaving={projectMutationFetcher.state !== 'idle'}
+        canManageProject={canManageActiveProject}
         onCancel={() => setProjectSettingsOpen(false)}
         onSave={saveProjectSettings}
       />

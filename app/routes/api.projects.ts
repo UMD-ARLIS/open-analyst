@@ -36,5 +36,11 @@ export async function action({ request }: Route.ActionArgs) {
   );
   await mkdir(resolveProjectWorkspace(project), { recursive: true });
   await upsertSettings({ activeProjectId: project.id }, userId);
-  return Response.json({ project, activeProjectId: project.id }, { status: 201 });
+  return Response.json(
+    {
+      project: { ...project, accessRole: 'owner', isOwner: true },
+      activeProjectId: project.id,
+    },
+    { status: 201 }
+  );
 }

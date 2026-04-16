@@ -97,6 +97,35 @@ Kubernetes manifests are in `k8s/open-analyst/`. The deployment uses:
 
 Services: webapp, runtime, analyst-mcp, keycloak, all in namespace `open-analyst`.
 
+### Autoscaling
+
+The repo now includes first-pass HPAs for:
+
+- `webapp`
+- `runtime`
+- `analyst-mcp`
+
+The manifests live in:
+
+- [webapp-hpa.yaml](/home/ubuntu/code/ARLIS/open-analyst/k8s/open-analyst/webapp-hpa.yaml)
+- [runtime-hpa.yaml](/home/ubuntu/code/ARLIS/open-analyst/k8s/open-analyst/runtime-hpa.yaml)
+- [analyst-mcp-hpa.yaml](/home/ubuntu/code/ARLIS/open-analyst/k8s/open-analyst/analyst-mcp-hpa.yaml)
+
+The initial sizing is intentionally conservative:
+
+- `webapp`: min `2`, max `4`
+- `runtime`: min `2`, max `6`
+- `analyst-mcp`: min `1`, max `3`
+
+These HPAs assume the cluster has:
+
+- Kubernetes Metrics Server
+- node autoscaling enabled at the EKS layer
+
+The runtime is the primary scaling target for concurrent analyst activity. Horizontal scaling is
+expected to help with 20–30 active users only if thread/run state remains fully durable and no
+critical path depends on pod-local memory.
+
 ### ALB Direct Access Workaround
 
 If the domain `analyst.insights.arlis.umd.edu` does not resolve from your network (e.g., corporate DNS hasn't propagated), the app can be accessed directly via the ALB hostname. The following changes were made to support this:

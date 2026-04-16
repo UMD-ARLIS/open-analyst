@@ -12,11 +12,37 @@ export interface Project {
   artifactS3Region: string | null;
   artifactS3Endpoint: string | null;
   artifactS3Prefix: string | null;
+  accessRole?: 'owner' | 'editor' | 'viewer';
+  isOwner?: boolean;
   createdAt: Date | null;
   updatedAt: Date | null;
 }
 
 export type NewProject = Omit<Project, 'id' | 'createdAt' | 'updatedAt'>;
+
+export interface AppUser {
+  userId: string;
+  email: string | null;
+  name: string | null;
+  username: string | null;
+  createdAt: Date | null;
+  updatedAt: Date | null;
+  lastSeenAt: Date | null;
+}
+
+export interface ProjectMember {
+  projectId: string;
+  userId: string;
+  role: 'owner' | 'editor' | 'viewer';
+  email: string | null;
+  name: string | null;
+  username: string | null;
+  addedByUserId: string | null;
+  createdAt: Date | null;
+  updatedAt: Date | null;
+  lastSeenAt: Date | null;
+  isOwner: boolean;
+}
 
 export interface Collection {
   id: string;

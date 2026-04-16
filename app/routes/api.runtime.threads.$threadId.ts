@@ -22,7 +22,7 @@ export async function action({
     return Response.json({ error: 'Method not allowed' }, { status: 405 });
   }
 
-  await requireRuntimeThreadAccess(request, params.threadId);
+  await requireRuntimeThreadAccess(request, params.threadId, 'editor');
   const init: RequestInit = {
     method: request.method,
     headers: runtimeRequestHeaders(request, { Accept: 'application/json' }),

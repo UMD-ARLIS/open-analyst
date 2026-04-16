@@ -1,6 +1,6 @@
 import { env } from '~/lib/env.server';
-import { requireApiUser } from '~/lib/auth/require-user.server';
-import { getProject } from '~/lib/db/queries/projects.server';
+import { requireProjectApiAccess } from '~/lib/project-access.server';
+import type { ProjectAccessRole } from '~/lib/db/queries/project-members.server';
 
 const RUNTIME_URL = env.LANGGRAPH_RUNTIME_URL.replace(/\/+$/g, '');
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -84,20 +84,19 @@ export function passthroughHeaders(response: Response, extra?: HeadersInit): Hea
   return headers;
 }
 
-export async function requireRuntimeProjectAccess(request: Request, projectId: string) {
-  const user = await requireApiUser(request);
-  const project = await getProject(projectId, user.userId);
-  if (!project) {
-    throw new Response(JSON.stringify({ error: `Project not found: ${projectId}` }), {
-      status: 404,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-  return { user, project };
+export async function requireRuntimeProjectAccess(
+  request: Request,
+  projectId: string,
+  minimumRole: ProjectAccessRole = 'editor'
+) {
+  return requireProjectApiAccess(request, projectId, { minimumRole });
 }
 
-export async function requireRuntimeThreadAccess(request: Request, threadId: string) {
-  const user = await requireApiUser(request);
+export async function requireRuntimeThreadAccess(
+  request: Request,
+  threadId: string,
+  minimumRole: ProjectAccessRole = 'viewer'
+) {
   const thread = await runtimeJson<RuntimeThreadSummary>(`/threads/${encodeURIComponent(threadId)}`);
   const metadata = thread.metadata && typeof thread.metadata === 'object' ? thread.metadata : {};
   const projectId = typeof metadata.project_id === 'string' ? metadata.project_id.trim() : '';
@@ -107,12 +106,6 @@ export async function requireRuntimeThreadAccess(request: Request, threadId: str
       headers: { 'Content-Type': 'application/json' },
     });
   }
-  const project = await getProject(projectId, user.userId);
-  if (!project) {
-    throw new Response(JSON.stringify({ error: 'Thread not found' }), {
-      status: 404,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
+  const { user, project } = await requireProjectApiAccess(request, projectId, { minimumRole });
   return { user, project, thread };
 }

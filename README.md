@@ -14,6 +14,12 @@ The product is a single project workspace with three coordinated surfaces:
 - center chat thread for the active conversation
 - right dock for `Sources`, `Canvas`, and artifact preview
 
+Projects can be shared with collaborators using three roles:
+
+- `owner`
+- `editor`
+- `viewer`
+
 There are three explicit runtime modes:
 
 - `Chat`: lightweight conversation with read-only project context
@@ -121,6 +127,7 @@ curl -H "x-api-key: $ANALYST_MCP_API_KEY" http://localhost:8000/api/capabilities
 ## Documentation
 
 - [Architecture](/home/ubuntu/code/ARLIS/open-analyst/docs/ARCHITECTURE.md)
+- [Collaboration](/home/ubuntu/code/ARLIS/open-analyst/docs/COLLABORATION.md)
 - [Agent Architecture](/home/ubuntu/code/ARLIS/open-analyst/docs/AGENT_ARCHITECTURE.md)
 - [Deployment](/home/ubuntu/code/ARLIS/open-analyst/docs/DEPLOYMENT.md)
 - [Workspace Settings](/home/ubuntu/code/ARLIS/open-analyst/docs/WORKSPACE_SETTINGS.md)

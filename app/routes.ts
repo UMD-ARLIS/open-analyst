@@ -58,6 +58,11 @@ export default [
     route('projects', 'routes/api.projects.ts'),
     route('projects/active', 'routes/api.projects.active.ts'),
     route('projects/:projectId', 'routes/api.projects.$projectId.ts'),
+    route('projects/:projectId/members', 'routes/api.projects.$projectId.members.ts'),
+    route(
+      'projects/:projectId/members/:memberUserId',
+      'routes/api.projects.$projectId.members.$memberUserId.ts'
+    ),
     route('projects/:projectId/knowledge', 'routes/api.projects.$projectId.knowledge.ts'),
     route('projects/:projectId/source-ingest', 'routes/api.projects.$projectId.source-ingest.ts'),
     route(
