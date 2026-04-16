@@ -144,7 +144,7 @@ function ToolUseBlock({ block }: { block: ToolUseContent }) {
     if (block.name === 'save_canvas_markdown') {
       return `Saving canvas: ${input.title || 'draft'}`;
     }
-    if (block.name === 'stage_literature_collection') {
+    if (block.name === 'collect_literature_candidates') {
       return `Collecting sources for "${input.query || '...'}"`;
     }
     if (block.name === 'stage_web_source') {

@@ -482,7 +482,7 @@ class RuntimeEngine:
         if command and "resume" in command:
             resume_payload = await self._normalize_resume_payload(thread_id, command.get("resume"))
             payload = Command(resume=resume_payload)
-            await runtime_db.resolve_interrupts(thread_id, run_id, {"resume": resume_payload})
+            await runtime_db.resolve_interrupts(thread_id, {"resume": resume_payload})
         else:
             payload = {"messages": _input_messages_to_langchain(input_messages)}
 

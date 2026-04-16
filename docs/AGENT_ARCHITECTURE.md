@@ -18,7 +18,7 @@ This split is deliberate:
 
 ## Supervisor Model
 
-Open Analyst uses one supervisor per thread. It does not run separate supervisors for chat, research, and product work. Instead, the same supervisor changes behavior based on `analysis_mode`.
+Open Analyst uses one supervisor per thread. It does not run separate supervisors for chat, research, and product work. Instead, the same supervisor adapts as the thread escalates between lightweight conversation, structured investigation, and deliverable production.
 
 The supervisor is primarily a coordinator:
 
@@ -30,36 +30,15 @@ The supervisor is primarily a coordinator:
 
 The supervisor does not use broad filesystem tools directly. File and command work stays delegated to the appropriate subagent.
 
-## Mode Behavior
+## Internal Workflow States
 
-### Chat
+The runtime still carries internal workflow hints such as `chat`, `research`, and `product`, but they are execution states, not user-managed walls.
 
-`chat` is the default conversational mode.
+- `chat`: lightweight conversation and quick analysis
+- `research`: evidence gathering, source import, synthesis, and memory capture
+- `product`: drafting, packaging, and publication
 
-- lightweight answers
-- read-only use of project context when needed
-- no structured workflow by default
-- no artifact capture or publication
-- no subagent fan-out unless the design changes intentionally in the future
-
-### Research
-
-`research` is the evidence-gathering mode.
-
-- visible planning for multi-step work
-- retrieval and synthesis delegation
-- approval-gated source import
-- collection-aware analysis
-- memory capture for durable findings
-
-### Product
-
-`product` is the deliverable mode.
-
-- visible planning for multi-step work
-- drafting in canvas
-- packaging into deliverable files
-- publication to project destinations such as `Reports`
+The assistant should escalate between these states on the same thread and ask for approval when the transition implies heavier retrieval, durable source import, command execution, or publication.
 
 ## Specialist Subagents
 
@@ -126,11 +105,11 @@ For ARLIS bulletins, the expected product path is planner, drafter, critic, then
 
 The runtime uses approval gates for high-impact actions such as source import, publication, and command execution.
 
-The user can also shift the conversation between modes inside the same thread. A common pattern is:
+The user should stay in one continuous analyst thread while the assistant adapts internally. A common pattern is:
 
-- research a topic in `Research`
-- ask a side question in `Chat`
-- resume drafting and publication in `Product`
+- start with a lightweight question
+- escalate into structured retrieval on approval
+- continue into drafting or publication on the same thread if needed
 
 ## Observability
 

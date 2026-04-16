@@ -97,17 +97,17 @@ The supported model is:
 
 The `Sources` panel is a browsing and staging surface. It may show ingest status, but it should not render generic runtime approval cards.
 
-## Mode Escalation
+## Workflow Escalation
 
-Mode switches are approval-gated runtime actions.
+Workflow escalation is approval-gated.
 
 The intended flow is:
 
-1. a run starts in `chat`, `research`, or `product`
-2. the supervisor decides a stronger mode is required
-3. the runtime emits a mode escalation approval
+1. a run starts in a lightweight thread state
+2. the supervisor decides heavier retrieval or deliverable work is required
+3. the runtime emits a workflow escalation approval
 4. the user approves or rejects
-5. the same thread resumes in the approved mode
+5. the same thread resumes in the approved state
 
 Users should not need to pre-toggle modes manually just to let the agent continue reasonable work.
 

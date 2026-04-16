@@ -243,53 +243,6 @@ class SupervisorToolGuard(AgentMiddleware if AgentMiddleware is not None else ob
         return await handler(request)
 
 
-class ModeToolGuard(AgentMiddleware if AgentMiddleware is not None else object):
-    """Restrict supervisor behavior by interaction mode."""
-
-    CHAT_BLOCKED_TOOLS = {"task", "write_todos", "approve_collected_literature", "propose_project_memory"}
-
-    def _analysis_mode(self, request: Any) -> str:
-        runtime = getattr(request, "runtime", None)
-        cfg = _get_project_config(runtime)
-        return _normalize_analysis_mode(cfg.get("analysis_mode"))
-
-    def _block(self, request: Any, reason: str) -> Any:
-        tool_name = str(getattr(request, "tool_call", {}).get("name") or "tool")
-        tool_call_id = str(getattr(request, "tool_call", {}).get("id") or f"blocked-{tool_name}")
-        return ToolMessage(
-            content=reason,
-            name=tool_name,
-            tool_call_id=tool_call_id,
-            status="error",
-        )
-
-    def wrap_tool_call(self, request: Any, handler: Any) -> Any:
-        tool_name = str(getattr(request, "tool_call", {}).get("name") or "")
-        if ToolMessage is not None and self._analysis_mode(request) == "chat" and tool_name in self.CHAT_BLOCKED_TOOLS:
-            return self._block(
-                request,
-                (
-                    f"{tool_name} is disabled in Chat mode. "
-                    "Chat mode is conversational and read-only. Switch to Research mode for structured retrieval "
-                    "or Product mode for drafting and publication. Use request_mode_switch to ask the user for approval."
-                ),
-            )
-        return handler(request)
-
-    async def awrap_tool_call(self, request: Any, handler: Any) -> Any:
-        tool_name = str(getattr(request, "tool_call", {}).get("name") or "")
-        if ToolMessage is not None and self._analysis_mode(request) == "chat" and tool_name in self.CHAT_BLOCKED_TOOLS:
-            return self._block(
-                request,
-                (
-                    f"{tool_name} is disabled in Chat mode. "
-                    "Chat mode is conversational and read-only. Switch to Research mode for structured retrieval "
-                    "or Product mode for drafting and publication. Use request_mode_switch to ask the user for approval."
-                ),
-            )
-        return await handler(request)
-
-
 class ResilientModelMiddleware(AgentMiddleware if AgentMiddleware is not None else object):
     """Add client-side admission control and graceful retry/fallback for transient model failures.
 
@@ -503,7 +456,7 @@ def _runtime_capabilities_payload(cfg: dict[str, Any]) -> dict[str, Any]:
                 "description": "Fetches literature, stages sources, and gathers project material without drafting conclusions.",
                 "tools": [
                     "search_literature",
-                    "stage_literature_collection",
+                    "collect_literature_candidates",
                     "stage_web_source",
                     "search_project_documents",
                     "read_project_document",
@@ -1100,12 +1053,13 @@ def _system_prompt() -> str:
         "When the user asks what you can do, answer from the actual active tools, connectors, and skills. "
         "Your direct tools are limited to project retrieval, capability inspection, canvas inspection, "
         "and shared memory persistence; specialized work should be delegated.\n\n"
-        "## Modes\n"
-        "The active interaction mode arrives in the runtime system message.\n"
-        "- Chat mode: conversational, lightweight, and read-only. Do not create plans or delegate.\n"
-        "- Research mode: structured retrieval and synthesis.\n"
-        "- Product mode: structured planning, drafting, packaging, and publication.\n\n"
-        "If the current mode is too restrictive for the user's request, call request_mode_switch instead of merely telling the user to toggle it manually.\n\n"
+        "## Workflow states\n"
+        "The runtime keeps an internal workflow state in thread metadata so the assistant can adapt its behavior. "
+        "Treat those states as execution hints, not as user-managed walls.\n"
+        "- chat: lightweight conversation and quick analysis\n"
+        "- research: structured retrieval, synthesis, and evidence review\n"
+        "- product: deliverable drafting, packaging, and publication\n\n"
+        "Do not tell the user to toggle modes manually. If the work needs to escalate into heavier retrieval or deliverable production, call request_mode_switch to ask for approval and then continue on the same thread.\n\n"
         "## Delegation\n"
         "Use the `task` tool to delegate specialized work to subagents:\n"
         "- subagent_type='reviewer': request clarification, branch analysis, and numbered user choices when the task is ambiguous\n"
@@ -1117,8 +1071,8 @@ def _system_prompt() -> str:
         "- subagent_type='packager': generate output files and format-specific deliverables\n"
         "- subagent_type='publisher': publish approved outputs and project artifacts\n"
         "- subagent_type='general-purpose': narrow fallback for synthesis that does not fit the named specialists\n\n"
-        "If the user wants to collect or add sources to the project while in Research or Product mode, delegate immediately to "
-        "the retriever subagent. Retriever branches gather candidates first; then you call approve_collected_literature once to present one consolidated approval.\n\n"
+        "If the user wants to collect or add sources to the project, delegate immediately to the retriever subagent. "
+        "Retriever branches gather candidates first; then you call approve_collected_literature once to present one consolidated approval.\n\n"
         "Never call a tool that appears only under a subagent's capabilities as if it were a direct supervisor tool. "
         "Use task(subagent_type=...) for those capabilities.\n\n"
         "Delegate rather than doing everything yourself. The retriever gathers sources, the researcher synthesizes them, "
@@ -1371,15 +1325,29 @@ def _approval_unavailable(tool_name: str) -> str:
     )
 
 
+def _webapp_api_headers(project_id: str) -> dict[str, str]:
+    api_key = (
+        _trimmed(getattr(settings, "open_analyst_internal_api_key", ""))
+        or _trimmed(getattr(settings, "analyst_mcp_api_key", ""))
+    )
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["x-open-analyst-internal-key"] = api_key
+    if project_id:
+        headers["x-open-analyst-project-id"] = str(project_id).strip()
+    return headers
+
 
 async def _list_canvas_documents_api(api_base_url: str, project_id: str) -> list[dict[str, Any]]:
     api_base_url = str(api_base_url or "").rstrip("/")
     if not api_base_url:
         return []
+    headers = _webapp_api_headers(project_id)
     try:
         async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
             response = await client.get(
-                f"{api_base_url}/api/projects/{project_id}/canvas-documents"
+                f"{api_base_url}/api/projects/{project_id}/canvas-documents",
+                headers=headers,
             )
             response.raise_for_status()
             payload = response.json()
@@ -1400,6 +1368,7 @@ async def _save_canvas_document_api(
     api_base_url = str(api_base_url or "").rstrip("/")
     if not api_base_url or not markdown.strip():
         return None
+    headers = _webapp_api_headers(project_id)
     try:
         existing = await _list_canvas_documents_api(api_base_url, project_id)
         target: dict[str, Any] | None = None
@@ -1431,6 +1400,7 @@ async def _save_canvas_document_api(
                 method,
                 f"{api_base_url}/api/projects/{project_id}/canvas-documents",
                 json=body,
+                headers=headers,
             )
             response.raise_for_status()
             payload = response.json()
@@ -1453,6 +1423,7 @@ async def _publish_canvas_document_api(
     api_base_url = str(api_base_url or "").rstrip("/")
     if not api_base_url:
         return None
+    headers = _webapp_api_headers(project_id)
     try:
         existing = await _list_canvas_documents_api(api_base_url, project_id)
         if not existing:
@@ -1470,6 +1441,7 @@ async def _publish_canvas_document_api(
                     "collectionName": collection_name or None,
                     "collectionId": collection_id,
                 },
+                headers=headers,
             )
             response.raise_for_status()
             payload = response.json()
@@ -1491,6 +1463,7 @@ async def _publish_workspace_file_api(
     api_base_url = str(api_base_url or "").rstrip("/")
     if not api_base_url or not relative_path.strip():
         return None
+    headers = _webapp_api_headers(project_id)
     try:
         payload = {
             "relativePath": relative_path,
@@ -1503,6 +1476,7 @@ async def _publish_workspace_file_api(
             response = await client.post(
                 f"{api_base_url}/api/projects/{project_id}/artifacts/capture",
                 json=payload,
+                headers=headers,
             )
             response.raise_for_status()
             body = response.json()
@@ -1622,9 +1596,10 @@ async def _stage_source_ingest_api(
             "details": {"reason": "missing_api_base_url"},
         }
     url = f"{api_base_url}/api/projects/{project_id}/source-ingest"
+    headers = _webapp_api_headers(project_id)
     try:
         async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-            response = await client.post(url, json=payload)
+            response = await client.post(url, json=payload, headers=headers)
             response.raise_for_status()
             body = response.json()
         if not isinstance(body, dict) or "batch" not in body:
@@ -1698,9 +1673,10 @@ async def _approve_source_batch_api(
             },
         }
     url = f"{api_base_url}/api/projects/{project_id}/source-ingest/{batch_id}/approve"
+    headers = _webapp_api_headers(project_id)
     try:
         async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-            response = await client.post(url)
+            response = await client.post(url, headers=headers)
             response.raise_for_status()
             body = response.json()
         if isinstance(body, dict):
@@ -2693,289 +2669,6 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         return json.dumps(import_result)
 
     @tool
-    async def stage_literature_collection(
-        query: str,
-        limit: int = 10,
-        date_from: str = "",
-        date_to: str = "",
-        collection_name: str = "",
-        sources: list[str] | None = None,
-        runtime: ToolRuntime = None,
-    ) -> str:
-        """Search literature and present results for user approval before adding to project sources."""
-        cfg = _get_project_config(runtime)
-        api_base_url = cfg.get("api_base_url", "")
-        project_id = cfg.get("project_id", "")
-        if not project_id:
-            return "{}"
-
-        # Step 1: Search literature
-        effective_limit = max(1, min(int(limit or 10), 20))
-        search_payload = await _get_cached_literature_search(
-            runtime=runtime,
-            project_id=project_id,
-            query=query,
-            limit=effective_limit,
-            date_from=date_from,
-            date_to=date_to,
-            sources=sources,
-        )
-        if search_payload is None:
-            search_payload = await _search_literature_api(
-                query,
-                limit=effective_limit,
-                date_from=date_from or None,
-                date_to=date_to or None,
-                sources=sources,
-            )
-            if isinstance(search_payload, dict) and isinstance(search_payload.get("results"), list):
-                await _cache_literature_search(
-                    runtime=runtime,
-                    project_id=project_id,
-                    query=query,
-                    limit=effective_limit,
-                    date_from=date_from,
-                    date_to=date_to,
-                    sources=sources,
-                    payload=search_payload,
-                )
-        search_failure = _literature_search_failure(search_payload)
-        if search_failure is not None:
-            return json.dumps(search_failure)
-        results = search_payload.get("results") if isinstance(search_payload.get("results"), list) else []
-        if not results:
-            return json.dumps({"status": "no_results", "message": f"No literature found for '{query}'."})
-
-        # Step 2: Build compact results for user review
-        compact = []
-        for i, item in enumerate(results):
-            if not isinstance(item, dict):
-                continue
-            compact.append({
-                "index": i,
-                "title": _clean_text(item.get("title"), limit=220),
-                "authors": _clean_authors(item.get("authors")),
-                "venue": _clean_text(item.get("venue"), limit=120),
-                "year": str(item.get("published_at") or "")[:4],
-                "abstract": _clean_text(item.get("abstract"), limit=300),
-                "doi": _clean_text(item.get("doi"), limit=120) or None,
-                "url": _clean_text(item.get("url"), limit=200) or None,
-                "citation_count": int(item.get("citation_count") or 0),
-            })
-
-        # Step 3: Interrupt for user approval with full paper list
-        if interrupt is not None:
-            approval_message = f"Found {len(compact)} sources for '{query}'. Select which to add to project."
-            warnings = search_payload.get("warnings") if isinstance(search_payload.get("warnings"), list) else []
-            if warnings:
-                approval_message += f"\n\nSearch warnings: {_clean_text(warnings[0], limit=220)}"
-            approval = interrupt({
-                "type": "source_collection_approval",
-                "query": query,
-                "total_found": len(compact),
-                "sources": compact,
-                "message": approval_message,
-                "provider_status": search_payload.get("provider_status")
-                if isinstance(search_payload.get("provider_status"), dict)
-                else {},
-                "warnings": warnings,
-            })
-        else:
-            return _approval_unavailable("stage_literature_collection")
-
-        if not isinstance(approval, dict) or not approval.get("approved"):
-            return json.dumps({"status": "rejected", "message": "Source collection was declined by the user."})
-
-        # Step 4: Filter to user-selected items
-        approved_indices = approval.get("approved_indices")
-        if approved_indices is not None:
-            approved_set = set(int(idx) for idx in approved_indices)
-            approved_results = [r for i, r in enumerate(results) if i in approved_set]
-        else:
-            approved_results = results
-
-        if not approved_results:
-            return json.dumps({"status": "rejected", "message": "No sources selected."})
-
-        approved_items: list[dict[str, Any]] = []
-        for item in approved_results:
-            if not isinstance(item, dict):
-                continue
-            normalized = _normalize_literature_item_for_ingest(item)
-            if normalized is None:
-                return json.dumps(
-                    {
-                        "status": "error",
-                        "error": "One or more approved literature items are missing canonical identifiers.",
-                    }
-                )
-            approved_items.append(normalized)
-
-        if not approved_items:
-            return json.dumps({"status": "error", "error": "No approved literature items could be normalized."})
-
-        # Step 5: Stage and approve the exact user-selected items
-        stage_payload = await _stage_source_ingest_api(
-            api_base_url,
-            project_id,
-            {
-                "origin": "literature",
-                "query": query,
-                "summary": f"Approved {len(approved_items)} literature source(s) from analyst search.",
-                "metadata": {
-                    "dateFrom": date_from or None,
-                    "dateTo": date_to or None,
-                    "sources": sources or [],
-                    "approvedCount": len(approved_items),
-                },
-                "collectionId": cfg.get("collection_id"),
-                "collectionName": collection_name or None,
-                "items": approved_items,
-            },
-        )
-        batch = stage_payload.get("batch") if isinstance(stage_payload, dict) else None
-        batch_id = str((batch or {}).get("id") or "").strip()
-        if not batch_id:
-            logger.error(
-                "stage_literature_collection: batch_id empty after staging "
-                "(stage_payload keys=%s, batch=%r)",
-                list(stage_payload.keys()) if isinstance(stage_payload, dict) else None,
-                batch,
-            )
-            return json.dumps(
-                {
-                    "status": "error",
-                    "error": _clean_text(
-                        stage_payload.get("error")
-                        if isinstance(stage_payload, dict)
-                        else "Failed to stage source ingest batch",
-                        limit=280,
-                    )
-                    or "Failed to stage source ingest batch",
-                    "details": stage_payload.get("details") if isinstance(stage_payload, dict) else None,
-                }
-            )
-
-        approval_payload = await _approve_source_batch_api(api_base_url, project_id, batch_id)
-        approved_batch = approval_payload.get("batch") if isinstance(approval_payload, dict) else None
-        if not isinstance(approved_batch, dict):
-            return json.dumps(
-                {
-                    "status": "error",
-                    "batch_id": batch_id,
-                    "error": _clean_text(
-                        approval_payload.get("error")
-                        if isinstance(approval_payload, dict)
-                        else "Source ingest approval failed before import results were returned.",
-                        limit=280,
-                    )
-                    or "Source ingest approval failed before import results were returned.",
-                    "details": approval_payload.get("details") if isinstance(approval_payload, dict) else None,
-                }
-            )
-
-        items_payload = approved_batch.get("items") if isinstance(approved_batch.get("items"), list) else []
-        completed_items = [item for item in items_payload if isinstance(item, dict) and item.get("status") == "completed"]
-        failed_items = [
-            {
-                "title": _clean_text(item.get("title"), limit=180),
-                "error": _clean_text(item.get("error"), limit=240),
-            }
-            for item in items_payload
-            if isinstance(item, dict) and item.get("status") == "failed"
-        ]
-        batch_status = str(approved_batch.get("status") or "").strip()
-
-        if completed_items:
-            warnings = search_payload.get("warnings") if isinstance(search_payload.get("warnings"), list) else []
-            top_titles = [
-                _clean_text(item.get("title"), limit=180)
-                for item in approved_results[:8]
-                if isinstance(item, dict) and _clean_text(item.get("title"), limit=180)
-            ]
-            memory_lines = [
-                f"Query: {query}",
-                f"Imported sources: {len(completed_items)} of {len(approved_items)} approved selections.",
-                f"Batch ID: {batch_id}",
-            ]
-            if warnings:
-                memory_lines.append(
-                    "Search warnings: "
-                    + "; ".join(
-                        _clean_text(warning, limit=200)
-                        for warning in warnings[:3]
-                        if _clean_text(warning, limit=200)
-                    )
-                )
-            if top_titles:
-                memory_lines.append("Imported titles:")
-                memory_lines.extend(f"- {title}" for title in top_titles)
-            if failed_items:
-                memory_lines.append(
-                    "Failed imports: "
-                    + "; ".join(
-                        _clean_text(item.get("title"), limit=120)
-                        for item in failed_items[:3]
-                        if _clean_text(item.get("title"), limit=120)
-                    )
-                )
-            await _persist_project_memory(
-                runtime=runtime,
-                title=f"Literature retrieval: {_clean_text(query, limit=80)}",
-                summary=(
-                    f"Imported {len(completed_items)} approved sources for "
-                    f"'{_clean_text(query, limit=80)}'."
-                ),
-                content="\n".join(memory_lines),
-                memory_type="retrieval_finding",
-                metadata={
-                    "kind": "literature_collection",
-                    "query": query,
-                    "approvedCount": len(approved_items),
-                    "completedCount": len(completed_items),
-                    "failedCount": len(failed_items),
-                    "batchId": batch_id,
-                    "providerStatus": search_payload.get("provider_status")
-                    if isinstance(search_payload.get("provider_status"), dict)
-                    else {},
-                    "warnings": warnings,
-                    "sourceIds": [
-                        str(item.get("canonical_id") or item.get("paper_id") or item.get("doi") or "")
-                        for item in approved_results
-                        if isinstance(item, dict)
-                    ],
-                },
-                provenance={
-                    "tool": "stage_literature_collection",
-                    "query": query,
-                    "collectionId": cfg.get("collection_id"),
-                    "collectionName": collection_name or None,
-                    "dateFrom": date_from or None,
-                    "dateTo": date_to or None,
-                    "sources": sources or [],
-                    "batchId": batch_id,
-                    "importedItems": [
-                        {
-                            "title": _clean_text(item.get("title"), limit=180),
-                            "documentId": str(item.get("document_id") or item.get("documentId") or "").strip() or None,
-                            "artifactId": str(item.get("artifact_id") or item.get("artifactId") or "").strip() or None,
-                        }
-                        for item in completed_items
-                    ],
-                },
-            )
-
-        return json.dumps({
-            "status": "approved" if batch_status == "completed" and not failed_items else "error",
-            "count": len(completed_items),
-            "requested_count": len(approved_items),
-            "batch_id": batch_id,
-            "batch_status": batch_status or None,
-            "failed_items": failed_items,
-            "error": None if batch_status == "completed" and not failed_items else "One or more approved sources failed to import.",
-        })
-
-    @tool
     async def stage_web_source(
         url: str,
         title: str = "",
@@ -3082,7 +2775,7 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         reason: str = "",
         runtime: ToolRuntime = None,
     ) -> str:
-        """Request user approval to switch the current thread into a different interaction mode."""
+        """Request user approval to shift the current thread into a different workflow state."""
         normalized_target = _normalize_analysis_mode(target_mode)
         cfg = _get_project_config(runtime)
         current_mode = _normalize_analysis_mode(cfg.get("analysis_mode"))
@@ -3102,9 +2795,9 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
                 "current_mode": current_mode,
                 "target_mode": normalized_target,
                 "reason": _clean_text(reason, limit=400)
-                or f"Switch to {normalized_target} mode to continue this workflow.",
+                or f"Shift into {normalized_target} workflow to continue this thread.",
                 "message": (
-                    f"The agent needs {normalized_target} mode to continue. "
+                    f"The agent needs the {normalized_target} workflow to continue. "
                     "Approve to update this thread and resume on the same conversation."
                 ),
             }
@@ -3115,7 +2808,7 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
                     "status": "rejected",
                     "current_mode": current_mode,
                     "target_mode": normalized_target,
-                    "message": "The requested mode switch was declined by the user.",
+                    "message": "The requested workflow escalation was declined by the user.",
                 }
             )
         return json.dumps(
@@ -3123,7 +2816,7 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
                 "status": "approved",
                 "current_mode": current_mode,
                 "target_mode": normalized_target,
-                "message": f"Approved mode switch to {normalized_target}.",
+                "message": f"Approved workflow escalation to {normalized_target}.",
             }
         )
 
@@ -3259,7 +2952,6 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         "search_literature": search_literature,
         "collect_literature_candidates": collect_literature_candidates,
         "approve_collected_literature": approve_collected_literature,
-        "stage_literature_collection": stage_literature_collection,
         "stage_web_source": stage_web_source,
         "web_search": web_search,
         "web_fetch": web_fetch,
@@ -3282,7 +2974,7 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         search_project_memories,    # Recall prior findings
         list_active_skills,         # Answer "what can you do?"
         describe_runtime_capabilities,  # Answer tool/connector questions
-        request_mode_switch,        # Escalate from chat into research/product with approval
+        request_mode_switch,        # Escalate into heavier retrieval or deliverable work with approval
         list_canvas_documents,      # Check current canvas state
         approve_collected_literature,  # One consolidated approval after parallel retrieval
         propose_project_memory,     # Persist findings across threads
@@ -3675,7 +3367,6 @@ def _build_runtime_middleware() -> list[Any]:
         fallback_models = [_build_chat_model(model_name) for model_name in settings.fallback_chat_models]
         middleware.append(ResilientModelMiddleware(fallback_models=fallback_models))
         middleware.append(SupervisorToolGuard())
-        middleware.append(ModeToolGuard())
     return middleware
 
 

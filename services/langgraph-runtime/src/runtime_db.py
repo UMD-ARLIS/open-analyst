@@ -350,14 +350,14 @@ class RuntimeDatabase:
             [thread_id, run_id, list(seen) or ["__none__"]],
         )
 
-    async def resolve_interrupts(self, thread_id: str, run_id: str, resolution: dict[str, Any]) -> None:
+    async def resolve_interrupts(self, thread_id: str, resolution: dict[str, Any]) -> None:
         await self.execute(
             """
             UPDATE runtime_interrupts
             SET status = 'resolved', resolution = %s::jsonb, resolved_at = NOW()
-            WHERE thread_id = %s AND run_id = %s AND status = 'pending'
+            WHERE thread_id = %s AND status = 'pending'
             """,
-            [_json(resolution), thread_id, run_id],
+            [_json(resolution), thread_id],
         )
 
     async def list_pending_interrupts(self, thread_id: str) -> list[dict[str, Any]]:

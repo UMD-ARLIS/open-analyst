@@ -18,7 +18,7 @@
 
 Key workspace components:
 
-- `AssistantWorkspaceView`: main chat workspace and mode switching
+- `AssistantWorkspaceView`: main analyst thread workspace and approval handling
 - `Sidebar`: project and collection navigation
 - `KnowledgePanel`: right-dock sources and collections panel
 - `CanvasPanel`: right-dock canvas editor and publication flow

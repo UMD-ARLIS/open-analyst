@@ -15,6 +15,10 @@ class RuntimeSettings(BaseSettings):
     open_analyst_data_dir: str = Field(default="", alias="OPEN_ANALYST_DATA_DIR")
     open_analyst_web_url: str = Field(default="", alias="OPEN_ANALYST_WEB_URL")
     open_analyst_web_port: int = Field(default=5173, alias="OPEN_ANALYST_WEB_PORT")
+    open_analyst_internal_api_key: str = Field(
+        default="",
+        alias="OPEN_ANALYST_INTERNAL_API_KEY",
+    )
     project_workspaces_root: str = Field(default="", alias="PROJECT_WORKSPACES_ROOT")
     artifact_storage_backend: str = Field(default="local", alias="ARTIFACT_STORAGE_BACKEND")
     artifact_local_dir: str = Field(default="", alias="ARTIFACT_LOCAL_DIR")

@@ -49,6 +49,15 @@ interface InterruptCardProps {
   isProcessing?: boolean;
 }
 
+function workflowStateLabel(value: string): string {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase();
+  if (normalized === 'product') return 'deliverable';
+  if (normalized === 'research') return 'research';
+  return 'lightweight';
+}
+
 function ModeSwitchCard({
   interrupt,
   onResume,
@@ -65,10 +74,10 @@ function ModeSwitchCard({
   return (
     <div className="rounded-xl border border-sky-500/30 bg-sky-900/10 p-4 space-y-3">
       <h3 className="text-sm font-semibold text-sky-300">
-        Switch thread from {currentMode} to {targetMode}?
+        Shift workflow from {workflowStateLabel(currentMode)} to {workflowStateLabel(targetMode)}?
       </h3>
       <div className="rounded-lg border border-sky-500/20 bg-sky-950/30 p-3 text-sm text-sky-100">
-        {reason || 'The agent is requesting a mode change to continue the workflow.'}
+        {reason || 'The agent is requesting a workflow escalation to continue this thread.'}
       </div>
       <div className="flex items-center gap-2">
         <button
@@ -78,7 +87,7 @@ function ModeSwitchCard({
           className="flex items-center gap-1.5 rounded-lg bg-green-600 px-4 py-1.5 text-sm text-white transition-colors hover:bg-green-500 disabled:opacity-50"
         >
           <CheckCircle className="h-3.5 w-3.5" />
-          Approve switch
+          Approve transition
         </button>
         <button
           type="button"
@@ -87,7 +96,7 @@ function ModeSwitchCard({
           className="flex items-center gap-1.5 rounded-lg bg-red-600/80 px-4 py-1.5 text-sm text-white transition-colors hover:bg-red-500 disabled:opacity-50"
         >
           <XCircle className="h-3.5 w-3.5" />
-          Stay in {currentMode}
+          Keep current workflow
         </button>
       </div>
     </div>

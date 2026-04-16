@@ -93,6 +93,18 @@ export async function getProject(projectId: string, userId: string): Promise<Pro
   );
 }
 
+export async function getProjectById(projectId: string): Promise<Project | undefined> {
+  return queryRow<Project>(
+    `
+      SELECT *
+      FROM projects
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [projectId]
+  );
+}
+
 export async function updateProject(
   projectId: string,
   userId: string,

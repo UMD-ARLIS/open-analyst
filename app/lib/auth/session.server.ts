@@ -1,6 +1,13 @@
 import { createCookieSessionStorage } from 'react-router';
 
-const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret-change-in-production';
+const SESSION_SECRET = (() => {
+  const configured = String(process.env.SESSION_SECRET || '').trim();
+  if (configured) return configured;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('SESSION_SECRET must be set in production');
+  }
+  return 'dev-secret-change-in-production';
+})();
 
 export const sessionStorage = createCookieSessionStorage({
   cookie: {
@@ -54,14 +61,10 @@ export async function getSessionUser(request: Request): Promise<SessionUser | nu
   };
 }
 
-export async function commitSession(
-  session: Awaited<ReturnType<typeof getSession>>,
-) {
+export async function commitSession(session: Awaited<ReturnType<typeof getSession>>) {
   return sessionStorage.commitSession(session);
 }
 
-export async function destroySession(
-  session: Awaited<ReturnType<typeof getSession>>,
-) {
+export async function destroySession(session: Awaited<ReturnType<typeof getSession>>) {
   return sessionStorage.destroySession(session);
 }

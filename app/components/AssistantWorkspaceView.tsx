@@ -1,16 +1,6 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useRevalidator, useSearchParams } from 'react-router';
-import {
-  BookOpen,
-  Bot,
-  ListTodo,
-  MessageSquare,
-  PanelRightOpen,
-  PenTool,
-  Search,
-  ShieldAlert,
-  Square,
-} from 'lucide-react';
+import { BookOpen, Bot, ListTodo, PanelRightOpen, ShieldAlert, Square } from 'lucide-react';
 import { useAnalystStream } from '~/hooks/useAnalystStream';
 import { useAppStore } from '~/lib/store';
 import type { Message } from '~/lib/types';
@@ -98,6 +88,12 @@ function prettifyStatus(value: string | undefined): string {
   return String(value || 'pending')
     .replace(/_/g, ' ')
     .trim();
+}
+
+function workflowStateLabel(value: AnalysisMode): string {
+  if (value === 'product') return 'deliverable';
+  if (value === 'research') return 'research';
+  return 'lightweight';
 }
 
 function summarizeApproval(value: Record<string, unknown>, index: number): string {
@@ -324,7 +320,7 @@ export function AssistantWorkspaceView({
     const memoryCount = workspaceContext.memories.active.length;
     return `${connectorCount} connectors, ${availableSkillCount} skills available (${enabledSkillCount} enabled), ${memoryCount} memories active in project context`;
   }, [workspaceContext]);
-  const [selectedMode, setSelectedMode] = useState<AnalysisMode>(
+  const [currentMode, setCurrentMode] = useState<AnalysisMode>(
     normalizeAnalysisMode(threadMetadata?.analysisMode)
   );
   const resolvedCollectionId = normalizeUuid(
@@ -332,7 +328,7 @@ export function AssistantWorkspaceView({
       ? (activeCollectionId ?? threadMetadata?.collectionId ?? null)
       : activeCollectionId
   );
-  const resolvedAnalysisMode = selectedMode;
+  const resolvedAnalysisMode = currentMode;
   const requestMetadata = useMemo(
     () => ({
       project_id: projectId,
@@ -343,7 +339,7 @@ export function AssistantWorkspaceView({
   );
 
   useEffect(() => {
-    setSelectedMode(normalizeAnalysisMode(threadMetadata?.analysisMode));
+    setCurrentMode(normalizeAnalysisMode(threadMetadata?.analysisMode));
   }, [threadMetadata?.analysisMode, initialAgentThreadId]);
 
   useEffect(() => {
@@ -362,34 +358,6 @@ export function AssistantWorkspaceView({
     threadMetadata?.collectionId,
   ]);
 
-  useEffect(() => {
-    if (!initialAgentThreadId) return;
-    const nextMode = normalizeAnalysisMode(threadMetadata?.analysisMode);
-    if (nextMode === selectedMode) return;
-    void fetch(`${agentServerUrl}/threads/${initialAgentThreadId}`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify({
-        metadata: {
-          project_id: projectId,
-          collection_id: resolvedCollectionId,
-          analysis_mode: selectedMode,
-        },
-      }),
-    }).catch((error) => {
-      console.error('[AssistantWorkspaceView] mode patch failed', error);
-    });
-  }, [
-    agentServerUrl,
-    initialAgentThreadId,
-    projectId,
-    resolvedCollectionId,
-    selectedMode,
-    threadMetadata?.analysisMode,
-  ]);
   const pendingPromptFromNavigation = useMemo(() => {
     const state = location.state as { pendingPrompt?: unknown } | null;
     return typeof state?.pendingPrompt === 'string' && state.pendingPrompt.trim()
@@ -568,13 +536,13 @@ export function AssistantWorkspaceView({
         initialAgentThreadId
       ) {
         const targetMode = normalizeAnalysisMode(
-          resumeValue.target_mode || interrupt?.value?.target_mode || selectedMode
+          resumeValue.target_mode || interrupt?.value?.target_mode || currentMode
         );
         nextMetadata = {
           ...requestMetadata,
           analysis_mode: targetMode,
         };
-        setSelectedMode(targetMode);
+        setCurrentMode(targetMode);
         const response = await fetch(`${agentServerUrl}/threads/${initialAgentThreadId}`, {
           method: 'PATCH',
           headers: {
@@ -725,23 +693,26 @@ export function AssistantWorkspaceView({
     hasAutoSubmittedPendingPromptRef.current = true;
     void (async () => {
       try {
-        await stream.submit({ messages: [{ role: 'human', content: pendingPromptFromNavigation }] }, {
-          optimisticValues: (previous: Record<string, unknown>) => ({
-            ...previous,
-            messages: [
-              ...(Array.isArray(previous.messages) ? previous.messages : []),
-              {
-                id: `optimistic-${Date.now()}`,
-                type: 'human',
-                content: pendingPromptFromNavigation,
-              },
-            ],
-          }),
-          metadata: requestMetadata,
-          streamSubgraphs: true,
-          onDisconnect: 'continue',
-          streamResumable: true,
-        } as StreamSubmitOptions);
+        await stream.submit(
+          { messages: [{ role: 'human', content: pendingPromptFromNavigation }] },
+          {
+            optimisticValues: (previous: Record<string, unknown>) => ({
+              ...previous,
+              messages: [
+                ...(Array.isArray(previous.messages) ? previous.messages : []),
+                {
+                  id: `optimistic-${Date.now()}`,
+                  type: 'human',
+                  content: pendingPromptFromNavigation,
+                },
+              ],
+            }),
+            metadata: requestMetadata,
+            streamSubgraphs: true,
+            onDisconnect: 'continue',
+            streamResumable: true,
+          } as StreamSubmitOptions
+        );
         navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
       } catch (error) {
         hasAutoSubmittedPendingPromptRef.current = false;
@@ -968,11 +939,7 @@ export function AssistantWorkspaceView({
                   <p className="mx-auto max-w-2xl text-sm text-text-secondary">
                     {isProjectHome
                       ? 'You are back at the main project workspace. Start a fresh thread here, open sources from the right panel, or adjust settings and memory from the left panel.'
-                      : selectedMode === 'chat'
-                        ? 'Use Chat mode for conversation, quick questions, and read-only project context. Switch to Research or Product when you want a structured workflow.'
-                        : selectedMode === 'research'
-                          ? 'Research mode is for structured retrieval, source review, synthesis, and confidence/gap analysis.'
-                          : 'Product mode is for planning, drafting, packaging, and publishing deliverables from your project research.'}
+                      : 'Work in one continuous analyst thread. The assistant will shift into retrieval, evidence review, drafting, and publication phases as needed, and will ask for approval before durable or high-impact actions.'}
                   </p>
                   {isProjectHome ? (
                     <div className="mt-5 flex items-center justify-center gap-3">
@@ -1029,34 +996,8 @@ export function AssistantWorkspaceView({
       <div className="border-t border-border bg-background px-6 py-4">
         <div className="mx-auto max-w-4xl">
           <div className="mb-3 flex items-center gap-2">
-            <div className="flex items-center gap-2 rounded-full border border-border bg-surface px-1 py-1">
-              {(
-                [
-                  { id: 'chat', label: 'Chat', icon: MessageSquare },
-                  { id: 'research', label: 'Research', icon: Search },
-                  { id: 'product', label: 'Product', icon: PenTool },
-                ] as const
-              ).map((mode) => {
-                const Icon = mode.icon;
-                const active = selectedMode === mode.id;
-                return (
-                  <button
-                    key={mode.id}
-                    type="button"
-                    onClick={() => setSelectedMode(mode.id)}
-                    className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-                      active
-                        ? 'bg-accent-muted text-accent'
-                        : 'text-text-muted hover:text-text-primary'
-                    }`}
-                  >
-                    <span className="inline-flex items-center gap-1.5">
-                      <Icon className="h-3.5 w-3.5" />
-                      {mode.label}
-                    </span>
-                  </button>
-                );
-              })}
+            <div className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-text-secondary">
+              Workflow state: {workflowStateLabel(currentMode)}
             </div>
             {stream.isLoading ? (
               <button

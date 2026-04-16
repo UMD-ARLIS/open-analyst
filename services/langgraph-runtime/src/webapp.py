@@ -170,16 +170,16 @@ def build_runtime_system_prompt(runtime_context: dict[str, Any], analysis_mode: 
     if mode == "chat":
         lines.extend(
             [
-                "Chat mode is active.",
-                "Stay conversational and lightweight.",
-                "You may inspect existing project context read-only, but do not create visible plans, delegate to subagents, stage retrieval workflows, or publish artifacts in this mode.",
-                "If the user asks for structured evidence gathering or deliverable production, call request_mode_switch to ask the user for approval before escalating into Research or Product mode.",
+                "Lightweight conversation is active.",
+                "Stay concise when the request is simple, but do not treat chat as a hard wall.",
+                "You may delegate, retrieve evidence, and build a visible plan when the task actually requires it.",
+                "If the work needs heavier retrieval or deliverable production, call request_mode_switch to ask for approval before escalating the workflow state on this same thread.",
             ]
         )
     elif mode == "research":
         lines.extend(
             [
-                "Research mode is active.",
+                "Research workflow is active.",
                 "Use structured retrieval and synthesis.",
                 "For multi-step work, create a visible plan, gather grounded evidence, and synthesize only after retrieval has produced enough support.",
             ]
@@ -187,10 +187,10 @@ def build_runtime_system_prompt(runtime_context: dict[str, Any], analysis_mode: 
     elif mode == "product":
         lines.extend(
             [
-                "Product mode is active.",
-                "Treat this as deliverable-oriented work.",
+                "Deliverable workflow is active.",
+                "Treat this as output-oriented work.",
                 "Use structured planning, drafting, critique, packaging, and publication behavior.",
-                "If key framing is missing for a product request, ask concise clarifying questions before substantial drafting.",
+                "If key framing is missing for a deliverable request, ask concise clarifying questions before substantial drafting.",
             ]
         )
     return " ".join(lines)

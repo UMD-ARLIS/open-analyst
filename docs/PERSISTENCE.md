@@ -4,25 +4,21 @@ This document describes where Open Analyst persists data today. It is intentiona
 
 ## Quick Map
 
-| Layer | What persists there | Primary code |
-| --- | --- | --- |
-| Browser `localStorage` | theme, browser API/model config fallback, panel widths, canvas draft backup | [browser-config.ts](/home/ubuntu/code/ARLIS/open-analyst/app/lib/browser-config.ts), [theme.ts](/home/ubuntu/code/ARLIS/open-analyst/app/lib/theme.ts), [CanvasPanel.tsx](/home/ubuntu/code/ARLIS/open-analyst/app/components/CanvasPanel.tsx) |
-| Browser cookie | authenticated session pointer and minimal user identity | [session.server.ts](/home/ubuntu/code/ARLIS/open-analyst/app/lib/auth/session.server.ts) |
-| Web app PostgreSQL | projects, collections, documents, settings, project profiles, artifacts, evidence, source ingest, canvas docs, server-side auth tokens | [schema.ts](/home/ubuntu/code/ARLIS/open-analyst/app/lib/db/schema.ts), query modules under [app/lib/db/queries](/home/ubuntu/code/ARLIS/open-analyst/app/lib/db/queries) |
-| Runtime PostgreSQL | runtime threads, runs, replayable stream events, pending/resolved interrupts | [runtime_db.py](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/runtime_db.py) |
-| LangGraph checkpointer/store | graph checkpoints and durable project memory namespaces | [runtime_engine.py](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/runtime_engine.py), [runtime_context.py](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/runtime_context.py) |
-| Local filesystem | workspace files, local artifacts, credentials, MCP config, skills config, logs | [helpers.server.ts](/home/ubuntu/code/ARLIS/open-analyst/app/lib/helpers.server.ts), [project-storage.server.ts](/home/ubuntu/code/ARLIS/open-analyst/app/lib/project-storage.server.ts) |
-| S3 | project artifacts when `ARTIFACT_STORAGE_BACKEND=s3` or project override selects S3 | [project-storage.server.ts](/home/ubuntu/code/ARLIS/open-analyst/app/lib/project-storage.server.ts), [artifacts.server.ts](/home/ubuntu/code/ARLIS/open-analyst/app/lib/artifacts.server.ts) |
-| Analyst MCP local/PG storage | paper metadata index and raw acquisition content | [config.py](/home/ubuntu/code/ARLIS/open-analyst/services/analyst-mcp/src/analyst_mcp/config.py), [paper_store.py](/home/ubuntu/code/ARLIS/open-analyst/services/analyst-mcp/src/analyst_mcp/paper_store.py) |
+| Layer                        | What persists there                                                                                                                    | Primary code                                                                                                                                                                                                             |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Browser `localStorage`       | theme, panel widths, canvas draft backup                                                                                               | [theme.ts](/home/ubuntu/code/ARLIS/open-analyst/app/lib/theme.ts), [CanvasPanel.tsx](/home/ubuntu/code/ARLIS/open-analyst/app/components/CanvasPanel.tsx)                                                                |
+| Browser cookie               | authenticated session pointer and minimal user identity                                                                                | [session.server.ts](/home/ubuntu/code/ARLIS/open-analyst/app/lib/auth/session.server.ts)                                                                                                                                 |
+| Web app PostgreSQL           | projects, collections, documents, settings, project profiles, artifacts, evidence, source ingest, canvas docs, server-side auth tokens | [schema.ts](/home/ubuntu/code/ARLIS/open-analyst/app/lib/db/schema.ts), query modules under [app/lib/db/queries](/home/ubuntu/code/ARLIS/open-analyst/app/lib/db/queries)                                                |
+| Runtime PostgreSQL           | runtime threads, runs, replayable stream events, pending/resolved interrupts                                                           | [runtime_db.py](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/runtime_db.py)                                                                                                                       |
+| LangGraph checkpointer/store | graph checkpoints and durable project memory namespaces                                                                                | [runtime_engine.py](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/runtime_engine.py), [runtime_context.py](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/runtime_context.py) |
+| Local filesystem             | workspace files, local artifacts, credentials, MCP config, skills config, logs                                                         | [helpers.server.ts](/home/ubuntu/code/ARLIS/open-analyst/app/lib/helpers.server.ts), [project-storage.server.ts](/home/ubuntu/code/ARLIS/open-analyst/app/lib/project-storage.server.ts)                                 |
+| S3                           | project artifacts when `ARTIFACT_STORAGE_BACKEND=s3` or project override selects S3                                                    | [project-storage.server.ts](/home/ubuntu/code/ARLIS/open-analyst/app/lib/project-storage.server.ts), [artifacts.server.ts](/home/ubuntu/code/ARLIS/open-analyst/app/lib/artifacts.server.ts)                             |
+| Analyst MCP local/PG storage | paper metadata index and raw acquisition content                                                                                       | [config.py](/home/ubuntu/code/ARLIS/open-analyst/services/analyst-mcp/src/analyst_mcp/config.py), [paper_store.py](/home/ubuntu/code/ARLIS/open-analyst/services/analyst-mcp/src/analyst_mcp/paper_store.py)             |
 
 ## Browser Persistence
 
 ### `localStorage`
 
-- `open-analyst.browser.config.v1`
-  - Stores browser-side fallback model/provider/base URL config.
-  - This is no longer authoritative for the active model; the DB-backed settings loader wins when available.
-  - Code: [browser-config.ts](/home/ubuntu/code/ARLIS/open-analyst/app/lib/browser-config.ts)
 - `open-analyst.theme`
   - Stores light/dark preference.
   - Code: [theme.ts](/home/ubuntu/code/ARLIS/open-analyst/app/lib/theme.ts)
