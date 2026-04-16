@@ -30,6 +30,7 @@ data:
   # Auth (Keycloak)
   AUTH_ENABLED: "true"
   KEYCLOAK_URL: "http://keycloak:8080"
+  KEYCLOAK_PUBLIC_URL: "https://analyst.insights.arlis.umd.edu"
   KEYCLOAK_REALM: "open-analyst"
   KEYCLOAK_CLIENT_ID: "open-analyst-web"
 

@@ -34,8 +34,10 @@ spec:
               value: xforwarded
             - name: KC_HTTP_ENABLED
               value: "true"
+            - name: KC_HOSTNAME
+              value: analyst.insights.arlis.umd.edu
             - name: KC_HOSTNAME_STRICT
-              value: "false"
+              value: "true"
             - name: KEYCLOAK_ADMIN
               value: admin
             - name: KEYCLOAK_ADMIN_PASSWORD

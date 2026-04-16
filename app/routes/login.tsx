@@ -1,9 +1,9 @@
 import type { LoaderFunctionArgs } from 'react-router';
 import { redirect, Form } from 'react-router';
-import { getSessionUser } from '~/lib/auth/session.server';
+import { getAuthenticatedUser } from '~/lib/auth/require-user.server';
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const user = await getSessionUser(request);
+  const user = await getAuthenticatedUser(request);
   if (user) return redirect('/');
   return null;
 }

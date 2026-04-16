@@ -50,14 +50,25 @@ export async function getSessionUser(request: Request): Promise<SessionUser | nu
 
   // Hydrate tokens from server-side store
   const tokens = await getTokens(cookieUser.userId);
+  const legacyCookieUser = cookieUser as SessionUser;
+  const hasLegacyCookieTokens =
+    typeof legacyCookieUser.accessToken === 'string' &&
+    legacyCookieUser.accessToken.length > 0 &&
+    typeof legacyCookieUser.refreshToken === 'string' &&
+    legacyCookieUser.refreshToken.length > 0;
+
+  if (!tokens && !hasLegacyCookieTokens) {
+    return null;
+  }
+
   return {
     userId: cookieUser.userId,
     email: cookieUser.email,
     name: cookieUser.name,
-    accessToken: tokens?.accessToken || (cookieUser as SessionUser).accessToken || '',
-    refreshToken: tokens?.refreshToken || (cookieUser as SessionUser).refreshToken || '',
-    idToken: tokens?.idToken || (cookieUser as SessionUser).idToken || '',
-    expiresAt: tokens?.expiresAt || (cookieUser as SessionUser).expiresAt || 0,
+    accessToken: tokens?.accessToken || legacyCookieUser.accessToken || '',
+    refreshToken: tokens?.refreshToken || legacyCookieUser.refreshToken || '',
+    idToken: tokens?.idToken || legacyCookieUser.idToken || '',
+    expiresAt: tokens?.expiresAt || legacyCookieUser.expiresAt || 0,
   };
 }
 
