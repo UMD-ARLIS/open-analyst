@@ -38,6 +38,7 @@ kind load docker-image open-analyst-analyst-mcp:local --name "$CLUSTER_NAME"
 
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 kubectl delete secret open-analyst-secrets -n "$NAMESPACE" --ignore-not-found
+INTERNAL_API_KEY="${OPEN_ANALYST_INTERNAL_API_KEY:-${SESSION_SECRET:-local-dev-internal-api-key}}"
 kubectl create secret generic open-analyst-secrets -n "$NAMESPACE" \
   --from-literal=DATABASE_URL="${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/open_analyst}" \
   --from-literal=CHECKPOINT_POSTGRES_URI="${CHECKPOINT_POSTGRES_URI:-postgresql://postgres:postgres@postgres:5432/open_analyst}" \
@@ -45,6 +46,7 @@ kubectl create secret generic open-analyst-secrets -n "$NAMESPACE" \
   --from-literal=LITELLM_API_KEY="${LITELLM_API_KEY:-local-dev}" \
   --from-literal=ANALYST_MCP_LITELLM_API_KEY="${ANALYST_MCP_LITELLM_API_KEY:-${LITELLM_API_KEY:-local-dev}}" \
   --from-literal=ANALYST_MCP_API_KEY="${ANALYST_MCP_API_KEY:-change-me}" \
+  --from-literal=OPEN_ANALYST_INTERNAL_API_KEY="$INTERNAL_API_KEY" \
   --from-literal=SESSION_SECRET="${SESSION_SECRET:-local-dev-session-secret}" \
   --from-literal=KEYCLOAK_CLIENT_SECRET="${KEYCLOAK_CLIENT_SECRET:-local-dev-client-secret}" \
   --from-literal=TAVILY_API_KEY="${TAVILY_API_KEY:-}" \

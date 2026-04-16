@@ -15,7 +15,7 @@ from langgraph.types import Command
 from graph import build_runtime_graph
 from pg_checkpointer import create_checkpointer
 from pg_store import create_store
-from runtime_context import runtime_context_service
+from runtime_context import derive_api_base_url, runtime_context_service
 from runtime_db import runtime_db
 from telemetry import get_tracer
 
@@ -465,11 +465,12 @@ class RuntimeEngine:
         collection_id = str(metadata.get("collection_id") or "").strip() or None
         analysis_mode = str(metadata.get("analysis_mode") or "chat").strip() or "chat"
         prompt = _latest_prompt(input_messages)
+        api_base_url = derive_api_base_url(origin=request_base_url, fallback_host=request_base_url)
         context = await runtime_context_service.build_context(
             project_id,
             collection_id=collection_id,
             analysis_mode=analysis_mode,
-            api_base_url=request_base_url,
+            api_base_url=api_base_url,
             prompt=prompt,
             messages=input_messages,
         )

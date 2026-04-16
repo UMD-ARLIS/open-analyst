@@ -8,6 +8,7 @@ import os
 import random
 import re
 import shlex
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -90,6 +91,7 @@ CONSOLIDATED_BRANCH_PREVIEW_LIMIT = 3
 CONSOLIDATED_IMPORT_CHUNK_SIZE = 25
 _MODEL_CONCURRENCY_SEMAPHORE: asyncio.Semaphore | None = None
 _MODEL_RATE_LIMITER: Any | None = None
+_WEBAPP_API_RETRY_ATTEMPTS = 3
 
 
 def _json_object(value: Any) -> dict[str, Any]:
@@ -1342,10 +1344,7 @@ def _approval_unavailable(tool_name: str) -> str:
 
 
 def _webapp_api_headers(project_id: str) -> dict[str, str]:
-    api_key = (
-        _trimmed(getattr(settings, "open_analyst_internal_api_key", ""))
-        or _trimmed(getattr(settings, "analyst_mcp_api_key", ""))
-    )
+    api_key = _trimmed(getattr(settings, "open_analyst_internal_api_key", ""))
     headers = {"Accept": "application/json"}
     if api_key:
         headers["x-open-analyst-internal-key"] = api_key
@@ -1354,19 +1353,81 @@ def _webapp_api_headers(project_id: str) -> dict[str, str]:
     return headers
 
 
+def _webapp_api_timeout() -> httpx.Timeout:
+    total = max(float(settings.request_timeout_seconds or 120.0), 5.0)
+    return httpx.Timeout(
+        timeout=total,
+        connect=min(total, 10.0),
+        read=total,
+        write=total,
+        pool=min(total, 5.0),
+    )
+
+
+def _webapp_request_error_detail(exc: Exception) -> str:
+    return _clean_text(str(exc), limit=260) or exc.__class__.__name__
+
+
+def _webapp_api_request_sync(
+    method: str,
+    url: str,
+    *,
+    headers: dict[str, str],
+    json_body: dict[str, Any] | None = None,
+) -> httpx.Response:
+    last_exc: Exception | None = None
+    for attempt in range(1, _WEBAPP_API_RETRY_ATTEMPTS + 1):
+        try:
+            with httpx.Client(timeout=_webapp_api_timeout(), trust_env=False) as client:
+                return client.request(method, url, headers=headers, json=json_body)
+        except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
+            last_exc = exc
+            if attempt >= _WEBAPP_API_RETRY_ATTEMPTS:
+                raise
+            delay = min(0.25 * (2 ** (attempt - 1)) + random.uniform(0.0, 0.2), 1.5)
+            logger.warning(
+                "Webapp API %s %s transient failure on attempt %s/%s: %s",
+                method,
+                url,
+                attempt,
+                _WEBAPP_API_RETRY_ATTEMPTS,
+                _webapp_request_error_detail(exc),
+            )
+            time.sleep(delay)
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError(f"Webapp API {method} {url} failed without an exception")
+
+
+async def _webapp_api_request(
+    method: str,
+    url: str,
+    *,
+    headers: dict[str, str],
+    json_body: dict[str, Any] | None = None,
+) -> httpx.Response:
+    return await asyncio.to_thread(
+        _webapp_api_request_sync,
+        method,
+        url,
+        headers=headers,
+        json_body=json_body,
+    )
+
+
 async def _list_canvas_documents_api(api_base_url: str, project_id: str) -> list[dict[str, Any]]:
     api_base_url = str(api_base_url or "").rstrip("/")
     if not api_base_url:
         return []
     headers = _webapp_api_headers(project_id)
     try:
-        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-            response = await client.get(
-                f"{api_base_url}/api/projects/{project_id}/canvas-documents",
-                headers=headers,
-            )
-            response.raise_for_status()
-            payload = response.json()
+        response = await _webapp_api_request(
+            "GET",
+            f"{api_base_url}/api/projects/{project_id}/canvas-documents",
+            headers=headers,
+        )
+        response.raise_for_status()
+        payload = response.json()
         documents = payload.get("documents") if isinstance(payload, dict) else []
         return documents if isinstance(documents, list) else []
     except Exception as exc:
@@ -1411,15 +1472,14 @@ async def _save_canvas_document_api(
                 "content": {"markdown": markdown},
                 "metadata": {"source": "deepagents-runtime"},
             }
-        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-            response = await client.request(
-                method,
-                f"{api_base_url}/api/projects/{project_id}/canvas-documents",
-                json=body,
-                headers=headers,
-            )
-            response.raise_for_status()
-            payload = response.json()
+        response = await _webapp_api_request(
+            method,
+            f"{api_base_url}/api/projects/{project_id}/canvas-documents",
+            headers=headers,
+            json_body=body,
+        )
+        response.raise_for_status()
+        payload = response.json()
         document = payload.get("document") if isinstance(payload, dict) else None
         return document if isinstance(document, dict) else None
     except Exception as exc:
@@ -1448,19 +1508,19 @@ async def _publish_canvas_document_api(
         document_id = str(target.get("id") or "").strip()
         if not document_id:
             return None
-        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-            response = await client.post(
-                f"{api_base_url}/api/projects/{project_id}/canvas-documents/{document_id}/publish",
-                json={
-                    "addToSources": add_to_sources,
-                    "changeSummary": change_summary,
-                    "collectionName": collection_name or None,
-                    "collectionId": collection_id,
-                },
-                headers=headers,
-            )
-            response.raise_for_status()
-            payload = response.json()
+        response = await _webapp_api_request(
+            "POST",
+            f"{api_base_url}/api/projects/{project_id}/canvas-documents/{document_id}/publish",
+            headers=headers,
+            json_body={
+                "addToSources": add_to_sources,
+                "changeSummary": change_summary,
+                "collectionName": collection_name or None,
+                "collectionId": collection_id,
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
         return payload if isinstance(payload, dict) else None
     except Exception as exc:
         logger.warning("Publish canvas document API call failed: %s", exc)
@@ -1488,14 +1548,14 @@ async def _publish_workspace_file_api(
             "collectionId": collection_id,
             "addToSources": add_to_sources,
         }
-        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-            response = await client.post(
-                f"{api_base_url}/api/projects/{project_id}/artifacts/capture",
-                json=payload,
-                headers=headers,
-            )
-            response.raise_for_status()
-            body = response.json()
+        response = await _webapp_api_request(
+            "POST",
+            f"{api_base_url}/api/projects/{project_id}/artifacts/capture",
+            headers=headers,
+            json_body=payload,
+        )
+        response.raise_for_status()
+        body = response.json()
         if not isinstance(body, dict):
             return None
         artifact = body.get("artifact")
@@ -1613,11 +1673,22 @@ async def _stage_source_ingest_api(
         }
     url = f"{api_base_url}/api/projects/{project_id}/source-ingest"
     headers = _webapp_api_headers(project_id)
+    if "x-open-analyst-internal-key" not in headers:
+        logger.error("Stage source ingest skipped: internal API key is not configured")
+        return {
+            "status": "error",
+            "error": "Stage source ingest skipped because the runtime internal API key is missing.",
+            "details": {"reason": "missing_internal_api_key", "url": url},
+        }
     try:
-        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-            response = await client.post(url, json=payload, headers=headers)
-            response.raise_for_status()
-            body = response.json()
+        response = await _webapp_api_request(
+            "POST",
+            url,
+            headers=headers,
+            json_body=payload,
+        )
+        response.raise_for_status()
+        body = response.json()
         if not isinstance(body, dict) or "batch" not in body:
             logger.error(
                 "Stage source ingest returned unexpected payload (keys=%s): %s",
@@ -1663,6 +1734,8 @@ async def _stage_source_ingest_api(
             "details": {
                 "reason": "request_error",
                 "exception_type": exc.__class__.__name__,
+                "url": url,
+                "item_count": len(payload.get("items") or []) if isinstance(payload.get("items"), list) else 0,
             },
         }
 
@@ -1691,11 +1764,17 @@ async def _approve_source_batch_api(
         }
     url = f"{api_base_url}/api/projects/{project_id}/source-ingest/{batch_id}/approve"
     headers = _webapp_api_headers(project_id)
+    if "x-open-analyst-internal-key" not in headers:
+        logger.error("Approve source batch skipped: internal API key is not configured")
+        return {
+            "status": "error",
+            "error": "Approve source batch skipped because the runtime internal API key is missing.",
+            "details": {"reason": "missing_internal_api_key", "url": url},
+        }
     try:
-        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-            response = await client.post(url, headers=headers)
-            response.raise_for_status()
-            body = response.json()
+        response = await _webapp_api_request("POST", url, headers=headers)
+        response.raise_for_status()
+        body = response.json()
         if isinstance(body, dict):
             return body
         return {

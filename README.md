@@ -65,6 +65,7 @@ Copy [`.env.example`](/home/ubuntu/code/ARLIS/open-analyst/.env.example) to [`.e
 - `LITELLM_CHAT_MODEL`
 - `LITELLM_EMBEDDING_MODEL`
 - `ANALYST_MCP_API_KEY`
+- `OPEN_ANALYST_INTERNAL_API_KEY`
 
 Common local defaults:
 

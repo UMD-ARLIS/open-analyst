@@ -1,12 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 
 function resolveInternalApiKey(): string {
-  return String(
-    process.env.OPEN_ANALYST_INTERNAL_API_KEY ||
-      process.env.ANALYST_MCP_API_KEY ||
-      process.env.SESSION_SECRET ||
-      ''
-  ).trim();
+  return String(process.env.OPEN_ANALYST_INTERNAL_API_KEY || '').trim();
 }
 
 function safeCompare(actual: string, expected: string): boolean {

@@ -24,6 +24,7 @@ Minimum:
 - `LITELLM_CHAT_MODEL`
 - `LITELLM_EMBEDDING_MODEL`
 - `ANALYST_MCP_API_KEY`
+- `OPEN_ANALYST_INTERNAL_API_KEY`
 - `LANGGRAPH_RUNTIME_URL`
 
 Optional but recommended:
@@ -62,6 +63,7 @@ The app uses Keycloak for OIDC authentication. Required env vars:
 
 - `AUTH_ENABLED` — `true` to enforce login, `false` for local dev without auth
 - `SESSION_SECRET` — random string for signing session cookies
+- `OPEN_ANALYST_INTERNAL_API_KEY` — shared secret used only for trusted runtime/webapp internal callbacks
 - `KEYCLOAK_URL` — internal Keycloak URL (e.g., `http://keycloak:8080`)
 - `KEYCLOAK_PUBLIC_URL` — browser-facing Keycloak base URL. In EKS this can stay unset and route through the app domain; for local auth use `http://localhost:8080`.
 - `KEYCLOAK_REALM` — Keycloak realm name (default: `open-analyst`)
