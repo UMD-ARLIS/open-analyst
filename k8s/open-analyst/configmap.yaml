@@ -18,6 +18,7 @@ data:
   # LiteLLM gateway (external, already persistent)
   LITELLM_BASE_URL: "https://gateway.ai-ops.umd-arlis.org"
   LITELLM_CHAT_MODEL: "bedrock-claude-sonnet-4"
+  LITELLM_FALLBACK_CHAT_MODELS: "bedrock-claude-opus-4.6,bedrock-llama3-70b"
   LITELLM_EMBEDDING_MODEL: "bedrock-titan-embed-text"
 
   # Analyst MCP config

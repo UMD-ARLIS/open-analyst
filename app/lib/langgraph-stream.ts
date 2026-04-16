@@ -104,18 +104,52 @@ export class MessageTupleManager {
 }
 
 function computeToolCallState(result: MessageLike | undefined, impliedCompleted: boolean) {
-  if (result) return result.status === 'error' ? 'error' : 'completed';
+  if (result) {
+    const content = normalizeToolResultContent(result.content).trim().toLowerCase();
+    const isImplicitError =
+      result.status === 'error' ||
+      content.startsWith('the model provider is temporarily unavailable') ||
+      content.startsWith('the model provider is temporarily rate limited');
+    return isImplicitError ? 'error' : 'completed';
+  }
   if (impliedCompleted) return 'completed';
   return 'pending';
+}
+
+function normalizeToolResultContent(content: unknown) {
+  if (typeof content === 'string') return content;
+  try {
+    return JSON.stringify(content);
+  } catch {
+    return String(content ?? '');
+  }
 }
 
 function getToolCallsWithResults(messages: MessageLike[]) {
   const results: Array<Record<string, unknown>> = [];
   const toolResultsById = new Map<string, MessageLike>();
+  const inferredToolResultsById = new Map<string, MessageLike>();
+  const pendingSubagentToolCallIds: string[] = [];
 
-  for (const message of messages) {
+  for (let messageIndex = 0; messageIndex < messages.length; messageIndex += 1) {
+    const message = messages[messageIndex];
+    if (message.type === 'ai' && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+      for (const call of message.tool_calls) {
+        const typedCall = (call || {}) as { id?: string; name?: string };
+        if (typedCall.id && typedCall.name === 'task') {
+          pendingSubagentToolCallIds.push(typedCall.id);
+        }
+      }
+    }
     if (message.type === 'tool' && typeof message.tool_call_id === 'string') {
       toolResultsById.set(message.tool_call_id, message);
+      continue;
+    }
+    if (message.type === 'tool' && pendingSubagentToolCallIds.length > 0) {
+      const nextToolCallId = pendingSubagentToolCallIds.shift();
+      if (nextToolCallId) {
+        inferredToolResultsById.set(nextToolCallId, message);
+      }
     }
   }
 
@@ -135,7 +169,9 @@ function getToolCallsWithResults(messages: MessageLike[]) {
 
     message.tool_calls.forEach((call, index) => {
       const typedCall = (call || {}) as { id?: string; name?: string; args?: Record<string, unknown> };
-      const result = typedCall.id ? toolResultsById.get(typedCall.id) : undefined;
+      const result = typedCall.id
+        ? toolResultsById.get(typedCall.id) ?? inferredToolResultsById.get(typedCall.id)
+        : undefined;
       results.push({
         id: typedCall.id ?? `${String(message.id || 'unknown')}-${index}`,
         call: typedCall,
@@ -481,53 +517,70 @@ export class SubagentManager {
 
   reconstructFromMessages(messages: MessageLike[], options?: { skipIfPopulated?: boolean }) {
     if (options?.skipIfPopulated && this.subagents.size > 0) return;
-
-    const toolResults = new Map<string, { content: string; status: 'success' | 'error' }>();
-    for (const message of messages) {
-      if (message.type === 'tool' && typeof message.tool_call_id === 'string') {
-        toolResults.set(message.tool_call_id, {
-          content: typeof message.content === 'string' ? message.content : JSON.stringify(message.content),
-          status: message.status === 'error' ? 'error' : 'success',
-        });
-      }
-    }
-
+    const toolCallsWithResults = getToolCallsWithResults(messages);
     let hasChanges = false;
-    for (const message of messages) {
-      if (message.type !== 'ai' || !Array.isArray(message.tool_calls)) continue;
-      for (const toolCall of message.tool_calls) {
-        const typedCall = (toolCall || {}) as { id?: string; name?: string; args?: unknown };
-        if (!typedCall.id || !this.isSubagentToolCall(typedCall.name) || this.subagents.has(typedCall.id)) continue;
-        const parsedArgs = this.parseArgs(typedCall.args);
-        if (!this.isValidSubagentType(parsedArgs.subagent_type)) continue;
+    for (const entry of toolCallsWithResults) {
+      const typedCall = (entry.call || {}) as { id?: string; name?: string; args?: unknown };
+      if (!typedCall.id || !this.isSubagentToolCall(typedCall.name)) continue;
+      const parsedArgs = this.parseArgs(typedCall.args);
+      if (!this.isValidSubagentType(parsedArgs.subagent_type)) continue;
 
-        const toolResult = toolResults.get(typedCall.id);
-        const status = !toolResult ? 'running' : toolResult.status === 'error' ? 'error' : 'complete';
+      const toolResult = (entry.result || null) as MessageLike | null;
+      const nextStatus =
+        entry.state === 'error' ? 'error' : entry.state === 'completed' ? 'complete' : 'running';
+      const nextResult =
+        toolResult && nextStatus === 'complete' ? normalizeToolResultContent(toolResult.content) : null;
+      const nextError =
+        toolResult && nextStatus === 'error' ? normalizeToolResultContent(toolResult.content) : null;
+      const existing = this.subagents.get(typedCall.id);
+      const nextAiMessageId =
+        entry.aiMessage && typeof (entry.aiMessage as MessageLike).id === 'string'
+          ? String((entry.aiMessage as MessageLike).id)
+          : null;
+
+      if (existing) {
+        const shouldUpdate =
+          existing.status !== nextStatus ||
+          existing.result !== nextResult ||
+          existing.error !== nextError ||
+          existing.aiMessageId !== nextAiMessageId;
+        if (!shouldUpdate) continue;
         this.subagents.set(typedCall.id, {
-          id: typedCall.id,
-          toolCall: {
-            id: typedCall.id,
-            name: typedCall.name,
-            args: {
-              description: parsedArgs.description,
-              subagent_type: parsedArgs.subagent_type,
-              ...parsedArgs,
-            },
-          },
-          status,
-          values: {},
-          result: toolResult && status === 'complete' ? toolResult.content : null,
-          error: toolResult && status === 'error' ? toolResult.content : null,
-          namespace: [],
-          messages: [],
-          aiMessageId: typeof message.id === 'string' ? message.id : null,
-          parentId: null,
-          depth: 0,
-          startedAt: null,
-          completedAt: toolResult ? new Date() : null,
+          ...existing,
+          status: nextStatus,
+          result: nextResult,
+          error: nextError,
+          aiMessageId: nextAiMessageId,
+          completedAt: nextStatus === 'running' ? null : existing.completedAt ?? new Date(),
         });
         hasChanges = true;
+        continue;
       }
+
+      this.subagents.set(typedCall.id, {
+        id: typedCall.id,
+        toolCall: {
+          id: typedCall.id,
+          name: typedCall.name,
+          args: {
+            description: parsedArgs.description,
+            subagent_type: parsedArgs.subagent_type,
+            ...parsedArgs,
+          },
+        },
+        status: nextStatus,
+        values: {},
+        result: nextResult,
+        error: nextError,
+        namespace: [],
+        messages: [],
+        aiMessageId: nextAiMessageId,
+        parentId: null,
+        depth: 0,
+        startedAt: null,
+        completedAt: nextStatus === 'running' ? null : new Date(),
+      });
+      hasChanges = true;
     }
 
     if (hasChanges) this.onSubagentChange?.();

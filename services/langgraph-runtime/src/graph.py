@@ -284,13 +284,35 @@ class ResilientModelMiddleware(AgentMiddleware if AgentMiddleware is not None el
             return await self._invoke_with_retries(request, handler)
         except Exception as primary_exc:
             if _is_retryable_model_error(primary_exc):
+                logger.warning(
+                    "Primary model call failed after retries; attempting fallbacks",
+                    extra={
+                        "model": getattr(request, "model", None) or settings.default_chat_model,
+                        "fallback_models": [getattr(model, "model_name", None) or str(model) for model in self.fallback_models],
+                        "error": str(primary_exc),
+                    },
+                )
                 for fallback_model in self.fallback_models:
                     try:
                         return await self._invoke_with_retries(request, handler, model_override=fallback_model)
                     except Exception as fallback_exc:
+                        logger.warning(
+                            "Fallback model call failed",
+                            extra={
+                                "fallback_model": getattr(fallback_model, "model_name", None) or str(fallback_model),
+                                "error": str(fallback_exc),
+                            },
+                        )
                         if not _is_retryable_model_error(fallback_exc):
                             raise
                 if AIMessage is not None:
+                    logger.warning(
+                        "Returning graceful transient model failure message to agent",
+                        extra={
+                            "model": getattr(request, "model", None) or settings.default_chat_model,
+                            "error": str(primary_exc),
+                        },
+                    )
                     return AIMessage(content=_format_model_transient_failure(primary_exc))
             raise
 
@@ -1452,7 +1474,11 @@ async def _save_canvas_document_api(
         if document_id:
             target = next((d for d in existing if d.get("id") == document_id), None)
         elif len(existing) == 1:
-            target = existing[0]
+            sole = existing[0]
+            sole_title = str(sole.get("title") or "").strip()
+            next_title = str(title or "").strip()
+            if not next_title or sole_title == next_title:
+                target = sole
 
         if target:
             method = "PUT"
@@ -1485,6 +1511,66 @@ async def _save_canvas_document_api(
     except Exception as exc:
         logger.warning("Save canvas document API call failed: %s", exc)
         return None
+
+
+def _extract_canvas_markdown(document: dict[str, Any] | None) -> str:
+    if not isinstance(document, dict):
+        return ""
+    content = document.get("content")
+    if isinstance(content, dict):
+        markdown = content.get("markdown")
+        if isinstance(markdown, str):
+            return markdown
+    if isinstance(content, str):
+        return content
+    return ""
+
+
+async def _append_canvas_document_api(
+    api_base_url: str,
+    project_id: str,
+    markdown_chunk: str,
+    *,
+    title: str = "Analysis Draft",
+    document_id: str | None = None,
+    replace_existing: bool = False,
+) -> dict[str, Any] | None:
+    api_base_url = str(api_base_url or "").rstrip("/")
+    chunk = str(markdown_chunk or "").strip()
+    if not api_base_url or not chunk:
+        return None
+
+    existing = await _list_canvas_documents_api(api_base_url, project_id)
+    target: dict[str, Any] | None = None
+    if document_id:
+        target = next((d for d in existing if d.get("id") == document_id), None)
+    elif len(existing) == 1:
+        sole = existing[0]
+        sole_title = str(sole.get("title") or "").strip()
+        next_title = str(title or "").strip()
+        if not next_title or sole_title == next_title:
+            target = sole
+    elif len(existing) > 1:
+        target = next((d for d in existing if str(d.get("title") or "").strip() == title.strip()), None)
+
+    if target and not replace_existing:
+        current_markdown = _extract_canvas_markdown(target).strip()
+        next_markdown = f"{current_markdown}\n\n{chunk}".strip() if current_markdown else chunk
+        return await _save_canvas_document_api(
+            api_base_url,
+            project_id,
+            markdown=next_markdown,
+            title=title or str(target.get("title") or "Analysis Draft"),
+            document_id=str(target.get("id") or "") or None,
+        )
+
+    return await _save_canvas_document_api(
+        api_base_url,
+        project_id,
+        markdown=chunk,
+        title=title,
+        document_id=str(target.get("id") or "") or None if target and replace_existing else None,
+    )
 
 
 async def _publish_canvas_document_api(
@@ -2929,13 +3015,15 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
 
     @tool
     async def save_canvas_markdown(markdown: str, title: str = "Analysis Draft", document_id: str = "", runtime: ToolRuntime = None) -> str:
-        """Create or update a markdown canvas document for the current project.
+        """Create or replace a markdown canvas document for the current project.
 
         Args:
             markdown: The markdown content to save.
             title: Document title (default "Analysis Draft").
             document_id: Optional ID of an existing canvas document to update.
                          If empty, updates the sole existing document or creates a new one.
+
+        Prefer append_canvas_markdown for long reports written section-by-section.
         """
         cfg = _get_project_config(runtime)
         api_base_url = cfg.get("api_base_url", "")
@@ -2945,6 +3033,40 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         document = await _save_canvas_document_api(
             api_base_url, project_id, markdown=markdown, title=title,
             document_id=document_id or None,
+        )
+        return json.dumps(document or {})
+
+    @tool
+    async def append_canvas_markdown(
+        markdown_chunk: str,
+        title: str = "Analysis Draft",
+        document_id: str = "",
+        replace_existing: bool = False,
+        runtime: ToolRuntime = None,
+    ) -> str:
+        """Append a markdown chunk to a canvas document for the current project.
+
+        Use this for long drafts written section-by-section. The server will load the
+        existing document, append the new chunk, and save the combined markdown.
+
+        Args:
+            markdown_chunk: New markdown fragment to append. Keep this focused to one section.
+            title: Document title used when creating or locating the draft.
+            document_id: Optional existing canvas document id.
+            replace_existing: When true, replace the existing markdown with this chunk instead of appending.
+        """
+        cfg = _get_project_config(runtime)
+        api_base_url = cfg.get("api_base_url", "")
+        project_id = cfg.get("project_id", "")
+        if not project_id:
+            return "{}"
+        document = await _append_canvas_document_api(
+            api_base_url,
+            project_id,
+            markdown_chunk=markdown_chunk,
+            title=title,
+            document_id=document_id or None,
+            replace_existing=bool(replace_existing),
         )
         return json.dumps(document or {})
 
@@ -3057,6 +3179,7 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         "request_mode_switch": request_mode_switch,
         "list_canvas_documents": list_canvas_documents,
         "save_canvas_markdown": save_canvas_markdown,
+        "append_canvas_markdown": append_canvas_markdown,
         "publish_canvas_document": publish_canvas_document,
         "execute_command": execute_command,
         "capture_artifact": capture_artifact,
@@ -3221,10 +3344,16 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 "Workflow:\n"
                 "1. Review the evidence and plan provided in the task description\n"
                 "2. Use search_project_documents or read_project_document to retrieve source material if needed\n"
-                "3. Use save_canvas_markdown to create or update drafts\n"
-                "4. Stage the draft for critique or user review in canvas\n"
-                "5. Leave packaging and publishing to the dedicated specialists\n"
-                "6. For ARLIS bulletins, produce the analytic content in canvas only and hand off packaging. Do not attempt document generation, artifact capture, or publication from this role.\n\n"
+                "3. For long drafts, use append_canvas_markdown section-by-section instead of trying to save the full document in one tool call\n"
+                "4. Use save_canvas_markdown only for short drafts or a full replacement pass\n"
+                "5. Stage the draft for critique or user review in canvas\n"
+                "6. Leave packaging and publishing to the dedicated specialists\n"
+                "7. For ARLIS bulletins, produce the analytic content in canvas only and hand off packaging. Do not attempt document generation, artifact capture, or publication from this role.\n\n"
+                "Canvas writing rules:\n"
+                "- For multi-page reports, create or reset the target draft with append_canvas_markdown(replace_existing=true) using only the title block and opening section header\n"
+                "- Then append one major section at a time with append_canvas_markdown\n"
+                "- Keep each appended chunk bounded to a single section or subsection, not the whole report\n"
+                "- When a project already has an outline canvas document, create a separate draft title rather than overwriting the outline unless explicitly told to revise it\n\n"
                 "Follow active skill instructions (SKILL.md) precisely for structured products.\n\n"
                 "IMPORTANT — Context management:\n"
                 "- Return ONLY a brief summary of what you produced (under 200 words)\n"
@@ -3237,6 +3366,7 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["search_project_documents"],
                 tool_map["read_project_document"],
                 tool_map["search_project_memories"],
+                tool_map["append_canvas_markdown"],
                 tool_map["save_canvas_markdown"],
                 tool_map["list_canvas_documents"],
             ],
