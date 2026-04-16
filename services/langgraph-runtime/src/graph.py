@@ -1194,6 +1194,10 @@ def _clean_text(value: Any, *, limit: int = 320) -> str:
     return text[: limit - 1].rstrip() + "…"
 
 
+def _trimmed(value: Any) -> str:
+    return str(value or "").strip()
+
+
 def _clean_authors(authors: Any, *, limit: int = 4) -> list[str]:
     results: list[str] = []
     if not isinstance(authors, list):
@@ -1652,9 +1656,10 @@ async def _stage_source_ingest_api(
         }
     except Exception as exc:
         logger.error("Stage source ingest API call failed: %s", exc, exc_info=True)
+        detail = _clean_text(str(exc), limit=260) or exc.__class__.__name__
         return {
             "status": "error",
-            "error": f"Stage source ingest request failed: {_clean_text(str(exc), limit=260)}",
+            "error": f"Stage source ingest request failed: {detail}",
             "details": {
                 "reason": "request_error",
                 "exception_type": exc.__class__.__name__,

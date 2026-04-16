@@ -14,6 +14,7 @@ class RuntimeSettings(BaseSettings):
     port: int = Field(default=8081)
     open_analyst_data_dir: str = Field(default="", alias="OPEN_ANALYST_DATA_DIR")
     open_analyst_web_url: str = Field(default="", alias="OPEN_ANALYST_WEB_URL")
+    open_analyst_web_internal_url: str = Field(default="", alias="OPEN_ANALYST_WEB_INTERNAL_URL")
     open_analyst_web_port: int = Field(default=5173, alias="OPEN_ANALYST_WEB_PORT")
     open_analyst_internal_api_key: str = Field(
         default="",

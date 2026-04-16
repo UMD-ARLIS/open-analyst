@@ -18,7 +18,7 @@ spec:
       serviceAccountName: open-analyst
       containers:
         - name: runtime
-          image: 718277288702.dkr.ecr.us-east-1.amazonaws.com/open-analyst/runtime:20260416-113057
+          image: 718277288702.dkr.ecr.us-east-1.amazonaws.com/open-analyst/runtime:20260416-120253
           ports:
             - containerPort: 8081
           envFrom:
@@ -31,6 +31,8 @@ spec:
               value: "0.0.0.0"
             - name: PORT
               value: "8081"
+            - name: OPEN_ANALYST_WEB_INTERNAL_URL
+              value: "http://webapp:5173"
             - name: CORS_ALLOWED_ORIGINS
               value: "https://analyst.insights.arlis.umd.edu"
           resources:
