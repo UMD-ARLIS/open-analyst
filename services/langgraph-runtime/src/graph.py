@@ -398,6 +398,14 @@ def _runtime_capabilities_payload(cfg: dict[str, Any]) -> dict[str, Any]:
     analysis_mode = _normalize_analysis_mode(cfg.get("analysis_mode"))
     direct_tools = [
         {
+            "name": "approve_collected_literature",
+            "description": "Present one consolidated approval for staged literature and web sources.",
+        },
+        {
+            "name": "stage_web_source",
+            "description": "Queue a web source for consolidated approval and project import.",
+        },
+        {
             "name": "search_project_documents",
             "description": "Search indexed project documents already in the store.",
         },
@@ -418,22 +426,24 @@ def _runtime_capabilities_payload(cfg: dict[str, Any]) -> dict[str, Any]:
             "description": "Inspect existing canvas documents in the project.",
         },
     ]
+    direct_tools = [
+        {
+            "name": "task",
+            "description": "Delegate specialized work to a subagent. Use this for research, drafting, review, and source collection.",
+        },
+        {
+            "name": "write_todos",
+            "description": "Create and update a visible plan for the current task.",
+        },
+        *direct_tools,
+    ]
     if analysis_mode != "chat":
-        direct_tools = [
-            {
-                "name": "task",
-                "description": "Delegate specialized work to a subagent. Use this for research, drafting, review, and source collection.",
-            },
-            {
-                "name": "write_todos",
-                "description": "Create and update a visible plan for the current task.",
-            },
-            *direct_tools,
+        direct_tools.append(
             {
                 "name": "propose_project_memory",
                 "description": "Persist a durable shared project memory for later retrieval.",
-            },
-        ]
+            }
+        )
     return {
         "project": cfg.get("project_name", ""),
         "current_date": cfg.get("current_date", ""),
@@ -1072,7 +1082,9 @@ def _system_prompt() -> str:
         "- subagent_type='publisher': publish approved outputs and project artifacts\n"
         "- subagent_type='general-purpose': narrow fallback for synthesis that does not fit the named specialists\n\n"
         "If the user wants to collect or add sources to the project, delegate immediately to the retriever subagent. "
-        "Retriever branches gather candidates first; then you call approve_collected_literature once to present one consolidated approval.\n\n"
+        "Retriever branches gather candidates first; then you call approve_collected_literature once to present one consolidated approval.\n"
+        "Do not ask the user to approve sources in plain chat text when an approval tool is available.\n"
+        "If a retriever returns concrete web URLs without staging them, call stage_web_source for each URL and then call approve_collected_literature yourself.\n\n"
         "Never call a tool that appears only under a subagent's capabilities as if it were a direct supervisor tool. "
         "Use task(subagent_type=...) for those capabilities.\n\n"
         "Delegate rather than doing everything yourself. The retriever gathers sources, the researcher synthesizes them, "
@@ -2976,6 +2988,7 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         describe_runtime_capabilities,  # Answer tool/connector questions
         request_mode_switch,        # Escalate into heavier retrieval or deliverable work with approval
         list_canvas_documents,      # Check current canvas state
+        stage_web_source,           # Recover web-source staging when retrievers return concrete URLs
         approve_collected_literature,  # One consolidated approval after parallel retrieval
         propose_project_memory,     # Persist findings across threads
     ]
@@ -3028,7 +3041,7 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 "5. Use web_fetch to extract full content from a specific URL when needed\n"
                 "6. Use read_project_document for promising in-project sources\n"
                 "7. Prefer collect_literature_candidates for academic papers so the supervisor can present one consolidated approval after all retriever branches finish\n"
-                "8. Use stage_web_source to queue web pages for consolidated approval alongside literature\n"
+                "8. If the task involves adding web sources to the project, you MUST call stage_web_source for each candidate URL you want considered for import\n"
                 "9. Do NOT ask the user for approval yourself; return candidates and let the supervisor handle it\n\n"
                 "Parallelism guidance:\n"
                 "- Safe to parallelize across independent queries, source sets, or provider slices\n"

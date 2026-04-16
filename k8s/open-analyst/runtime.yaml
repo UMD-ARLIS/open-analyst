@@ -18,7 +18,7 @@ spec:
       serviceAccountName: open-analyst
       containers:
         - name: runtime
-          image: 718277288702.dkr.ecr.us-east-1.amazonaws.com/open-analyst/runtime:20260415-132401
+          image: 718277288702.dkr.ecr.us-east-1.amazonaws.com/open-analyst/runtime:20260416-113057
           ports:
             - containerPort: 8081
           envFrom:
