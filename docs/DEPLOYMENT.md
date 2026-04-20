@@ -5,7 +5,7 @@
 Run three services:
 
 - web app
-- LangGraph runtime
+- runtime API
 - Analyst MCP
 
 All three should share access to:
@@ -24,7 +24,13 @@ Minimum:
 - `LITELLM_CHAT_MODEL`
 - `LITELLM_EMBEDDING_MODEL`
 - `ANALYST_MCP_API_KEY`
+- `OPEN_ANALYST_INTERNAL_API_KEY`
 - `LANGGRAPH_RUNTIME_URL`
+
+Optional but recommended:
+
+- `TAVILY_API_KEY` (enables web search and Tavily Extract for clean web content extraction)
+- `ANALYST_MCP_SEMANTIC_SCHOLAR_API_KEY` (improves Semantic Scholar search results)
 
 Common optional values:
 
@@ -50,6 +56,111 @@ Common optional values:
 - `CHAT_RATE_LIMIT_CHECK_EVERY_SECONDS`
 - `CHAT_RATE_LIMIT_MAX_BUCKET_SIZE`
 - `CHAT_MAX_CONCURRENT_REQUESTS`
+
+## Authentication (Keycloak)
+
+The app uses Keycloak for OIDC authentication. Required env vars:
+
+- `AUTH_ENABLED` — `true` to enforce login, `false` for local dev without auth
+- `SESSION_SECRET` — random string for signing session cookies
+- `OPEN_ANALYST_INTERNAL_API_KEY` — shared secret used only for trusted runtime/webapp internal callbacks
+- `KEYCLOAK_URL` — internal Keycloak URL (e.g., `http://keycloak:8080`)
+- `KEYCLOAK_PUBLIC_URL` — browser-facing Keycloak base URL. In EKS this can stay unset and route through the app domain; for local auth use `http://localhost:8080`.
+- `KEYCLOAK_REALM` — Keycloak realm name (default: `open-analyst`)
+- `KEYCLOAK_CLIENT_ID` — OIDC client ID (default: `open-analyst-web`)
+- `KEYCLOAK_CLIENT_SECRET` — OIDC client secret
+
+The browser-facing Keycloak endpoints (`/realms/*`) must be routable from the user's browser at the same domain as the app.
+
+Auth tokens (access, refresh, ID) are stored server-side in PostgreSQL, not in the session cookie. Only minimal user info (userId, email, name) is stored in the cookie to stay within browser cookie size limits. This keeps sessions stable across webapp pod restarts and multi-replica routing as long as the app shares the same database.
+
+### Runtime Architecture
+
+The runtime is a first-party FastAPI service. It keeps:
+
+- LangGraph + DeepAgents for execution
+- PostgreSQL-backed runtime tables for threads, runs, events, and interrupts
+- PostgreSQL checkpointer/store for graph durability and project memory
+
+This removes the old Agent Server in-memory thread index problem. Thread listing, sidebar state, interrupts, and replayable stream events now come from the runtime's own Postgres-backed API.
+
+The browser should talk only to the web app. The web app exposes same-origin runtime proxy routes under `/api/runtime/*` and forwards those requests to the internal runtime service.
+
+## EKS Deployment
+
+Kubernetes manifests are in `k8s/open-analyst/`. The deployment uses:
+
+- EKS Auto Mode (cluster `eks`, us-east-1)
+- ALB Ingress Controller with path-based routing
+- ACM certificate for HTTPS
+- External-dns for automatic DNS (`*.insights.arlis.umd.edu`)
+- EKS Pod Identity for S3 access
+- Shared RDS PostgreSQL (existing)
+
+Services: webapp, runtime, analyst-mcp, keycloak, all in namespace `open-analyst`.
+
+### Autoscaling
+
+The repo now includes first-pass HPAs for:
+
+- `webapp`
+- `runtime`
+- `analyst-mcp`
+
+The manifests live in:
+
+- [webapp-hpa.yaml](/home/ubuntu/code/ARLIS/open-analyst/k8s/open-analyst/webapp-hpa.yaml)
+- [runtime-hpa.yaml](/home/ubuntu/code/ARLIS/open-analyst/k8s/open-analyst/runtime-hpa.yaml)
+- [analyst-mcp-hpa.yaml](/home/ubuntu/code/ARLIS/open-analyst/k8s/open-analyst/analyst-mcp-hpa.yaml)
+
+The initial sizing is intentionally conservative:
+
+- `webapp`: min `2`, max `4`
+- `runtime`: min `2`, max `6`
+- `analyst-mcp`: min `1`, max `3`
+
+These HPAs assume the cluster has:
+
+- Kubernetes Metrics Server
+- node autoscaling enabled at the EKS layer
+
+The runtime is the primary scaling target for concurrent analyst activity. Horizontal scaling is
+expected to help with 20–30 active users only if thread/run state remains fully durable and no
+critical path depends on pod-local memory.
+
+### ALB Direct Access Workaround
+
+If the domain `analyst.insights.arlis.umd.edu` does not resolve from your network (e.g., corporate DNS hasn't propagated), the app can be accessed directly via the ALB hostname. The following changes were made to support this:
+
+1. **Ingress**: Removed the `host` restriction so the ALB accepts requests on any hostname (not just `analyst.insights.arlis.umd.edu`).
+2. **ConfigMap**: Set `OPEN_ANALYST_WEB_URL` and `LANGGRAPH_RUNTIME_PUBLIC_URL` to `https://<ALB_HOSTNAME>` so auth redirects use the ALB.
+3. **Keycloak client**: Added the ALB hostname as an additional valid redirect URI and web origin (the original domain entries are preserved).
+
+The ALB hostname is: `k8s-openanal-openanal-945e74a1d3-462564428.us-east-1.elb.amazonaws.com`
+
+You will see a TLS certificate warning because the ACM cert covers `*.insights.arlis.umd.edu`, not the ALB hostname. Click through it.
+
+### Reverting to the Proper Domain
+
+Once DNS resolves correctly, revert these changes:
+
+```bash
+# 1. Restore host restriction on ingress
+kubectl patch ingress open-analyst -n open-analyst --type='json' \
+  -p='[{"op": "add", "path": "/spec/rules/0/host", "value": "analyst.insights.arlis.umd.edu"}]'
+
+# 2. Restore configmap URLs
+kubectl patch configmap open-analyst-config -n open-analyst --type='json' -p='[
+  {"op": "replace", "path": "/data/OPEN_ANALYST_WEB_URL", "value": "https://analyst.insights.arlis.umd.edu"},
+  {"op": "replace", "path": "/data/LANGGRAPH_RUNTIME_PUBLIC_URL", "value": "https://analyst.insights.arlis.umd.edu"}
+]'
+
+# 3. Restart webapp to pick up config
+kubectl rollout restart deployment/webapp -n open-analyst
+
+# 4. (Optional) Remove ALB hostname from Keycloak client redirect URIs
+#    via Keycloak admin console or kcadm.sh
+```
 
 ## Recommended Infrastructure
 
@@ -86,6 +197,49 @@ pnpm setup:python
 pnpm dev:all
 ```
 
+### Docker Compose
+
+```bash
+cp .env.example .env   # edit with your config
+docker compose up -d
+```
+
+All services read `.env` directly. Set `DATABASE_URL`, `LANGGRAPH_RUNTIME_URL`, and `ANALYST_MCP_BASE_URL` to match your environment. The postgres service in `docker-compose.yml` is optional — omit it if using an external database.
+
+### Local Kubernetes Parity
+
+The repo includes a `kind`-based local overlay in `k8s/overlays/local/` that mirrors the EKS topology with:
+
+- webapp
+- runtime
+- analyst-mcp
+- keycloak
+- local Postgres
+- local MinIO (S3-compatible storage)
+- nginx ingress at `http://open-analyst.localtest.me`
+
+Bootstrap the cluster with:
+
+```bash
+pnpm local:k8s:bootstrap
+```
+
+This script expects `docker`, `kubectl`, and `kind` to be installed locally. It builds the local images, loads them into the cluster, creates the required secrets, installs ingress-nginx, and applies the local overlay.
+
+Run the workflow validation with:
+
+```bash
+OPEN_ANALYST_BASE_URL=http://open-analyst.localtest.me pnpm local:k8s:e2e
+```
+
+If auth is enabled on the local cluster, pass a valid app session cookie:
+
+```bash
+OPEN_ANALYST_COOKIE='__oa_session=...' \
+OPEN_ANALYST_BASE_URL=http://open-analyst.localtest.me \
+pnpm local:k8s:e2e
+```
+
 ### Production-style web app
 
 ```bash
@@ -95,6 +249,15 @@ pnpm build
 pnpm start
 pnpm dev:runtime
 pnpm dev:analyst-mcp
+```
+
+Workflow-first validation commands:
+
+```bash
+kubectl kustomize k8s/overlays/local
+node --check scripts/local-k8s/e2e-workflow.mjs
+pnpm local:k8s:bootstrap
+OPEN_ANALYST_BASE_URL=http://open-analyst.localtest.me pnpm local:k8s:e2e
 ```
 
 ## Health Checks
@@ -108,12 +271,12 @@ curl -H "x-api-key: $ANALYST_MCP_API_KEY" http://localhost:8000/api/health/detai
 
 ## Browser To Runtime Connectivity
 
-The browser talks directly to Agent Server for threads, runs, streaming, interrupts, and resume.
+The browser talks directly to the runtime API for threads, runs, streaming, interrupts, and resume.
 
 That means:
 
-- `LANGGRAPH_RUNTIME_URL` must point the web app at the reachable Agent Server origin
-- Agent Server must allow the web app origin through CORS
+- `LANGGRAPH_RUNTIME_URL` must point the web app at the reachable runtime origin
+- the runtime API must allow the web app origin through CORS
 - `OPEN_ANALYST_WEB_URL` should point the runtime back to the web app origin for product API callbacks
 
 Default local assumptions:

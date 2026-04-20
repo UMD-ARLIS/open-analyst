@@ -18,11 +18,15 @@
     "audit:prod": "pnpm audit --prod",
     "validate:inventory": "node scripts/validation/inventory.mjs --check",
     "knowledge:reindex": "node scripts/reindex-knowledge.mjs",
-    "reset:chat-state": "node scripts/reset-chat-state.mjs"
+    "reset:chat-state": "node scripts/reset-chat-state.mjs",
+    "local:k8s:bootstrap": "bash scripts/local-k8s/bootstrap.sh",
+    "local:k8s:e2e": "node scripts/local-k8s/e2e-workflow.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.77",
-    "@anthropic-ai/claude-code": "^2.1.42",
+    "@anthropic-ai/claude-code": "^2.1.53",
     "@anthropic-ai/sdk": "^0.74.0",
     "@aws-sdk/client-s3": "^3.1005.0",
     "@langchain/core": "^1.1.33",
@@ -39,11 +43,13 @@
     "dotenv": "^17.3.1",
     "glob": "^10.3.10",
     "isbot": "^5",
+    "jose": "^6.2.2",
     "katex": "^0.16.27",
     "lucide-react": "^0.468.0",
     "mammoth": "^1.11.0",
     "ngrok": "^5.0.0-beta.2",
     "openai": "^6.22.0",
+    "openid-client": "5.7.1",
     "pdf-parse": "^2.4.5",
     "pg": "^8.18.0",
     "react": "^18.3.1",
@@ -69,18 +75,20 @@
     "@typescript-eslint/eslint-plugin": "^8.55.0",
     "@typescript-eslint/parser": "^8.55.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "@vitest/coverage-v8": "^3.2.1",
     "autoprefixer": "^10.4.20",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "esbuild": "^0.27.4",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
-    "playwright": "1.54.2",
+    "happy-dom": "^20.9.0",
     "postcss": "^8.4.49",
     "prettier": "^3.4.2",
     "tailwindcss": "^3.4.16",
     "typescript": "^5.3.3",
-    "vite": "^7.3.1"
+    "vite": "^7.3.2",
+    "vitest": "^3.2.1"
   },
   "author": "Justin Mullins (ARLIS - Applied Research Laboratory for Intelligence and Security)",
   "license": "MIT",
@@ -96,7 +104,12 @@
       "rollup": "4.59.0",
       "minimatch@5.1.6": "5.1.9",
       "minimatch@5.1.7": "5.1.9",
-      "minimatch@9.0.5": "9.0.7"
+      "minimatch@9.0.5": "9.0.7",
+      "minimatch@<3.1.4": "3.1.4",
+      "flatted": "3.4.2",
+      "undici": "7.24.0",
+      "fast-xml-parser": "5.5.7",
+      "ajv@<6.14.0": "6.14.0"
     }
   },
   "packageManager": "pnpm@10.28.0+sha512.05df71d1421f21399e053fde567cea34d446fa02c76571441bfc1c7956e98e363088982d940465fd34480d4d90a0668bc12362f8aa88000a64e83d0b0e47be48"

@@ -1,8 +1,14 @@
-import { createArtifact, getArtifactVersionCounts, listArtifacts } from "~/lib/db/queries/workspace.server";
-import { parseJsonBody } from "~/lib/request-utils";
-import type { Route } from "./+types/api.projects.$projectId.artifacts";
+import {
+  createArtifact,
+  getArtifactVersionCounts,
+  listArtifacts,
+} from '~/lib/db/queries/workspace.server';
+import { requireProjectApiAccess } from '~/lib/project-access.server';
+import { parseJsonBody } from '~/lib/request-utils';
+import type { Route } from './+types/api.projects.$projectId.artifacts';
 
-export async function loader({ params }: Route.LoaderArgs) {
+export async function loader({ params, request }: Route.LoaderArgs) {
+  await requireProjectApiAccess(request, params.projectId);
   const [artifacts, versionsByArtifactId] = await Promise.all([
     listArtifacts(params.projectId),
     getArtifactVersionCounts(params.projectId),
@@ -11,9 +17,10 @@ export async function loader({ params }: Route.LoaderArgs) {
 }
 
 export async function action({ params, request }: Route.ActionArgs) {
-  if (request.method !== "POST") {
-    return Response.json({ error: "Method not allowed" }, { status: 405 });
+  if (request.method !== 'POST') {
+    return Response.json({ error: 'Method not allowed' }, { status: 405 });
   }
+  await requireProjectApiAccess(request, params.projectId);
   const body = await parseJsonBody(request);
   if (body instanceof Response) return body;
   const artifact = await createArtifact(params.projectId, {

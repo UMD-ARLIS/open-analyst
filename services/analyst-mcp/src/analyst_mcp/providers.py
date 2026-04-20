@@ -3,12 +3,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import re
-import tarfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
-from email.utils import parsedate_to_datetime
-from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import quote_plus
 
@@ -16,7 +13,7 @@ import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential_jitter
 
 from .config import Settings
-from .models import Author, DownloadCandidate, PaperRecord
+from .models import Author, PaperRecord
 
 
 @dataclass(slots=True)
@@ -93,14 +90,6 @@ class BaseProvider:
     async def get_paper(self, identifier: str) -> PaperRecord | None:
         raise NotImplementedError
 
-    async def download_candidates(self, paper: PaperRecord) -> list[DownloadCandidate]:
-        candidates: list[DownloadCandidate] = []
-        if paper.pdf_url:
-            candidates.append(DownloadCandidate(url=paper.pdf_url, label="pdf", mime_type="application/pdf"))
-        for url in paper.source_urls:
-            candidates.append(DownloadCandidate(url=url, label="source"))
-        return candidates
-
     def canonical_id(self, provider_id: str, doi: str | None = None, arxiv_id: str | None = None) -> str:
         seed = doi or arxiv_id or f"{self.source_name}:{provider_id}"
         digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()[:16]
@@ -116,7 +105,6 @@ class ArxivProvider(BaseProvider):
             "search_query": self._compose_query(query=query, date_from=date_from, date_to=date_to),
             "start": 0,
             "max_results": min(limit, 50),
-            # Topical search should favor relevance; recency-only scans use list_recent().
             "sortBy": "relevance" if query else "lastUpdatedDate",
             "sortOrder": "descending",
         }
@@ -128,29 +116,6 @@ class ArxivProvider(BaseProvider):
         payload = await self._get_text(self.settings.arxiv_base_url, params=params, headers={"User-Agent": self.settings.user_agent()})
         records = self._parse_feed(payload)
         return records[0] if records else None
-
-    async def list_recent(self, limit: int, date_from: str, date_to: str | None = None) -> list[PaperRecord]:
-        records: list[PaperRecord] = []
-        start = 0
-        page_size = min(100, limit)
-        while len(records) < limit:
-            batch_size = min(page_size, limit - len(records))
-            params = {
-                "search_query": self._compose_query(query=None, date_from=date_from, date_to=date_to),
-                "start": start,
-                "max_results": batch_size,
-                "sortBy": "lastUpdatedDate",
-                "sortOrder": "descending",
-            }
-            payload = await self._get_text(self.settings.arxiv_base_url, params=params, headers={"User-Agent": self.settings.user_agent()})
-            batch = self._parse_feed(payload)
-            if not batch:
-                break
-            records.extend(batch)
-            if len(batch) < batch_size:
-                break
-            start += len(batch)
-        return records[:limit]
 
     def _compose_query(self, query: str | None, date_from: str | None, date_to: str | None) -> str:
         parts: list[str] = []
@@ -221,14 +186,6 @@ class OpenAlexProvider(BaseProvider):
 
     async def search(self, query: str, limit: int, date_from: str | None = None, date_to: str | None = None) -> list[PaperRecord]:
         return await self._list_works(limit=limit, query=query, date_from=date_from, date_to=date_to)
-
-    async def list_recent(self, limit: int, date_from: str, date_to: str | None = None) -> list[PaperRecord]:
-        try:
-            return await self._list_works(limit=limit, query=None, date_from=date_from, date_to=date_to, use_updated_window=True)
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code not in {400, 401, 403}:
-                raise
-        return await self._list_works(limit=limit, query=None, date_from=date_from, date_to=date_to, use_updated_window=False)
 
     async def _list_works(
         self,
@@ -543,20 +500,3 @@ class ProviderRegistry:
         text = str(exc).strip() or exc.__class__.__name__
         text = re.sub(r"\s+", " ", text)
         return text[:180]
-
-
-def extract_tar_member(archive_path: Path, member_name: str, destination: Path) -> Path:
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(archive_path) as archive:
-        member = archive.getmember(member_name)
-        with archive.extractfile(member) as source, destination.open("wb") as target:
-            if source is None:
-                raise FileNotFoundError(member_name)
-            target.write(source.read())
-    return destination
-
-
-def parse_rfc822_datetime(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    return parsedate_to_datetime(value).astimezone(UTC)

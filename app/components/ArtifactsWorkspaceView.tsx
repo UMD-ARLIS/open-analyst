@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
-import { useParams } from "react-router";
-import { headlessGetArtifacts, type HeadlessArtifact } from "~/lib/headless-api";
-import { useAppStore } from "~/lib/store";
+import { useEffect, useState } from 'react';
+import { useParams } from 'react-router';
+import { headlessGetArtifacts, type HeadlessArtifact } from '~/lib/headless-api';
+import { useAppStore } from '~/lib/store';
 
 function buildArtifactUrls(projectId: string, artifactId: string) {
   const artifactUrl = `/api/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}/content`;
@@ -42,12 +42,12 @@ export function ArtifactsWorkspaceView() {
     const intervalId = window.setInterval(() => {
       void loadArtifacts();
     }, 5000);
-    window.addEventListener("focus", handleFocus);
+    window.addEventListener('focus', handleFocus);
 
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
-      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener('focus', handleFocus);
     };
   }, [projectId]);
 
@@ -74,21 +74,21 @@ export function ArtifactsWorkspaceView() {
                 onClick={() => {
                   const links = buildArtifactUrls(projectId, artifact.id);
                   const metadata =
-                    artifact.metadata && typeof artifact.metadata === "object"
+                    artifact.metadata && typeof artifact.metadata === 'object'
                       ? (artifact.metadata as Record<string, unknown>)
                       : {};
                   openFileViewer({
                     artifactId: artifact.id,
-                    filename: (metadata.filename as string) || artifact.title || "artifact",
+                    filename: (metadata.filename as string) || artifact.title || 'artifact',
                     mimeType: artifact.mimeType,
-                    size: typeof metadata.bytes === "number" ? metadata.bytes : 0,
+                    size: typeof metadata.bytes === 'number' ? metadata.bytes : 0,
                     artifactUrl: links.artifactUrl,
                     downloadUrl: links.downloadUrl,
                     title: artifact.title,
                     storageUri: artifact.storageUri || undefined,
                     metadata,
                     textPreview:
-                      typeof metadata.textPreview === "string" ? metadata.textPreview : "",
+                      typeof metadata.textPreview === 'string' ? metadata.textPreview : '',
                   });
                 }}
               >
@@ -100,7 +100,9 @@ export function ArtifactsWorkspaceView() {
                   {versionsByArtifactId[artifact.id] || 0} versions
                 </div>
                 {artifact.storageUri && (
-                  <div className="text-xs text-text-muted mt-2 break-all">{artifact.storageUri}</div>
+                  <div className="text-xs text-text-muted mt-2 break-all">
+                    {artifact.storageUri}
+                  </div>
                 )}
               </button>
             ))

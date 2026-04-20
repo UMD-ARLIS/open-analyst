@@ -1,5 +1,5 @@
-import { useState, useCallback, useMemo } from "react";
-import { CheckCircle, XCircle, ExternalLink, ChevronDown, ChevronRight } from "lucide-react";
+import { useState, useCallback, useMemo } from 'react';
+import { CheckCircle, XCircle, ExternalLink, ChevronDown, ChevronRight } from 'lucide-react';
 
 interface SourceItem {
   index: number;
@@ -20,6 +20,9 @@ interface SourceItem {
 
 interface InterruptValue {
   type: string;
+  current_mode?: string;
+  target_mode?: string;
+  reason?: string;
   query?: string;
   total_found?: number;
   total_candidates?: number;
@@ -46,6 +49,60 @@ interface InterruptCardProps {
   isProcessing?: boolean;
 }
 
+function workflowStateLabel(value: string): string {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase();
+  if (normalized === 'product') return 'deliverable';
+  if (normalized === 'research') return 'research';
+  return 'lightweight';
+}
+
+function ModeSwitchCard({
+  interrupt,
+  onResume,
+  isProcessing,
+}: {
+  interrupt: InterruptValue;
+  onResume: (value: Record<string, unknown>) => void;
+  isProcessing?: boolean;
+}) {
+  const currentMode = String(interrupt.current_mode || 'chat');
+  const targetMode = String(interrupt.target_mode || 'research');
+  const reason = String(interrupt.reason || interrupt.message || '').trim();
+
+  return (
+    <div className="rounded-xl border border-sky-500/30 bg-sky-900/10 p-4 space-y-3">
+      <h3 className="text-sm font-semibold text-sky-300">
+        Shift workflow from {workflowStateLabel(currentMode)} to {workflowStateLabel(targetMode)}?
+      </h3>
+      <div className="rounded-lg border border-sky-500/20 bg-sky-950/30 p-3 text-sm text-sky-100">
+        {reason || 'The agent is requesting a workflow escalation to continue this thread.'}
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onResume({ approved: true, target_mode: targetMode })}
+          disabled={isProcessing}
+          className="flex items-center gap-1.5 rounded-lg bg-green-600 px-4 py-1.5 text-sm text-white transition-colors hover:bg-green-500 disabled:opacity-50"
+        >
+          <CheckCircle className="h-3.5 w-3.5" />
+          Approve transition
+        </button>
+        <button
+          type="button"
+          onClick={() => onResume({ approved: false, target_mode: targetMode })}
+          disabled={isProcessing}
+          className="flex items-center gap-1.5 rounded-lg bg-red-600/80 px-4 py-1.5 text-sm text-white transition-colors hover:bg-red-500 disabled:opacity-50"
+        >
+          <XCircle className="h-3.5 w-3.5" />
+          Keep current workflow
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function SourceCollectionCard({
   interrupt,
   onResume,
@@ -61,27 +118,33 @@ function SourceCollectionCard({
       Array.isArray(interrupt.groups)
         ? interrupt.groups.filter(
             (item): item is { label?: string; query?: string; candidate_count?: number } =>
-              !!item && typeof item === "object",
+              !!item && typeof item === 'object'
           )
         : [],
-    [interrupt.groups],
+    [interrupt.groups]
   );
   const warnings = useMemo(
-    () => (Array.isArray(interrupt.warnings) ? interrupt.warnings.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : []),
-    [interrupt.warnings],
+    () =>
+      Array.isArray(interrupt.warnings)
+        ? interrupt.warnings.filter(
+            (item): item is string => typeof item === 'string' && item.trim().length > 0
+          )
+        : [],
+    [interrupt.warnings]
   );
-  const isConsolidated = interrupt.type === "consolidated_source_approval";
+  const isConsolidated = interrupt.type === 'consolidated_source_approval';
   const selectionKeys = useMemo(
     () => sources.map((source) => String(source.key || source.index)),
-    [sources],
+    [sources]
   );
   const recommendedKeys = useMemo(
-    () => new Set(
-      sources
-        .filter((source) => source.recommended)
-        .map((source) => String(source.key || source.index)),
-    ),
-    [sources],
+    () =>
+      new Set(
+        sources
+          .filter((source) => source.recommended)
+          .map((source) => String(source.key || source.index))
+      ),
+    [sources]
   );
   const initialSelectionKeys = useMemo(() => {
     if (isConsolidated && recommendedKeys.size > 0) {
@@ -158,11 +221,11 @@ function SourceCollectionCard({
     }
 
     if (selected.size === selectionKeys.length) {
-      onResume({ approved: true, selection_mode: "all" });
+      onResume({ approved: true, selection_mode: 'all' });
       return;
     }
     if (isRecommendedSelection) {
-      onResume({ approved: true, selection_mode: "recommended" });
+      onResume({ approved: true, selection_mode: 'recommended' });
       return;
     }
 
@@ -171,7 +234,7 @@ function SourceCollectionCard({
     if (excludedKeys.length > 0 && excludedKeys.length < selectedKeys.length) {
       onResume({
         approved: true,
-        selection_mode: "all_except",
+        selection_mode: 'all_except',
         excluded_keys: excludedKeys,
       });
       return;
@@ -179,7 +242,7 @@ function SourceCollectionCard({
 
     onResume({
       approved: true,
-      selection_mode: "custom",
+      selection_mode: 'custom',
       approved_keys: selectedKeys,
     });
   }, [isConsolidated, isRecommendedSelection, onResume, selected, selectionKeys, sources]);
@@ -198,7 +261,7 @@ function SourceCollectionCard({
           className="text-xs text-amber-400 hover:text-amber-300 underline"
           disabled={isProcessing}
         >
-          {selected.size === selectionKeys.length ? "Deselect all" : "Select all"}
+          {selected.size === selectionKeys.length ? 'Deselect all' : 'Select all'}
         </button>
       </div>
 
@@ -208,13 +271,13 @@ function SourceCollectionCard({
 
       {isConsolidated ? (
         <div className="flex flex-wrap gap-2 text-[11px] text-amber-100/85">
-          {typeof interrupt.recommended_count === "number" && interrupt.recommended_count > 0 ? (
+          {typeof interrupt.recommended_count === 'number' && interrupt.recommended_count > 0 ? (
             <span className="rounded-full border border-emerald-500/30 bg-emerald-950/40 px-2.5 py-1">
               Recommended: {interrupt.recommended_count}
             </span>
           ) : null}
-          {typeof interrupt.soft_limit === "number" &&
-          typeof interrupt.total_found === "number" &&
+          {typeof interrupt.soft_limit === 'number' &&
+          typeof interrupt.total_found === 'number' &&
           interrupt.total_found >= interrupt.soft_limit ? (
             <span className="rounded-full border border-amber-500/30 bg-amber-950/40 px-2.5 py-1">
               Large import: chunked after approval
@@ -229,17 +292,21 @@ function SourceCollectionCard({
           <div className="flex flex-wrap gap-2">
             {groups.map((group, index) => (
               <div
-                key={`${group.label || group.query || "group"}-${index}`}
+                key={`${group.label || group.query || 'group'}-${index}`}
                 className="rounded-full border border-amber-500/20 bg-amber-950/50 px-2.5 py-1 text-[11px] text-amber-100"
               >
-                <span className="font-medium">{group.label || group.query || `Branch ${index + 1}`}</span>
-                {typeof group.candidate_count === "number" ? ` · ${group.candidate_count}` : ""}
+                <span className="font-medium">
+                  {group.label || group.query || `Branch ${index + 1}`}
+                </span>
+                {typeof group.candidate_count === 'number' ? ` · ${group.candidate_count}` : ''}
               </div>
             ))}
           </div>
-          {typeof interrupt.total_candidates === "number" && interrupt.total_candidates > sources.length ? (
+          {typeof interrupt.total_candidates === 'number' &&
+          interrupt.total_candidates > sources.length ? (
             <p className="text-[11px] text-amber-100/80">
-              {interrupt.total_candidates} raw results collapsed into {sources.length} unique sources.
+              {interrupt.total_candidates} raw results collapsed into {sources.length} unique
+              sources.
             </p>
           ) : null}
         </div>
@@ -291,8 +358,8 @@ function SourceCollectionCard({
             key={source.key || source.index}
             className={`rounded-lg border p-3 transition-colors cursor-pointer ${
               selected.has(String(source.key || source.index))
-                ? "border-amber-500/40 bg-amber-900/20"
-                : "border-neutral-700 bg-neutral-900/50 opacity-60"
+                ? 'border-amber-500/40 bg-amber-900/20'
+                : 'border-neutral-700 bg-neutral-900/50 opacity-60'
             }`}
             onClick={() => toggleOne(String(source.key || source.index))}
           >
@@ -305,15 +372,13 @@ function SourceCollectionCard({
                 onClick={(e) => e.stopPropagation()}
               />
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-white leading-snug">
-                  {source.title}
-                </div>
+                <div className="text-sm font-medium text-white leading-snug">{source.title}</div>
                 <div className="text-xs text-neutral-400 mt-0.5">
-                  {source.authors?.slice(0, 3).join(", ")}
-                  {(source.authors?.length || 0) > 3 ? " et al." : ""}
-                  {source.venue ? ` · ${source.venue}` : ""}
-                  {source.year ? ` · ${source.year}` : ""}
-                  {source.citation_count ? ` · ${source.citation_count} citations` : ""}
+                  {source.authors?.slice(0, 3).join(', ')}
+                  {(source.authors?.length || 0) > 3 ? ' et al.' : ''}
+                  {source.venue ? ` · ${source.venue}` : ''}
+                  {source.year ? ` · ${source.year}` : ''}
+                  {source.citation_count ? ` · ${source.citation_count} citations` : ''}
                 </div>
                 {source.recommended ? (
                   <div className="mt-1">
@@ -332,7 +397,7 @@ function SourceCollectionCard({
                         {branch}
                       </span>
                     ))}
-                    {typeof source.branch_count === "number" &&
+                    {typeof source.branch_count === 'number' &&
                     source.branch_count > source.branch_preview.length ? (
                       <span className="rounded-full border border-sky-500/20 bg-sky-950/20 px-2 py-0.5 text-[10px] text-sky-100">
                         +{source.branch_count - source.branch_preview.length} more branches
@@ -483,21 +548,19 @@ function ToolApprovalCard({
   onResume: (value: Record<string, unknown>) => void;
   isProcessing?: boolean;
 }) {
-  const toolName = interrupt.name || "action";
+  const toolName = interrupt.name || 'action';
   const toolArgs = interrupt.args || {};
 
   return (
     <div className="rounded-xl border border-amber-500/30 bg-amber-900/10 p-4 space-y-3">
-      <h3 className="text-sm font-semibold text-amber-300">
-        Approve {toolName}?
-      </h3>
+      <h3 className="text-sm font-semibold text-amber-300">Approve {toolName}?</h3>
       <pre className="text-xs bg-neutral-900 border border-neutral-700 rounded-lg p-3 overflow-x-auto text-neutral-300">
         {JSON.stringify(toolArgs, null, 2)}
       </pre>
       <div className="flex items-center gap-2">
         <button
           type="button"
-          onClick={() => onResume({ type: "approve" })}
+          onClick={() => onResume({ type: 'approve' })}
           disabled={isProcessing}
           className="flex items-center gap-1.5 px-4 py-1.5 bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
         >
@@ -506,7 +569,7 @@ function ToolApprovalCard({
         </button>
         <button
           type="button"
-          onClick={() => onResume({ type: "reject", message: "User rejected" })}
+          onClick={() => onResume({ type: 'reject', message: 'User rejected' })}
           disabled={isProcessing}
           className="flex items-center gap-1.5 px-4 py-1.5 bg-red-600/80 hover:bg-red-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
         >
@@ -521,10 +584,20 @@ function ToolApprovalCard({
 export function InterruptCard({ interrupt, onResume, isProcessing }: InterruptCardProps) {
   const value = interrupt.value;
 
-  if (value.type === "source_collection_approval" || value.type === "consolidated_source_approval") {
+  if (value.type === 'mode_switch_approval') {
+    return <ModeSwitchCard interrupt={value} onResume={onResume} isProcessing={isProcessing} />;
+  }
+
+  if (
+    value.type === 'source_collection_approval' ||
+    value.type === 'consolidated_source_approval'
+  ) {
     return (
       <SourceCollectionCard
-        key={interrupt.id || `${value.type}:${value.query || value.message || value.title || "approval"}`}
+        key={
+          interrupt.id ||
+          `${value.type}:${value.query || value.message || value.title || 'approval'}`
+        }
         interrupt={value}
         onResume={onResume}
         isProcessing={isProcessing}
@@ -532,22 +605,10 @@ export function InterruptCard({ interrupt, onResume, isProcessing }: InterruptCa
     );
   }
 
-  if (value.type === "web_source_approval") {
-    return (
-      <WebSourceCard
-        interrupt={value}
-        onResume={onResume}
-        isProcessing={isProcessing}
-      />
-    );
+  if (value.type === 'web_source_approval') {
+    return <WebSourceCard interrupt={value} onResume={onResume} isProcessing={isProcessing} />;
   }
 
   // Default: generic tool approval (execute_command, publish_*)
-  return (
-    <ToolApprovalCard
-      interrupt={value}
-      onResume={onResume}
-      isProcessing={isProcessing}
-    />
-  );
+  return <ToolApprovalCard interrupt={value} onResume={onResume} isProcessing={isProcessing} />;
 }

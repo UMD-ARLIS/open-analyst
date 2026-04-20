@@ -24,7 +24,9 @@ export function TextRenderer({ url }: TextRendererProps) {
     }
 
     void load();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [url]);
 
   if (error) {

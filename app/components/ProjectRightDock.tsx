@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { GripVertical } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { GripVertical } from 'lucide-react';
 
 const MIN_WIDTH = 360;
 const MAX_WIDTH = 1400;
@@ -14,7 +14,7 @@ function getStorageKey(mode: string) {
 }
 
 function getInitialWidth(mode: string) {
-  if (typeof window === "undefined") {
+  if (typeof window === 'undefined') {
     return DEFAULT_WIDTHS[mode] || 600;
   }
   const saved = window.localStorage.getItem(getStorageKey(mode));
@@ -26,7 +26,7 @@ function getInitialWidth(mode: string) {
 }
 
 interface ProjectRightDockProps {
-  mode: "sources" | "canvas" | "artifact";
+  mode: 'sources' | 'canvas' | 'artifact';
   children: React.ReactNode;
 }
 
@@ -41,7 +41,7 @@ export function ProjectRightDock({ mode, children }: ProjectRightDockProps) {
   }, [mode]);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
+    if (typeof window !== 'undefined') {
       window.localStorage.setItem(getStorageKey(mode), String(width));
     }
   }, [mode, width]);
@@ -52,8 +52,8 @@ export function ProjectRightDock({ mode, children }: ProjectRightDockProps) {
       isDragging.current = true;
       startX.current = event.clientX;
       startWidth.current = width;
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
     },
     [width]
   );
@@ -69,15 +69,15 @@ export function ProjectRightDock({ mode, children }: ProjectRightDockProps) {
     const handleMouseUp = () => {
       if (!isDragging.current) return;
       isDragging.current = false;
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
     };
 
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
     return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
     };
   }, []);
 

@@ -1,9 +1,5 @@
-export type FileTextPart =
-  | { type: 'text'; value: string }
-  | { type: 'file'; value: string };
-export type FileChildPart =
-  | FileTextPart
-  | { type: 'node'; value: unknown };
+export type FileTextPart = { type: 'text'; value: string } | { type: 'file'; value: string };
+export type FileChildPart = FileTextPart | { type: 'node'; value: unknown };
 
 const fileLinkButtonClassName =
   'text-accent hover:text-accent-hover underline underline-offset-2 text-left break-all inline-block';
@@ -21,7 +17,7 @@ const boundaryPattern = new RegExp(`[\\s${escapeForCharClass(boundaryChars)}]`);
 const asciiFilenamePattern = /[A-Za-z0-9][A-Za-z0-9._-]*\.[A-Za-z0-9]{1,8}/gi;
 const cjkFilenamePattern = new RegExp(
   `(?:^|${boundaryPattern.source})([\\p{Script=Han}0-9_-]+\\.[A-Za-z0-9]{1,8})`,
-  'gu',
+  'gu'
 );
 const pathPattern = /(?:[A-Za-z]:\\|\/)[^\n]+?\.[a-z0-9]{1,8}/gi;
 

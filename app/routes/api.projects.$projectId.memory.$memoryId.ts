@@ -1,16 +1,19 @@
-import { parseJsonBody } from "~/lib/request-utils";
-import type { Route } from "./+types/api.projects.$projectId.memory.$memoryId";
+import { env } from '~/lib/env.server';
+import { requireProjectApiAccess } from '~/lib/project-access.server';
+import { parseJsonBody } from '~/lib/request-utils';
+import type { Route } from './+types/api.projects.$projectId.memory.$memoryId';
 
-const RUNTIME_URL = process.env.RUNTIME_URL || "http://localhost:8081";
+const RUNTIME_URL = env.LANGGRAPH_RUNTIME_URL;
 
 function memoryNamespace(projectId: string): string[] {
-  return ["open-analyst", "projects", projectId, "memories"];
+  return ['open-analyst', 'projects', projectId, 'memories'];
 }
 
-export async function loader({ params }: Route.LoaderArgs) {
+export async function loader({ params, request }: Route.LoaderArgs) {
+  await requireProjectApiAccess(request, params.projectId);
   const res = await fetch(`${RUNTIME_URL}/store/items/search`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       namespace_prefix: memoryNamespace(params.projectId),
       filter: { key: params.memoryId },
@@ -19,7 +22,7 @@ export async function loader({ params }: Route.LoaderArgs) {
   });
 
   if (!res.ok) {
-    const detail = await res.text().catch(() => "");
+    const detail = await res.text().catch(() => '');
     return Response.json({ error: `Store API error: ${res.status} ${detail}` }, { status: 502 });
   }
 
@@ -28,7 +31,7 @@ export async function loader({ params }: Route.LoaderArgs) {
   const match = items.find((item) => item.key === params.memoryId);
 
   if (!match) {
-    return Response.json({ error: "Project memory not found" }, { status: 404 });
+    return Response.json({ error: 'Project memory not found' }, { status: 404 });
   }
 
   const value = (match.value ?? {}) as Record<string, unknown>;
@@ -43,11 +46,12 @@ export async function loader({ params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  if (request.method === "PATCH") {
+  await requireProjectApiAccess(request, params.projectId);
+  if (request.method === 'PATCH') {
     // Fetch existing value first
     const getRes = await fetch(`${RUNTIME_URL}/store/items/search`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         namespace_prefix: memoryNamespace(params.projectId),
         filter: { key: params.memoryId },
@@ -59,7 +63,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     const existing = items.find((item) => item.key === params.memoryId);
 
     if (!existing) {
-      return Response.json({ error: "Project memory not found" }, { status: 404 });
+      return Response.json({ error: 'Project memory not found' }, { status: 404 });
     }
 
     const existingValue = (existing.value ?? {}) as Record<string, unknown>;
@@ -68,22 +72,22 @@ export async function action({ request, params }: Route.ActionArgs) {
 
     const updatedValue = {
       ...existingValue,
-      ...(typeof body.title === "string" ? { title: body.title } : {}),
-      ...(typeof body.summary === "string" ? { summary: body.summary } : {}),
-      ...(typeof body.content === "string" ? { content: body.content } : {}),
-      ...(body.status === "proposed" || body.status === "active" || body.status === "dismissed"
+      ...(typeof body.title === 'string' ? { title: body.title } : {}),
+      ...(typeof body.summary === 'string' ? { summary: body.summary } : {}),
+      ...(typeof body.content === 'string' ? { content: body.content } : {}),
+      ...(body.status === 'proposed' || body.status === 'active' || body.status === 'dismissed'
         ? { status: body.status }
         : {}),
-      ...(body.metadata && typeof body.metadata === "object" ? { metadata: body.metadata } : {}),
-      ...(body.provenance && typeof body.provenance === "object"
+      ...(body.metadata && typeof body.metadata === 'object' ? { metadata: body.metadata } : {}),
+      ...(body.provenance && typeof body.provenance === 'object'
         ? { provenance: body.provenance }
         : {}),
       updatedAt: new Date().toISOString(),
     };
 
     const putRes = await fetch(`${RUNTIME_URL}/store/items`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         namespace: memoryNamespace(params.projectId),
         key: params.memoryId,
@@ -92,17 +96,20 @@ export async function action({ request, params }: Route.ActionArgs) {
     });
 
     if (!putRes.ok) {
-      const detail = await putRes.text().catch(() => "");
-      return Response.json({ error: `Store API error: ${putRes.status} ${detail}` }, { status: 502 });
+      const detail = await putRes.text().catch(() => '');
+      return Response.json(
+        { error: `Store API error: ${putRes.status} ${detail}` },
+        { status: 502 }
+      );
     }
 
     return Response.json({ memory: { id: params.memoryId, ...updatedValue } });
   }
 
-  if (request.method === "DELETE") {
+  if (request.method === 'DELETE') {
     const delRes = await fetch(`${RUNTIME_URL}/store/items`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         namespace: memoryNamespace(params.projectId),
         key: params.memoryId,
@@ -110,12 +117,15 @@ export async function action({ request, params }: Route.ActionArgs) {
     });
 
     if (!delRes.ok && delRes.status !== 404) {
-      const detail = await delRes.text().catch(() => "");
-      return Response.json({ error: `Store API error: ${delRes.status} ${detail}` }, { status: 502 });
+      const detail = await delRes.text().catch(() => '');
+      return Response.json(
+        { error: `Store API error: ${delRes.status} ${detail}` },
+        { status: 502 }
+      );
     }
 
     return Response.json({ ok: true });
   }
 
-  return Response.json({ error: "Method not allowed" }, { status: 405 });
+  return Response.json({ error: 'Method not allowed' }, { status: 405 });
 }

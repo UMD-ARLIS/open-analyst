@@ -1,6 +1,16 @@
 import { useAppStore } from '~/lib/store';
 import type { ArtifactMeta } from '~/lib/types';
-import { X, Download, FileText, FileSpreadsheet, Image, BookOpen, FileAudio, FileVideo, Loader2 } from 'lucide-react';
+import {
+  X,
+  Download,
+  FileText,
+  FileSpreadsheet,
+  Image,
+  BookOpen,
+  FileAudio,
+  FileVideo,
+  Loader2,
+} from 'lucide-react';
 import { DocxRenderer } from '~/components/file-renderers/DocxRenderer';
 import { XlsxRenderer } from '~/components/file-renderers/XlsxRenderer';
 import { TextRenderer } from '~/components/file-renderers/TextRenderer';
@@ -94,7 +104,9 @@ function MetadataPreview({ artifact }: { artifact: ArtifactMeta }) {
 
       {artifact.textPreview ? (
         <div className="rounded-xl border border-border bg-background px-4 py-3">
-          <div className="text-xs uppercase tracking-[0.16em] text-text-muted mb-2">Extracted text</div>
+          <div className="text-xs uppercase tracking-[0.16em] text-text-muted mb-2">
+            Extracted text
+          </div>
           <pre className="text-xs whitespace-pre-wrap break-words text-text-secondary">
             {artifact.textPreview}
           </pre>
@@ -103,7 +115,9 @@ function MetadataPreview({ artifact }: { artifact: ArtifactMeta }) {
 
       {Object.keys(metadata).length ? (
         <div className="rounded-xl border border-border bg-background px-4 py-3">
-          <div className="text-xs uppercase tracking-[0.16em] text-text-muted mb-2">Metadata JSON</div>
+          <div className="text-xs uppercase tracking-[0.16em] text-text-muted mb-2">
+            Metadata JSON
+          </div>
           <pre className="text-xs whitespace-pre-wrap break-words text-text-secondary">
             {JSON.stringify(metadata, null, 2)}
           </pre>
@@ -139,13 +153,7 @@ function FileContent({ artifact }: { artifact: ArtifactMeta }) {
 
   // PDF
   if (isPdf) {
-    return (
-      <iframe
-        src={previewUrl}
-        className="w-full h-full border-0"
-        title={artifact.filename}
-      />
-    );
+    return <iframe src={previewUrl} className="w-full h-full border-0" title={artifact.filename} />;
   }
 
   // Image
@@ -172,7 +180,13 @@ function FileContent({ artifact }: { artifact: ArtifactMeta }) {
   }
 
   if (isHtml) {
-    return <iframe src={previewUrl} className="w-full h-full border-0 bg-white" title={artifact.filename} />;
+    return (
+      <iframe
+        src={previewUrl}
+        className="w-full h-full border-0 bg-white"
+        title={artifact.filename}
+      />
+    );
   }
 
   if (isAudio) {
@@ -210,23 +224,26 @@ export function FileViewerPanel({ onOpenKnowledge }: FileViewerPanelProps) {
   if (!artifact) return null;
 
   const { icon: Icon, color } = getArtifactIconColor(artifact.mimeType);
-  const HeaderIcon =
-    isAudioMime(artifact.mimeType) ? FileAudio : isVideoMime(artifact.mimeType) ? FileVideo : Icon;
+  const HeaderIcon = isAudioMime(artifact.mimeType)
+    ? FileAudio
+    : isVideoMime(artifact.mimeType)
+      ? FileVideo
+      : Icon;
 
   return (
     <div className="bg-surface flex flex-col shrink-0 relative min-h-0 h-full">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border shrink-0">
-        <div className={`w-7 h-7 rounded-lg bg-surface-muted flex items-center justify-center ${color}`}>
+        <div
+          className={`w-7 h-7 rounded-lg bg-surface-muted flex items-center justify-center ${color}`}
+        >
           <HeaderIcon className="w-3.5 h-3.5" />
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-text-primary truncate">
             {artifact.title || artifact.filename}
           </p>
-          <p className="text-xs text-text-muted">
-            {formatFileSize(artifact.size)}
-          </p>
+          <p className="text-xs text-text-muted">{formatFileSize(artifact.size)}</p>
         </div>
         <div className="flex items-center gap-1">
           {onOpenKnowledge && (

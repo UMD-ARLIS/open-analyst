@@ -1,16 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useRevalidator } from "react-router";
-import { FilePlus2, GripVertical, Save, Upload, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRevalidator } from 'react-router';
+import { FilePlus2, GripVertical, Save, Upload, X } from 'lucide-react';
 import {
   headlessCreateCanvasDocument,
   headlessGetCanvasDocuments,
   type HeadlessCanvasDocument,
-} from "~/lib/headless-api";
+} from '~/lib/headless-api';
 
 const MIN_NAV_WIDTH = 220;
 const MAX_NAV_WIDTH = 480;
 const DEFAULT_NAV_WIDTH = 260;
-const SPLIT_STORAGE_KEY = "open-analyst:canvas:list-width";
+const SPLIT_STORAGE_KEY = 'open-analyst:canvas:list-width';
+const DRAFT_BACKUP_KEY_PREFIX = 'open-analyst:canvas:draft-backup:';
+const AUTO_SAVE_INTERVAL_MS = 30_000;
 
 interface CanvasPanelProps {
   projectId: string;
@@ -18,11 +20,11 @@ interface CanvasPanelProps {
 }
 
 function getMarkdown(content: Record<string, unknown> | null | undefined): string {
-  return typeof content?.markdown === "string" ? content.markdown : "";
+  return typeof content?.markdown === 'string' ? content.markdown : '';
 }
 
 function getInitialNavWidth() {
-  if (typeof window === "undefined") return DEFAULT_NAV_WIDTH;
+  if (typeof window === 'undefined') return DEFAULT_NAV_WIDTH;
   const saved = window.localStorage.getItem(SPLIT_STORAGE_KEY);
   const parsed = saved ? Number(saved) : Number.NaN;
   if (!Number.isFinite(parsed)) return DEFAULT_NAV_WIDTH;
@@ -33,35 +35,103 @@ export function CanvasPanel({ projectId, onClose }: CanvasPanelProps) {
   const { revalidate } = useRevalidator();
   const [documents, setDocuments] = useState<HeadlessCanvasDocument[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
-  const [title, setTitle] = useState("");
+  const [draft, setDraft] = useState('');
+  const [title, setTitle] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishToSources, setPublishToSources] = useState(false);
-  const [statusText, setStatusText] = useState("");
+  const [statusText, setStatusText] = useState('');
   const [navWidth, setNavWidth] = useState(() => getInitialNavWidth());
   const isDragging = useRef(false);
   const startX = useRef(0);
   const startWidth = useRef(0);
+  const lastSavedDraftRef = useRef('');
+  const backupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const isDirty = activeId != null && draft !== lastSavedDraftRef.current;
+
+  const backupKey = `${DRAFT_BACKUP_KEY_PREFIX}${projectId}`;
+
+  // localStorage backup — debounced write on every draft change
+  useEffect(() => {
+    if (!activeId || typeof window === 'undefined') return;
+    if (backupTimerRef.current) clearTimeout(backupTimerRef.current);
+    backupTimerRef.current = setTimeout(() => {
+      try {
+        window.localStorage.setItem(
+          backupKey,
+          JSON.stringify({ activeId, title, draft, savedAt: Date.now() })
+        );
+      } catch {
+        /* quota exceeded — ignore */
+      }
+    }, 1000);
+    return () => {
+      if (backupTimerRef.current) clearTimeout(backupTimerRef.current);
+    };
+  }, [activeId, backupKey, draft, title]);
+
+  // beforeunload warning when dirty
+  useEffect(() => {
+    if (!isDirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [isDirty]);
 
   useEffect(() => {
     let active = true;
     void headlessGetCanvasDocuments(projectId).then((next) => {
       if (!active) return;
       setDocuments(next);
-      if (next[0]) {
+
+      // Check for localStorage backup
+      let restored = false;
+      if (typeof window !== 'undefined') {
+        try {
+          const raw = window.localStorage.getItem(backupKey);
+          if (raw) {
+            const backup = JSON.parse(raw) as {
+              activeId?: string;
+              title?: string;
+              draft?: string;
+              savedAt?: number;
+            };
+            const backupDoc = backup.activeId ? next.find((d) => d.id === backup.activeId) : null;
+            if (backupDoc && backup.draft && backup.savedAt) {
+              const serverMarkdown = getMarkdown(backupDoc.content as Record<string, unknown>);
+              if (backup.draft !== serverMarkdown) {
+                setActiveId(backupDoc.id);
+                setTitle(backup.title || backupDoc.title);
+                setDraft(backup.draft);
+                lastSavedDraftRef.current = serverMarkdown;
+                setStatusText('Restored unsaved draft from local backup.');
+                restored = true;
+              }
+            }
+          }
+        } catch {
+          /* corrupt backup — ignore */
+        }
+      }
+
+      if (!restored && next[0]) {
         setActiveId(next[0].id);
         setTitle(next[0].title);
-        setDraft(getMarkdown(next[0].content as Record<string, unknown>));
+        const md = getMarkdown(next[0].content as Record<string, unknown>);
+        setDraft(md);
+        lastSavedDraftRef.current = md;
       }
     });
     return () => {
       active = false;
     };
-  }, [projectId]);
+  }, [backupKey, projectId]);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
+    if (typeof window !== 'undefined') {
       window.localStorage.setItem(SPLIT_STORAGE_KEY, String(navWidth));
     }
   }, [navWidth]);
@@ -77,15 +147,15 @@ export function CanvasPanel({ projectId, onClose }: CanvasPanelProps) {
     const handleMouseUp = () => {
       if (!isDragging.current) return;
       isDragging.current = false;
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
     };
 
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
     return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
     };
   }, []);
 
@@ -102,45 +172,56 @@ export function CanvasPanel({ projectId, onClose }: CanvasPanelProps) {
     if (target) {
       setActiveId(target.id);
       setTitle(target.title);
-      setDraft(getMarkdown(target.content as Record<string, unknown>));
+      const md = getMarkdown(target.content as Record<string, unknown>);
+      setDraft(md);
+      lastSavedDraftRef.current = md;
     } else {
       setActiveId(null);
-      setTitle("");
-      setDraft("");
+      setTitle('');
+      setDraft('');
+      lastSavedDraftRef.current = '';
+    }
+    // Clear backup after successful refresh
+    try {
+      window.localStorage.removeItem(backupKey);
+    } catch {
+      /* ignore */
     }
   };
 
   const selectDocument = (document: HeadlessCanvasDocument) => {
     setActiveId(document.id);
     setTitle(document.title);
-    setDraft(getMarkdown(document.content as Record<string, unknown>));
-    setStatusText("");
+    const md = getMarkdown(document.content as Record<string, unknown>);
+    setDraft(md);
+    lastSavedDraftRef.current = md;
+    setStatusText('');
   };
 
   const handleCreate = async () => {
     const next = await headlessCreateCanvasDocument(projectId, {
-      title: "New Analysis Draft",
-      documentType: "markdown",
-      content: { markdown: "# New Analysis Draft\n\n" },
+      title: 'New Analysis Draft',
+      documentType: 'markdown',
+      content: { markdown: '# New Analysis Draft\n\n' },
     });
     await refreshDocuments(next.id);
-    setStatusText("Created a new canvas draft.");
+    setStatusText('Created a new canvas draft.');
   };
 
-  const handleSave = async () => {
+  const handleSave = useCallback(async () => {
     if (!activeDocument) return;
     setIsSaving(true);
-    setStatusText("");
+    setStatusText('');
     try {
       const response = await fetch(
         `/api/projects/${encodeURIComponent(projectId)}/canvas-documents`,
         {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             id: activeDocument.id,
             title: title.trim() || activeDocument.title,
-            documentType: "markdown",
+            documentType: 'markdown',
             content: { markdown: draft },
             metadata: activeDocument.metadata || {},
             artifactId: activeDocument.artifactId || null,
@@ -148,29 +229,38 @@ export function CanvasPanel({ projectId, onClose }: CanvasPanelProps) {
         }
       );
       if (!response.ok) {
-        throw new Error("Failed to save canvas document");
+        throw new Error('Failed to save canvas document');
       }
       await refreshDocuments(activeDocument.id);
-      setStatusText("Draft saved.");
+      setStatusText('Draft saved.');
     } finally {
       setIsSaving(false);
     }
-  };
+  }, [activeDocument, draft, projectId, title]);
+
+  // Auto-save every 30 seconds when dirty
+  useEffect(() => {
+    if (!isDirty || isSaving) return;
+    const timer = setTimeout(() => {
+      void handleSave();
+    }, AUTO_SAVE_INTERVAL_MS);
+    return () => clearTimeout(timer);
+  }, [isDirty, isSaving, handleSave]);
 
   const handlePublish = async () => {
     if (!activeDocument) return;
     setIsPublishing(true);
-    setStatusText("");
+    setStatusText('');
     try {
       const saveResponse = await fetch(
         `/api/projects/${encodeURIComponent(projectId)}/canvas-documents`,
         {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             id: activeDocument.id,
             title: title.trim() || activeDocument.title,
-            documentType: "markdown",
+            documentType: 'markdown',
             content: { markdown: draft },
             metadata: activeDocument.metadata || {},
             artifactId: activeDocument.artifactId || null,
@@ -178,29 +268,29 @@ export function CanvasPanel({ projectId, onClose }: CanvasPanelProps) {
         }
       );
       if (!saveResponse.ok) {
-        throw new Error("Failed to save canvas draft before publish");
+        throw new Error('Failed to save canvas draft before publish');
       }
       const response = await fetch(
         `/api/projects/${encodeURIComponent(projectId)}/canvas-documents/${encodeURIComponent(activeDocument.id)}/publish`,
         {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             addToSources: publishToSources,
-            changeSummary: "Published from canvas",
-            collectionName: publishToSources ? "Reports" : undefined,
+            changeSummary: 'Published from canvas',
+            collectionName: publishToSources ? 'Reports' : undefined,
           }),
         }
       );
       if (!response.ok) {
-        throw new Error("Failed to publish canvas document");
+        throw new Error('Failed to publish canvas document');
       }
       await refreshDocuments(activeDocument.id);
       revalidate();
       setStatusText(
         publishToSources
-          ? "Published to artifact storage and added to Reports."
-          : "Published to artifact storage."
+          ? 'Published to artifact storage and added to Reports.'
+          : 'Published to artifact storage.'
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -215,8 +305,8 @@ export function CanvasPanel({ projectId, onClose }: CanvasPanelProps) {
     isDragging.current = true;
     startX.current = event.clientX;
     startWidth.current = navWidth;
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
   };
 
   return (
@@ -234,7 +324,11 @@ export function CanvasPanel({ projectId, onClose }: CanvasPanelProps) {
       </div>
 
       <div className="border-b border-border px-3 py-2 flex items-center gap-2 flex-wrap">
-        <button type="button" className="btn btn-secondary text-sm" onClick={() => void handleCreate()}>
+        <button
+          type="button"
+          className="btn btn-secondary text-sm"
+          onClick={() => void handleCreate()}
+        >
           <FilePlus2 className="w-4 h-4" />
           New
         </button>
@@ -271,7 +365,10 @@ export function CanvasPanel({ projectId, onClose }: CanvasPanelProps) {
       ) : null}
 
       <div className="flex-1 min-h-0 flex">
-        <div className="border-r border-border overflow-y-auto p-2 space-y-1" style={{ width: navWidth }}>
+        <div
+          className="border-r border-border overflow-y-auto p-2 space-y-1"
+          style={{ width: navWidth }}
+        >
           {documents.map((document) => (
             <button
               key={document.id}
@@ -279,13 +376,13 @@ export function CanvasPanel({ projectId, onClose }: CanvasPanelProps) {
               onClick={() => selectDocument(document)}
               className={`w-full rounded-lg px-3 py-2 text-left text-sm ${
                 document.id === activeId
-                  ? "bg-accent-muted text-accent"
-                  : "hover:bg-surface-hover text-text-secondary"
+                  ? 'bg-accent-muted text-accent'
+                  : 'hover:bg-surface-hover text-text-secondary'
               }`}
             >
               <div className="font-medium truncate">{document.title}</div>
               <div className="text-xs text-text-muted">
-                {document.artifactId ? "published draft" : "draft only"}
+                {document.artifactId ? 'published draft' : 'draft only'}
               </div>
             </button>
           ))}

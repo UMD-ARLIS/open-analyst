@@ -4,9 +4,11 @@ node_modules
 build
 test-results
 playwright-report
-services/strands-agent/.venv
-services/analyst-mcp/.venv
-services/**/__pycache__
-services/**/*.pyc
+services/
+!services/langgraph-runtime/
+!services/langgraph-runtime/**
+infra/
+k8s/
+docs/
 .env
 *.log

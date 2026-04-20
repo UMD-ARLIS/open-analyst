@@ -1,20 +1,23 @@
-import { v4 as uuidv4 } from "uuid";
-import { parseJsonBody } from "~/lib/request-utils";
-import type { Route } from "./+types/api.projects.$projectId.memory";
+import { v4 as uuidv4 } from 'uuid';
+import { env } from '~/lib/env.server';
+import { requireProjectApiAccess } from '~/lib/project-access.server';
+import { parseJsonBody } from '~/lib/request-utils';
+import type { Route } from './+types/api.projects.$projectId.memory';
 
-const RUNTIME_URL = process.env.RUNTIME_URL || "http://localhost:8081";
+const RUNTIME_URL = env.LANGGRAPH_RUNTIME_URL;
 
 function memoryNamespace(projectId: string): string[] {
-  return ["open-analyst", "projects", projectId, "memories"];
+  return ['open-analyst', 'projects', projectId, 'memories'];
 }
 
 export async function loader({ request, params }: Route.LoaderArgs) {
+  await requireProjectApiAccess(request, params.projectId);
   const url = new URL(request.url);
-  const status = url.searchParams.get("status") || undefined;
+  const status = url.searchParams.get('status') || undefined;
 
   const res = await fetch(`${RUNTIME_URL}/store/items/search`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       namespace_prefix: memoryNamespace(params.projectId),
       limit: 100,
@@ -22,7 +25,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   });
 
   if (!res.ok) {
-    const detail = await res.text().catch(() => "");
+    const detail = await res.text().catch(() => '');
     return Response.json({ error: `Store API error: ${res.status} ${detail}` }, { status: 502 });
   }
 
@@ -35,7 +38,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       return {
         id: item.key as string,
         ...value,
-        status: value.status ?? "active",
+        status: value.status ?? 'active',
         createdAt: item.created_at ?? value.createdAt,
         updatedAt: item.updated_at ?? value.updatedAt,
       };
@@ -46,25 +49,26 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  if (request.method !== "POST") {
-    return Response.json({ error: "Method not allowed" }, { status: 405 });
+  if (request.method !== 'POST') {
+    return Response.json({ error: 'Method not allowed' }, { status: 405 });
   }
+  await requireProjectApiAccess(request, params.projectId);
 
   const body = await parseJsonBody(request);
   if (body instanceof Response) return body;
   const memoryId = uuidv4();
   const memoryPayload = {
-    title: typeof body.title === "string" ? body.title : "Untitled memory",
-    summary: typeof body.summary === "string" ? body.summary : "",
-    content: typeof body.content === "string" ? body.content : "",
-    memoryType: typeof body.memoryType === "string" ? body.memoryType : "note",
-    status: typeof body.status === "string" ? body.status : "proposed",
+    title: typeof body.title === 'string' ? body.title : 'Untitled memory',
+    summary: typeof body.summary === 'string' ? body.summary : '',
+    content: typeof body.content === 'string' ? body.content : '',
+    memoryType: typeof body.memoryType === 'string' ? body.memoryType : 'note',
+    status: typeof body.status === 'string' ? body.status : 'proposed',
     metadata:
-      body.metadata && typeof body.metadata === "object"
+      body.metadata && typeof body.metadata === 'object'
         ? (body.metadata as Record<string, unknown>)
         : {},
     provenance:
-      body.provenance && typeof body.provenance === "object"
+      body.provenance && typeof body.provenance === 'object'
         ? (body.provenance as Record<string, unknown>)
         : {},
     createdAt: new Date().toISOString(),
@@ -72,8 +76,8 @@ export async function action({ request, params }: Route.ActionArgs) {
   };
 
   const res = await fetch(`${RUNTIME_URL}/store/items`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       namespace: memoryNamespace(params.projectId),
       key: memoryId,
@@ -82,7 +86,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   });
 
   if (!res.ok) {
-    const detail = await res.text().catch(() => "");
+    const detail = await res.text().catch(() => '');
     return Response.json({ error: `Store API error: ${res.status} ${detail}` }, { status: 502 });
   }
 

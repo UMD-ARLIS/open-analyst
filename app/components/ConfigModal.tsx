@@ -12,11 +12,19 @@ interface ConfigModalProps {
   isFirstRun?: boolean;
 }
 
-export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun }: ConfigModalProps) {
+export function ConfigModal({
+  isOpen,
+  onClose,
+  onSave,
+  initialConfig,
+  isFirstRun,
+}: ConfigModalProps) {
   const [model, setModel] = useState(initialConfig?.model || '');
   const [customModel, setCustomModel] = useState('');
   const [useCustomModel, setUseCustomModel] = useState(false);
-  const [models, setModels] = useState<Array<{ id: string; name: string; supportsTools: boolean }>>([]);
+  const [models, setModels] = useState<Array<{ id: string; name: string; supportsTools: boolean }>>(
+    []
+  );
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
@@ -33,7 +41,9 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
           setModel((list.find((item) => item.supportsTools) || list[0]).id);
         }
       })
-      .catch((e) => setError(`Failed to load models: ${e instanceof Error ? e.message : String(e)}`))
+      .catch((e) =>
+        setError(`Failed to load models: ${e instanceof Error ? e.message : String(e)}`)
+      )
       .finally(() => setLoading(false));
   }, [isOpen]);
 
@@ -50,7 +60,9 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
       return;
     }
     if (!supportsToolCalling(finalModel)) {
-      setError('This model does not appear to support tool calling. Choose a tool-capable model such as Claude Sonnet or Opus.');
+      setError(
+        'This model does not appear to support tool calling. Choose a tool-capable model such as Claude Sonnet or Opus.'
+      );
       return;
     }
 
@@ -100,7 +112,8 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
 
         <div className="p-6 space-y-5 max-h-[60vh] overflow-y-auto">
           <p className="text-sm text-text-secondary">
-            Models are served through the LiteLLM gateway. Open Analyst requires a model that supports tool calling.
+            Models are served through the LiteLLM gateway. Open Analyst requires a model that
+            supports tool calling.
           </p>
 
           <div className="space-y-2">
@@ -125,7 +138,9 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
               >
                 {loading && <option>Loading models...</option>}
                 {models.map((m) => (
-                  <option key={m.id} value={m.id}>{m.supportsTools ? m.name : `${m.name} (no tool support)`}</option>
+                  <option key={m.id} value={m.id}>
+                    {m.supportsTools ? m.name : `${m.name} (no tool support)`}
+                  </option>
                 ))}
               </select>
             )}

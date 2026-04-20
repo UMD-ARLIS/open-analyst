@@ -8,6 +8,7 @@ import os
 import random
 import re
 import shlex
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,8 @@ from uuid import uuid4
 import httpx
 
 from config import settings
+from langchain_core.runnables import RunnableConfig
+from langgraph_sdk.runtime import ServerRuntime
 from models import RuntimeProjectContext
 from retrieval import retrieval_service
 from telemetry import get_tracer
@@ -88,6 +91,11 @@ CONSOLIDATED_BRANCH_PREVIEW_LIMIT = 3
 CONSOLIDATED_IMPORT_CHUNK_SIZE = 25
 _MODEL_CONCURRENCY_SEMAPHORE: asyncio.Semaphore | None = None
 _MODEL_RATE_LIMITER: Any | None = None
+_WEBAPP_API_RETRY_ATTEMPTS = 3
+
+
+def _json_object(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def _iter_exception_chain(exc: Exception) -> list[Exception]:
@@ -120,7 +128,10 @@ def _extract_error_status_code(exc: Exception) -> int | None:
 
 
 def _is_retryable_model_error(exc: Exception) -> bool:
-    if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError)):
+    if any(
+        isinstance(current, (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError))
+        for current in _iter_exception_chain(exc)
+    ):
         return True
     status_code = _extract_error_status_code(exc)
     if status_code in {408, 409, 429}:
@@ -140,6 +151,8 @@ def _is_retryable_model_error(exc: Exception) -> bool:
             "timed out",
             "timeout",
             "connection reset",
+            "remoteprotocolerror",
+            "internal error occurred",
         )
     )
 
@@ -232,53 +245,6 @@ class SupervisorToolGuard(AgentMiddleware if AgentMiddleware is not None else ob
         return await handler(request)
 
 
-class ModeToolGuard(AgentMiddleware if AgentMiddleware is not None else object):
-    """Restrict supervisor behavior by interaction mode."""
-
-    CHAT_BLOCKED_TOOLS = {"task", "write_todos", "approve_collected_literature", "propose_project_memory"}
-
-    def _analysis_mode(self, request: Any) -> str:
-        runtime = getattr(request, "runtime", None)
-        cfg = _get_project_config(runtime)
-        return _normalize_analysis_mode(cfg.get("analysis_mode"))
-
-    def _block(self, request: Any, reason: str) -> Any:
-        tool_name = str(getattr(request, "tool_call", {}).get("name") or "tool")
-        tool_call_id = str(getattr(request, "tool_call", {}).get("id") or f"blocked-{tool_name}")
-        return ToolMessage(
-            content=reason,
-            name=tool_name,
-            tool_call_id=tool_call_id,
-            status="error",
-        )
-
-    def wrap_tool_call(self, request: Any, handler: Any) -> Any:
-        tool_name = str(getattr(request, "tool_call", {}).get("name") or "")
-        if ToolMessage is not None and self._analysis_mode(request) == "chat" and tool_name in self.CHAT_BLOCKED_TOOLS:
-            return self._block(
-                request,
-                (
-                    f"{tool_name} is disabled in Chat mode. "
-                    "Chat mode is conversational and read-only. Switch to Research mode for structured retrieval "
-                    "or Product mode for drafting and publication."
-                ),
-            )
-        return handler(request)
-
-    async def awrap_tool_call(self, request: Any, handler: Any) -> Any:
-        tool_name = str(getattr(request, "tool_call", {}).get("name") or "")
-        if ToolMessage is not None and self._analysis_mode(request) == "chat" and tool_name in self.CHAT_BLOCKED_TOOLS:
-            return self._block(
-                request,
-                (
-                    f"{tool_name} is disabled in Chat mode. "
-                    "Chat mode is conversational and read-only. Switch to Research mode for structured retrieval "
-                    "or Product mode for drafting and publication."
-                ),
-            )
-        return await handler(request)
-
-
 class ResilientModelMiddleware(AgentMiddleware if AgentMiddleware is not None else object):
     """Add client-side admission control and graceful retry/fallback for transient model failures.
 
@@ -318,13 +284,35 @@ class ResilientModelMiddleware(AgentMiddleware if AgentMiddleware is not None el
             return await self._invoke_with_retries(request, handler)
         except Exception as primary_exc:
             if _is_retryable_model_error(primary_exc):
+                logger.warning(
+                    "Primary model call failed after retries; attempting fallbacks",
+                    extra={
+                        "model": getattr(request, "model", None) or settings.default_chat_model,
+                        "fallback_models": [getattr(model, "model_name", None) or str(model) for model in self.fallback_models],
+                        "error": str(primary_exc),
+                    },
+                )
                 for fallback_model in self.fallback_models:
                     try:
                         return await self._invoke_with_retries(request, handler, model_override=fallback_model)
                     except Exception as fallback_exc:
+                        logger.warning(
+                            "Fallback model call failed",
+                            extra={
+                                "fallback_model": getattr(fallback_model, "model_name", None) or str(fallback_model),
+                                "error": str(fallback_exc),
+                            },
+                        )
                         if not _is_retryable_model_error(fallback_exc):
                             raise
                 if AIMessage is not None:
+                    logger.warning(
+                        "Returning graceful transient model failure message to agent",
+                        extra={
+                            "model": getattr(request, "model", None) or settings.default_chat_model,
+                            "error": str(primary_exc),
+                        },
+                    )
                     return AIMessage(content=_format_model_transient_failure(primary_exc))
             raise
 
@@ -378,10 +366,20 @@ def _normalize_analysis_mode(value: Any) -> str:
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    env_root = os.environ.get("REPO_ROOT", "")
+    if env_root:
+        return Path(env_root)
+    try:
+        return Path(__file__).resolve().parents[3]
+    except IndexError:
+        # Inside Docker the path hierarchy is shorter; fall back to /app
+        return Path(__file__).resolve().parent.parent
 
 
 def _skills_root() -> Path:
+    env_skills = os.environ.get("SKILLS_DIR", "")
+    if env_skills:
+        return Path(env_skills)
     return _repo_root() / "skills"
 
 
@@ -424,6 +422,14 @@ def _runtime_capabilities_payload(cfg: dict[str, Any]) -> dict[str, Any]:
     analysis_mode = _normalize_analysis_mode(cfg.get("analysis_mode"))
     direct_tools = [
         {
+            "name": "approve_collected_literature",
+            "description": "Present one consolidated approval for staged literature and web sources.",
+        },
+        {
+            "name": "stage_web_source",
+            "description": "Queue a web source for consolidated approval and project import.",
+        },
+        {
             "name": "search_project_documents",
             "description": "Search indexed project documents already in the store.",
         },
@@ -444,22 +450,24 @@ def _runtime_capabilities_payload(cfg: dict[str, Any]) -> dict[str, Any]:
             "description": "Inspect existing canvas documents in the project.",
         },
     ]
+    direct_tools = [
+        {
+            "name": "task",
+            "description": "Delegate specialized work to a subagent. Use this for research, drafting, review, and source collection.",
+        },
+        {
+            "name": "write_todos",
+            "description": "Create and update a visible plan for the current task.",
+        },
+        *direct_tools,
+    ]
     if analysis_mode != "chat":
-        direct_tools = [
-            {
-                "name": "task",
-                "description": "Delegate specialized work to a subagent. Use this for research, drafting, review, and source collection.",
-            },
-            {
-                "name": "write_todos",
-                "description": "Create and update a visible plan for the current task.",
-            },
-            *direct_tools,
+        direct_tools.append(
             {
                 "name": "propose_project_memory",
                 "description": "Persist a durable shared project memory for later retrieval.",
-            },
-        ]
+            }
+        )
     return {
         "project": cfg.get("project_name", ""),
         "current_date": cfg.get("current_date", ""),
@@ -482,7 +490,7 @@ def _runtime_capabilities_payload(cfg: dict[str, Any]) -> dict[str, Any]:
                 "description": "Fetches literature, stages sources, and gathers project material without drafting conclusions.",
                 "tools": [
                     "search_literature",
-                    "stage_literature_collection",
+                    "collect_literature_candidates",
                     "stage_web_source",
                     "search_project_documents",
                     "read_project_document",
@@ -1079,11 +1087,13 @@ def _system_prompt() -> str:
         "When the user asks what you can do, answer from the actual active tools, connectors, and skills. "
         "Your direct tools are limited to project retrieval, capability inspection, canvas inspection, "
         "and shared memory persistence; specialized work should be delegated.\n\n"
-        "## Modes\n"
-        "The active interaction mode arrives in the runtime system message.\n"
-        "- Chat mode: conversational, lightweight, and read-only. Do not create plans or delegate.\n"
-        "- Research mode: structured retrieval and synthesis.\n"
-        "- Product mode: structured planning, drafting, packaging, and publication.\n\n"
+        "## Workflow states\n"
+        "The runtime keeps an internal workflow state in thread metadata so the assistant can adapt its behavior. "
+        "Treat those states as execution hints, not as user-managed walls.\n"
+        "- chat: lightweight conversation and quick analysis\n"
+        "- research: structured retrieval, synthesis, and evidence review\n"
+        "- product: deliverable drafting, packaging, and publication\n\n"
+        "Do not tell the user to toggle modes manually. If the work needs to escalate into heavier retrieval or deliverable production, call request_mode_switch to ask for approval and then continue on the same thread.\n\n"
         "## Delegation\n"
         "Use the `task` tool to delegate specialized work to subagents:\n"
         "- subagent_type='reviewer': request clarification, branch analysis, and numbered user choices when the task is ambiguous\n"
@@ -1095,8 +1105,10 @@ def _system_prompt() -> str:
         "- subagent_type='packager': generate output files and format-specific deliverables\n"
         "- subagent_type='publisher': publish approved outputs and project artifacts\n"
         "- subagent_type='general-purpose': narrow fallback for synthesis that does not fit the named specialists\n\n"
-        "If the user wants to collect or add sources to the project while in Research or Product mode, delegate immediately to "
-        "the retriever subagent. Retriever branches gather candidates first; then you call approve_collected_literature once to present one consolidated approval.\n\n"
+        "If the user wants to collect or add sources to the project, delegate immediately to the retriever subagent. "
+        "Retriever branches gather candidates first; then you call approve_collected_literature once to present one consolidated approval.\n"
+        "Do not ask the user to approve sources in plain chat text when an approval tool is available.\n"
+        "If a retriever returns concrete web URLs without staging them, call stage_web_source for each URL and then call approve_collected_literature yourself.\n\n"
         "Never call a tool that appears only under a subagent's capabilities as if it were a direct supervisor tool. "
         "Use task(subagent_type=...) for those capabilities.\n\n"
         "Delegate rather than doing everything yourself. The retriever gathers sources, the researcher synthesizes them, "
@@ -1120,9 +1132,20 @@ def _system_prompt() -> str:
         "After parallel retriever branches finish, consolidate their candidates and request one final approval. Do not ask the user to approve each branch separately.\n\n"
         "Before launching a broad retrieval pass, check search_project_memories and reuse relevant findings unless the user explicitly asks for a refresh or revalidation. "
         "If the user asks what is already known or previously collected, default to memories and project documents first; do not launch new retrieval unless a concrete gap blocks an answer.\n\n"
-        "You can invoke multiple task() calls in parallel for independent work "
-        "(e.g., multiple retriever tasks for separate source sets, or multiple researcher tasks for competing hypotheses).\n"
-        "When a request naturally decomposes into independent lines of effort, launch multiple subagents in parallel before synthesizing.\n\n"
+        "## Collection deduplication\n"
+        "Before adding items to a collection, always check whether the item already exists by calling search_project_documents first. "
+        "Never add duplicates to a collection. The system enforces dedup by sourceUri and title, but you should also avoid staging sources that are already in the project.\n\n"
+        "## Parallel delegation (CRITICAL)\n"
+        "When the research question decomposes into 2+ independent retrieval lines, you MUST "
+        "launch multiple task(subagent_type='retriever') calls in the SAME response. Do NOT "
+        "wait for one retriever to finish before starting the next. Independent retrieval "
+        "lines include: different source types (academic vs web), different subtopics, "
+        "different date ranges, or different provider sets.\n\n"
+        "Example: if the user asks about 'AI policy impacts on supply chains', decompose into "
+        "parallel retrievers for (1) AI policy literature, (2) supply chain disruption sources, "
+        "(3) web search for recent policy announcements. Launch all three task() calls in one turn.\n\n"
+        "The same applies to researcher tasks — launch parallel researchers for independent "
+        "subquestions or competing hypotheses.\n\n"
         "## Clarification\n"
         "If the request is materially ambiguous or branches into distinct retrieval or drafting strategies, "
         "use task(subagent_type='reviewer') before launching broad work. "
@@ -1134,6 +1157,12 @@ def _system_prompt() -> str:
         "Do this before the first subagent delegation. Update todos after every major delegation boundary. "
         "This is mandatory for complex work because the UI depends on it. "
         "For any request that will require delegation, your first substantive action should be `write_todos` unless you can fully answer from current context in one turn.\n\n"
+        "## Web search\n"
+        "The retriever subagent has web_search (Tavily) and web_fetch (Tavily Extract) tools "
+        "in addition to academic literature search (arxiv, openalex, semantic scholar). "
+        "Use web search when the user asks about current events, non-academic topics, organizations, "
+        "news, or anything that academic databases won't cover. "
+        "Delegate to the retriever with clear instructions on whether to use web_search, search_literature, or both.\n\n"
         "## Filesystem and commands\n"
         "You do NOT have direct filesystem access. Do not use ls, read_file, write_file, "
         "edit_file, glob, grep, or execute. All file operations and command execution "
@@ -1187,6 +1216,10 @@ def _clean_text(value: Any, *, limit: int = 320) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 1].rstrip() + "…"
+
+
+def _trimmed(value: Any) -> str:
+    return str(value or "").strip()
 
 
 def _clean_authors(authors: Any, *, limit: int = 4) -> list[str]:
@@ -1332,18 +1365,91 @@ def _approval_unavailable(tool_name: str) -> str:
     )
 
 
+def _webapp_api_headers(project_id: str) -> dict[str, str]:
+    api_key = _trimmed(getattr(settings, "open_analyst_internal_api_key", ""))
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["x-open-analyst-internal-key"] = api_key
+    if project_id:
+        headers["x-open-analyst-project-id"] = str(project_id).strip()
+    return headers
+
+
+def _webapp_api_timeout() -> httpx.Timeout:
+    total = max(float(settings.request_timeout_seconds or 120.0), 5.0)
+    return httpx.Timeout(
+        timeout=total,
+        connect=min(total, 10.0),
+        read=total,
+        write=total,
+        pool=min(total, 5.0),
+    )
+
+
+def _webapp_request_error_detail(exc: Exception) -> str:
+    return _clean_text(str(exc), limit=260) or exc.__class__.__name__
+
+
+def _webapp_api_request_sync(
+    method: str,
+    url: str,
+    *,
+    headers: dict[str, str],
+    json_body: dict[str, Any] | None = None,
+) -> httpx.Response:
+    last_exc: Exception | None = None
+    for attempt in range(1, _WEBAPP_API_RETRY_ATTEMPTS + 1):
+        try:
+            with httpx.Client(timeout=_webapp_api_timeout(), trust_env=False) as client:
+                return client.request(method, url, headers=headers, json=json_body)
+        except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
+            last_exc = exc
+            if attempt >= _WEBAPP_API_RETRY_ATTEMPTS:
+                raise
+            delay = min(0.25 * (2 ** (attempt - 1)) + random.uniform(0.0, 0.2), 1.5)
+            logger.warning(
+                "Webapp API %s %s transient failure on attempt %s/%s: %s",
+                method,
+                url,
+                attempt,
+                _WEBAPP_API_RETRY_ATTEMPTS,
+                _webapp_request_error_detail(exc),
+            )
+            time.sleep(delay)
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError(f"Webapp API {method} {url} failed without an exception")
+
+
+async def _webapp_api_request(
+    method: str,
+    url: str,
+    *,
+    headers: dict[str, str],
+    json_body: dict[str, Any] | None = None,
+) -> httpx.Response:
+    return await asyncio.to_thread(
+        _webapp_api_request_sync,
+        method,
+        url,
+        headers=headers,
+        json_body=json_body,
+    )
+
 
 async def _list_canvas_documents_api(api_base_url: str, project_id: str) -> list[dict[str, Any]]:
     api_base_url = str(api_base_url or "").rstrip("/")
     if not api_base_url:
         return []
+    headers = _webapp_api_headers(project_id)
     try:
-        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-            response = await client.get(
-                f"{api_base_url}/api/projects/{project_id}/canvas-documents"
-            )
-            response.raise_for_status()
-            payload = response.json()
+        response = await _webapp_api_request(
+            "GET",
+            f"{api_base_url}/api/projects/{project_id}/canvas-documents",
+            headers=headers,
+        )
+        response.raise_for_status()
+        payload = response.json()
         documents = payload.get("documents") if isinstance(payload, dict) else []
         return documents if isinstance(documents, list) else []
     except Exception as exc:
@@ -1356,14 +1462,25 @@ async def _save_canvas_document_api(
     project_id: str,
     markdown: str,
     title: str = "Analysis Draft",
+    document_id: str | None = None,
 ) -> dict[str, Any] | None:
     api_base_url = str(api_base_url or "").rstrip("/")
     if not api_base_url or not markdown.strip():
         return None
+    headers = _webapp_api_headers(project_id)
     try:
         existing = await _list_canvas_documents_api(api_base_url, project_id)
-        if existing:
-            target = existing[0]
+        target: dict[str, Any] | None = None
+        if document_id:
+            target = next((d for d in existing if d.get("id") == document_id), None)
+        elif len(existing) == 1:
+            sole = existing[0]
+            sole_title = str(sole.get("title") or "").strip()
+            next_title = str(title or "").strip()
+            if not next_title or sole_title == next_title:
+                target = sole
+
+        if target:
             method = "PUT"
             body: dict[str, Any] = {
                 "id": target.get("id"),
@@ -1381,19 +1498,79 @@ async def _save_canvas_document_api(
                 "content": {"markdown": markdown},
                 "metadata": {"source": "deepagents-runtime"},
             }
-        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-            response = await client.request(
-                method,
-                f"{api_base_url}/api/projects/{project_id}/canvas-documents",
-                json=body,
-            )
-            response.raise_for_status()
-            payload = response.json()
+        response = await _webapp_api_request(
+            method,
+            f"{api_base_url}/api/projects/{project_id}/canvas-documents",
+            headers=headers,
+            json_body=body,
+        )
+        response.raise_for_status()
+        payload = response.json()
         document = payload.get("document") if isinstance(payload, dict) else None
         return document if isinstance(document, dict) else None
     except Exception as exc:
         logger.warning("Save canvas document API call failed: %s", exc)
         return None
+
+
+def _extract_canvas_markdown(document: dict[str, Any] | None) -> str:
+    if not isinstance(document, dict):
+        return ""
+    content = document.get("content")
+    if isinstance(content, dict):
+        markdown = content.get("markdown")
+        if isinstance(markdown, str):
+            return markdown
+    if isinstance(content, str):
+        return content
+    return ""
+
+
+async def _append_canvas_document_api(
+    api_base_url: str,
+    project_id: str,
+    markdown_chunk: str,
+    *,
+    title: str = "Analysis Draft",
+    document_id: str | None = None,
+    replace_existing: bool = False,
+) -> dict[str, Any] | None:
+    api_base_url = str(api_base_url or "").rstrip("/")
+    chunk = str(markdown_chunk or "").strip()
+    if not api_base_url or not chunk:
+        return None
+
+    existing = await _list_canvas_documents_api(api_base_url, project_id)
+    target: dict[str, Any] | None = None
+    if document_id:
+        target = next((d for d in existing if d.get("id") == document_id), None)
+    elif len(existing) == 1:
+        sole = existing[0]
+        sole_title = str(sole.get("title") or "").strip()
+        next_title = str(title or "").strip()
+        if not next_title or sole_title == next_title:
+            target = sole
+    elif len(existing) > 1:
+        target = next((d for d in existing if str(d.get("title") or "").strip() == title.strip()), None)
+
+    if target and not replace_existing:
+        current_markdown = _extract_canvas_markdown(target).strip()
+        next_markdown = f"{current_markdown}\n\n{chunk}".strip() if current_markdown else chunk
+        return await _save_canvas_document_api(
+            api_base_url,
+            project_id,
+            markdown=next_markdown,
+            title=title or str(target.get("title") or "Analysis Draft"),
+            document_id=str(target.get("id") or "") or None,
+        )
+
+    return await _save_canvas_document_api(
+        api_base_url,
+        project_id,
+        markdown=chunk,
+        title=title,
+        document_id=str(target.get("id") or "") or None if target and replace_existing else None,
+    )
 
 
 async def _publish_canvas_document_api(
@@ -1408,6 +1585,7 @@ async def _publish_canvas_document_api(
     api_base_url = str(api_base_url or "").rstrip("/")
     if not api_base_url:
         return None
+    headers = _webapp_api_headers(project_id)
     try:
         existing = await _list_canvas_documents_api(api_base_url, project_id)
         if not existing:
@@ -1416,18 +1594,19 @@ async def _publish_canvas_document_api(
         document_id = str(target.get("id") or "").strip()
         if not document_id:
             return None
-        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-            response = await client.post(
-                f"{api_base_url}/api/projects/{project_id}/canvas-documents/{document_id}/publish",
-                json={
-                    "addToSources": add_to_sources,
-                    "changeSummary": change_summary,
-                    "collectionName": collection_name or None,
-                    "collectionId": collection_id,
-                },
-            )
-            response.raise_for_status()
-            payload = response.json()
+        response = await _webapp_api_request(
+            "POST",
+            f"{api_base_url}/api/projects/{project_id}/canvas-documents/{document_id}/publish",
+            headers=headers,
+            json_body={
+                "addToSources": add_to_sources,
+                "changeSummary": change_summary,
+                "collectionName": collection_name or None,
+                "collectionId": collection_id,
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
         return payload if isinstance(payload, dict) else None
     except Exception as exc:
         logger.warning("Publish canvas document API call failed: %s", exc)
@@ -1446,6 +1625,7 @@ async def _publish_workspace_file_api(
     api_base_url = str(api_base_url or "").rstrip("/")
     if not api_base_url or not relative_path.strip():
         return None
+    headers = _webapp_api_headers(project_id)
     try:
         payload = {
             "relativePath": relative_path,
@@ -1454,13 +1634,14 @@ async def _publish_workspace_file_api(
             "collectionId": collection_id,
             "addToSources": add_to_sources,
         }
-        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-            response = await client.post(
-                f"{api_base_url}/api/projects/{project_id}/artifacts/capture",
-                json=payload,
-            )
-            response.raise_for_status()
-            body = response.json()
+        response = await _webapp_api_request(
+            "POST",
+            f"{api_base_url}/api/projects/{project_id}/artifacts/capture",
+            headers=headers,
+            json_body=payload,
+        )
+        response.raise_for_status()
+        body = response.json()
         if not isinstance(body, dict):
             return None
         artifact = body.get("artifact")
@@ -1571,32 +1752,78 @@ async def _stage_source_ingest_api(
     api_base_url = str(api_base_url or "").rstrip("/")
     if not api_base_url:
         logger.error("Stage source ingest skipped: api_base_url is empty")
-        return {}
+        return {
+            "status": "error",
+            "error": "Stage source ingest skipped because the runtime API base URL is empty.",
+            "details": {"reason": "missing_api_base_url"},
+        }
     url = f"{api_base_url}/api/projects/{project_id}/source-ingest"
+    headers = _webapp_api_headers(project_id)
+    if "x-open-analyst-internal-key" not in headers:
+        logger.error("Stage source ingest skipped: internal API key is not configured")
+        return {
+            "status": "error",
+            "error": "Stage source ingest skipped because the runtime internal API key is missing.",
+            "details": {"reason": "missing_internal_api_key", "url": url},
+        }
     try:
-        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-            response = await client.post(url, json=payload)
-            response.raise_for_status()
-            body = response.json()
+        response = await _webapp_api_request(
+            "POST",
+            url,
+            headers=headers,
+            json_body=payload,
+        )
+        response.raise_for_status()
+        body = response.json()
         if not isinstance(body, dict) or "batch" not in body:
             logger.error(
                 "Stage source ingest returned unexpected payload (keys=%s): %s",
                 list(body.keys()) if isinstance(body, dict) else type(body).__name__,
                 str(body)[:500],
             )
-            return {}
+            return {
+                "status": "error",
+                "error": "Stage source ingest returned an unexpected response payload.",
+                "details": {
+                    "reason": "unexpected_payload",
+                    "payload_type": type(body).__name__,
+                    "payload_preview": _clean_text(str(body), limit=300),
+                },
+            }
         return body
     except httpx.HTTPStatusError as exc:
+        response_text = _clean_text(exc.response.text, limit=300)
         logger.error(
             "Stage source ingest HTTP %s from %s: %s",
             exc.response.status_code,
             url,
             exc.response.text[:500],
         )
-        return {}
+        return {
+            "status": "error",
+            "error": (
+                f"Stage source ingest failed with HTTP {exc.response.status_code}"
+                + (f": {response_text}" if response_text else ".")
+            ),
+            "details": {
+                "reason": "http_error",
+                "status_code": exc.response.status_code,
+                "response_body": response_text,
+            },
+        }
     except Exception as exc:
         logger.error("Stage source ingest API call failed: %s", exc, exc_info=True)
-        return {}
+        detail = _clean_text(str(exc), limit=260) or exc.__class__.__name__
+        return {
+            "status": "error",
+            "error": f"Stage source ingest request failed: {detail}",
+            "details": {
+                "reason": "request_error",
+                "exception_type": exc.__class__.__name__,
+                "url": url,
+                "item_count": len(payload.get("items") or []) if isinstance(payload.get("items"), list) else 0,
+            },
+        }
 
 
 async def _approve_source_batch_api(
@@ -1612,25 +1839,69 @@ async def _approve_source_batch_api(
             api_base_url,
             batch_id,
         )
-        return {}
+        return {
+            "status": "error",
+            "error": "Approve source batch skipped because the runtime API base URL or batch id is missing.",
+            "details": {
+                "reason": "missing_inputs",
+                "missing_api_base_url": not bool(api_base_url),
+                "missing_batch_id": not bool(batch_id),
+            },
+        }
     url = f"{api_base_url}/api/projects/{project_id}/source-ingest/{batch_id}/approve"
+    headers = _webapp_api_headers(project_id)
+    if "x-open-analyst-internal-key" not in headers:
+        logger.error("Approve source batch skipped: internal API key is not configured")
+        return {
+            "status": "error",
+            "error": "Approve source batch skipped because the runtime internal API key is missing.",
+            "details": {"reason": "missing_internal_api_key", "url": url},
+        }
     try:
-        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-            response = await client.post(url)
-            response.raise_for_status()
-            body = response.json()
-        return body if isinstance(body, dict) else {}
+        response = await _webapp_api_request("POST", url, headers=headers)
+        response.raise_for_status()
+        body = response.json()
+        if isinstance(body, dict):
+            return body
+        return {
+            "status": "error",
+            "error": "Approve source batch returned an unexpected response payload.",
+            "details": {
+                "reason": "unexpected_payload",
+                "payload_type": type(body).__name__,
+                "payload_preview": _clean_text(str(body), limit=300),
+            },
+        }
     except httpx.HTTPStatusError as exc:
+        response_text = _clean_text(exc.response.text, limit=300)
         logger.error(
             "Approve source batch HTTP %s from %s: %s",
             exc.response.status_code,
             url,
             exc.response.text[:500],
         )
-        return {}
+        return {
+            "status": "error",
+            "error": (
+                f"Approve source batch failed with HTTP {exc.response.status_code}"
+                + (f": {response_text}" if response_text else ".")
+            ),
+            "details": {
+                "reason": "http_error",
+                "status_code": exc.response.status_code,
+                "response_body": response_text,
+            },
+        }
     except Exception as exc:
         logger.error("Approve source batch API call failed: %s", exc, exc_info=True)
-        return {}
+        return {
+            "status": "error",
+            "error": f"Approve source batch request failed: {_clean_text(str(exc), limit=260)}",
+            "details": {
+                "reason": "request_error",
+                "exception_type": exc.__class__.__name__,
+            },
+        }
 
 
 def _workspace_root(workspace_path: str) -> Path:
@@ -1860,11 +2131,18 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         project_id = cfg.get("project_id", "")
         if not project_id:
             return "[]"
+        retrieval_policy = _json_object(cfg.get("retrieval_policy"))
+        policy_limit = retrieval_policy.get("limit")
+        policy_min_score = retrieval_policy.get("minScore")
+        effective_limit = max(1, min(int(limit or 6), 8))
+        if isinstance(policy_limit, (int, float)) and int(policy_limit) > 0:
+            effective_limit = min(effective_limit, max(1, min(int(policy_limit), 8)))
         results = await retrieval_service.search_project_documents(
             project_id,
             query,
             collection_id=cfg.get("collection_id"),
-            limit=max(1, min(int(limit or 6), 8)),
+            limit=effective_limit,
+            min_score=float(policy_min_score) if isinstance(policy_min_score, (int, float)) else None,
         )
         return json.dumps(results)
 
@@ -1889,10 +2167,18 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         project_id = cfg.get("project_id", "")
         if not project_id:
             return "[]"
+        retrieval_policy = _json_object(cfg.get("retrieval_policy"))
+        if retrieval_policy.get("includeProjectMemories") is False:
+            return "[]"
+        memory_profile = _json_object(cfg.get("memory_profile"))
+        configured_limit = memory_profile.get("maxEntries")
+        effective_limit = max(1, min(int(limit or 6), 8))
+        if isinstance(configured_limit, (int, float)) and int(configured_limit) > 0:
+            effective_limit = min(effective_limit, max(1, min(int(configured_limit), 20)))
         results = await retrieval_service.search_project_memories(
             project_id,
             query,
-            limit=max(1, min(int(limit or 6), 8)),
+            limit=effective_limit,
             store=getattr(runtime, "store", None),
         )
         return json.dumps(results)
@@ -1970,17 +2256,85 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         if not approved_items:
             return {"status": "error", "error": "No approved literature items were provided."}
 
+        # Split web sources from literature — they need different import paths
+        literature_items = [item for item in approved_items if item.get("origin") != "web"]
+        web_items = [item for item in approved_items if item.get("origin") == "web"]
+
+        # Import web sources individually via the web origin path
+        web_completed: list[dict[str, Any]] = []
+        web_failed: list[dict[str, Any]] = []
+        web_batch_ids: list[str] = []
+        for web_item in web_items:
+            try:
+                web_url = web_item.get("sourceUrl") or web_item.get("url") or ""
+                web_payload = await _stage_source_ingest_api(
+                    api_base_url,
+                    project_id,
+                    {
+                        "origin": "web",
+                        "url": web_url,
+                        "title": web_item.get("title") or web_url,
+                        "collectionId": web_item.get("collectionId") or collection_id,
+                        "collectionName": web_item.get("collectionName") or collection_name or None,
+                    },
+                )
+                web_batch = web_payload.get("batch") if isinstance(web_payload, dict) else None
+                web_batch_id = str((web_batch or {}).get("id") or "").strip()
+                if web_batch_id:
+                    web_batch_ids.append(web_batch_id)
+                    approval_result = await _approve_source_batch_api(api_base_url, project_id, web_batch_id)
+                    approved_batch = approval_result.get("batch") if isinstance(approval_result, dict) else None
+                    if isinstance(approved_batch, dict) and approved_batch.get("status") == "completed":
+                        web_completed.append({"title": web_item.get("title"), "url": web_url})
+                    else:
+                        web_failed.append(
+                            {
+                                "title": web_item.get("title"),
+                                "error": _clean_text(
+                                    approval_result.get("error") if isinstance(approval_result, dict) else "Import failed",
+                                    limit=240,
+                                )
+                                or "Import failed",
+                            }
+                        )
+                else:
+                    web_failed.append(
+                        {
+                            "title": web_item.get("title"),
+                            "error": _clean_text(
+                                web_payload.get("error") if isinstance(web_payload, dict) else "Staging failed",
+                                limit=240,
+                            )
+                            or "Staging failed",
+                        }
+                    )
+            except Exception as exc:
+                web_failed.append({"title": web_item.get("title"), "error": str(exc)})
+
+        # If no literature items, return web results only
+        if not literature_items:
+            return {
+                "status": "approved" if web_completed and not web_failed else "error",
+                "count": len(web_completed),
+                "requested_count": len(approved_items),
+                "batch_ids": web_batch_ids,
+                "chunk_count": 1,
+                "completed_items": web_completed,
+                "failed_items": web_failed,
+                "error": None if not web_failed else "One or more web sources failed to import.",
+            }
+
         stage_payload = await _stage_source_ingest_api(
             api_base_url,
             project_id,
             {
                 "origin": "literature",
                 "query": query_label,
-                "summary": f"Approved {len(approved_items)} literature source(s) from analyst retrieval.",
-                "metadata": metadata,
+                "summary": f"Approved {len(literature_items)} literature source(s) from analyst retrieval.",
+                "metadata": {**metadata, "source": "runtime-consolidated"},
                 "collectionId": collection_id,
                 "collectionName": collection_name or None,
-                "items": approved_items,
+                "items": literature_items,
             },
         )
         batch = stage_payload.get("batch") if isinstance(stage_payload, dict) else None
@@ -1992,7 +2346,15 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
                 list(stage_payload.keys()) if isinstance(stage_payload, dict) else None,
                 batch,
             )
-            return {"status": "error", "error": "Failed to stage source ingest batch"}
+            return {
+                "status": "error",
+                "error": _clean_text(
+                    stage_payload.get("error") if isinstance(stage_payload, dict) else "Failed to stage source ingest batch",
+                    limit=280,
+                )
+                or "Failed to stage source ingest batch",
+                "details": stage_payload.get("details") if isinstance(stage_payload, dict) else None,
+            }
 
         approval_payload = await _approve_source_batch_api(api_base_url, project_id, batch_id)
         approved_batch = approval_payload.get("batch") if isinstance(approval_payload, dict) else None
@@ -2000,7 +2362,14 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
             return {
                 "status": "error",
                 "batch_id": batch_id,
-                "error": "Source ingest approval failed before import results were returned.",
+                "error": _clean_text(
+                    approval_payload.get("error")
+                    if isinstance(approval_payload, dict)
+                    else "Source ingest approval failed before import results were returned.",
+                    limit=280,
+                )
+                or "Source ingest approval failed before import results were returned.",
+                "details": approval_payload.get("details") if isinstance(approval_payload, dict) else None,
             }
 
         items_payload = approved_batch.get("items") if isinstance(approved_batch.get("items"), list) else []
@@ -2014,16 +2383,20 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
             if isinstance(item, dict) and item.get("status") == "failed"
         ]
         batch_status = str(approved_batch.get("status") or "").strip()
+        all_completed = completed_items + web_completed
+        all_failed = failed_items + web_failed
+        all_batch_ids = ([batch_id] if batch_id else []) + web_batch_ids
         return {
-            "status": "approved" if batch_status == "completed" and not failed_items else "error",
-            "count": len(completed_items),
+            "status": "approved" if batch_status == "completed" and not all_failed else "error",
+            "count": len(all_completed),
             "requested_count": len(approved_items),
             "batch_id": batch_id,
+            "batch_ids": all_batch_ids,
             "batch_status": batch_status or None,
-            "failed_items": failed_items,
-            "completed_items": completed_items,
+            "failed_items": all_failed,
+            "completed_items": all_completed,
             "approved_batch": approved_batch,
-            "error": None if batch_status == "completed" and not failed_items else "One or more approved sources failed to import.",
+            "error": None if batch_status == "completed" and not all_failed else "One or more approved sources failed to import.",
         }
 
     async def _import_literature_in_chunks(
@@ -2478,380 +2851,73 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         return json.dumps(import_result)
 
     @tool
-    async def stage_literature_collection(
-        query: str,
-        limit: int = 10,
-        date_from: str = "",
-        date_to: str = "",
-        collection_name: str = "",
-        sources: list[str] | None = None,
-        runtime: ToolRuntime = None,
-    ) -> str:
-        """Search literature and present results for user approval before adding to project sources."""
-        cfg = _get_project_config(runtime)
-        api_base_url = cfg.get("api_base_url", "")
-        project_id = cfg.get("project_id", "")
-        if not project_id:
-            return "{}"
-
-        # Step 1: Search literature
-        effective_limit = max(1, min(int(limit or 10), 20))
-        search_payload = await _get_cached_literature_search(
-            runtime=runtime,
-            project_id=project_id,
-            query=query,
-            limit=effective_limit,
-            date_from=date_from,
-            date_to=date_to,
-            sources=sources,
-        )
-        if search_payload is None:
-            search_payload = await _search_literature_api(
-                query,
-                limit=effective_limit,
-                date_from=date_from or None,
-                date_to=date_to or None,
-                sources=sources,
-            )
-            if isinstance(search_payload, dict) and isinstance(search_payload.get("results"), list):
-                await _cache_literature_search(
-                    runtime=runtime,
-                    project_id=project_id,
-                    query=query,
-                    limit=effective_limit,
-                    date_from=date_from,
-                    date_to=date_to,
-                    sources=sources,
-                    payload=search_payload,
-                )
-        search_failure = _literature_search_failure(search_payload)
-        if search_failure is not None:
-            return json.dumps(search_failure)
-        results = search_payload.get("results") if isinstance(search_payload.get("results"), list) else []
-        if not results:
-            return json.dumps({"status": "no_results", "message": f"No literature found for '{query}'."})
-
-        # Step 2: Build compact results for user review
-        compact = []
-        for i, item in enumerate(results):
-            if not isinstance(item, dict):
-                continue
-            compact.append({
-                "index": i,
-                "title": _clean_text(item.get("title"), limit=220),
-                "authors": _clean_authors(item.get("authors")),
-                "venue": _clean_text(item.get("venue"), limit=120),
-                "year": str(item.get("published_at") or "")[:4],
-                "abstract": _clean_text(item.get("abstract"), limit=300),
-                "doi": _clean_text(item.get("doi"), limit=120) or None,
-                "url": _clean_text(item.get("url"), limit=200) or None,
-                "citation_count": int(item.get("citation_count") or 0),
-            })
-
-        # Step 3: Interrupt for user approval with full paper list
-        if interrupt is not None:
-            approval_message = f"Found {len(compact)} sources for '{query}'. Select which to add to project."
-            warnings = search_payload.get("warnings") if isinstance(search_payload.get("warnings"), list) else []
-            if warnings:
-                approval_message += f"\n\nSearch warnings: {_clean_text(warnings[0], limit=220)}"
-            approval = interrupt({
-                "type": "source_collection_approval",
-                "query": query,
-                "total_found": len(compact),
-                "sources": compact,
-                "message": approval_message,
-                "provider_status": search_payload.get("provider_status")
-                if isinstance(search_payload.get("provider_status"), dict)
-                else {},
-                "warnings": warnings,
-            })
-        else:
-            return _approval_unavailable("stage_literature_collection")
-
-        if not isinstance(approval, dict) or not approval.get("approved"):
-            return json.dumps({"status": "rejected", "message": "Source collection was declined by the user."})
-
-        # Step 4: Filter to user-selected items
-        approved_indices = approval.get("approved_indices")
-        if approved_indices is not None:
-            approved_set = set(int(idx) for idx in approved_indices)
-            approved_results = [r for i, r in enumerate(results) if i in approved_set]
-        else:
-            approved_results = results
-
-        if not approved_results:
-            return json.dumps({"status": "rejected", "message": "No sources selected."})
-
-        approved_items: list[dict[str, Any]] = []
-        for item in approved_results:
-            if not isinstance(item, dict):
-                continue
-            normalized = _normalize_literature_item_for_ingest(item)
-            if normalized is None:
-                return json.dumps(
-                    {
-                        "status": "error",
-                        "error": "One or more approved literature items are missing canonical identifiers.",
-                    }
-                )
-            approved_items.append(normalized)
-
-        if not approved_items:
-            return json.dumps({"status": "error", "error": "No approved literature items could be normalized."})
-
-        # Step 5: Stage and approve the exact user-selected items
-        stage_payload = await _stage_source_ingest_api(
-            api_base_url,
-            project_id,
-            {
-                "origin": "literature",
-                "query": query,
-                "summary": f"Approved {len(approved_items)} literature source(s) from analyst search.",
-                "metadata": {
-                    "dateFrom": date_from or None,
-                    "dateTo": date_to or None,
-                    "sources": sources or [],
-                    "approvedCount": len(approved_items),
-                },
-                "collectionId": cfg.get("collection_id"),
-                "collectionName": collection_name or None,
-                "items": approved_items,
-            },
-        )
-        batch = stage_payload.get("batch") if isinstance(stage_payload, dict) else None
-        batch_id = str((batch or {}).get("id") or "").strip()
-        if not batch_id:
-            logger.error(
-                "stage_literature_collection: batch_id empty after staging "
-                "(stage_payload keys=%s, batch=%r)",
-                list(stage_payload.keys()) if isinstance(stage_payload, dict) else None,
-                batch,
-            )
-            return json.dumps({"status": "error", "error": "Failed to stage source ingest batch"})
-
-        approval_payload = await _approve_source_batch_api(api_base_url, project_id, batch_id)
-        approved_batch = approval_payload.get("batch") if isinstance(approval_payload, dict) else None
-        if not isinstance(approved_batch, dict):
-            return json.dumps(
-                {
-                    "status": "error",
-                    "batch_id": batch_id,
-                    "error": "Source ingest approval failed before import results were returned.",
-                }
-            )
-
-        items_payload = approved_batch.get("items") if isinstance(approved_batch.get("items"), list) else []
-        completed_items = [item for item in items_payload if isinstance(item, dict) and item.get("status") == "completed"]
-        failed_items = [
-            {
-                "title": _clean_text(item.get("title"), limit=180),
-                "error": _clean_text(item.get("error"), limit=240),
-            }
-            for item in items_payload
-            if isinstance(item, dict) and item.get("status") == "failed"
-        ]
-        batch_status = str(approved_batch.get("status") or "").strip()
-
-        if completed_items:
-            warnings = search_payload.get("warnings") if isinstance(search_payload.get("warnings"), list) else []
-            top_titles = [
-                _clean_text(item.get("title"), limit=180)
-                for item in approved_results[:8]
-                if isinstance(item, dict) and _clean_text(item.get("title"), limit=180)
-            ]
-            memory_lines = [
-                f"Query: {query}",
-                f"Imported sources: {len(completed_items)} of {len(approved_items)} approved selections.",
-                f"Batch ID: {batch_id}",
-            ]
-            if warnings:
-                memory_lines.append(
-                    "Search warnings: "
-                    + "; ".join(
-                        _clean_text(warning, limit=200)
-                        for warning in warnings[:3]
-                        if _clean_text(warning, limit=200)
-                    )
-                )
-            if top_titles:
-                memory_lines.append("Imported titles:")
-                memory_lines.extend(f"- {title}" for title in top_titles)
-            if failed_items:
-                memory_lines.append(
-                    "Failed imports: "
-                    + "; ".join(
-                        _clean_text(item.get("title"), limit=120)
-                        for item in failed_items[:3]
-                        if _clean_text(item.get("title"), limit=120)
-                    )
-                )
-            await _persist_project_memory(
-                runtime=runtime,
-                title=f"Literature retrieval: {_clean_text(query, limit=80)}",
-                summary=(
-                    f"Imported {len(completed_items)} approved sources for "
-                    f"'{_clean_text(query, limit=80)}'."
-                ),
-                content="\n".join(memory_lines),
-                memory_type="retrieval_finding",
-                metadata={
-                    "kind": "literature_collection",
-                    "query": query,
-                    "approvedCount": len(approved_items),
-                    "completedCount": len(completed_items),
-                    "failedCount": len(failed_items),
-                    "batchId": batch_id,
-                    "providerStatus": search_payload.get("provider_status")
-                    if isinstance(search_payload.get("provider_status"), dict)
-                    else {},
-                    "warnings": warnings,
-                    "sourceIds": [
-                        str(item.get("canonical_id") or item.get("paper_id") or item.get("doi") or "")
-                        for item in approved_results
-                        if isinstance(item, dict)
-                    ],
-                },
-                provenance={
-                    "tool": "stage_literature_collection",
-                    "query": query,
-                    "collectionId": cfg.get("collection_id"),
-                    "collectionName": collection_name or None,
-                    "dateFrom": date_from or None,
-                    "dateTo": date_to or None,
-                    "sources": sources or [],
-                    "batchId": batch_id,
-                    "importedItems": [
-                        {
-                            "title": _clean_text(item.get("title"), limit=180),
-                            "documentId": str(item.get("document_id") or item.get("documentId") or "").strip() or None,
-                            "artifactId": str(item.get("artifact_id") or item.get("artifactId") or "").strip() or None,
-                        }
-                        for item in completed_items
-                    ],
-                },
-            )
-
-        return json.dumps({
-            "status": "approved" if batch_status == "completed" and not failed_items else "error",
-            "count": len(completed_items),
-            "requested_count": len(approved_items),
-            "batch_id": batch_id,
-            "batch_status": batch_status or None,
-            "failed_items": failed_items,
-            "error": None if batch_status == "completed" and not failed_items else "One or more approved sources failed to import.",
-        })
-
-    @tool
     async def stage_web_source(
         url: str,
         title: str = "",
         collection_name: str = "",
         runtime: ToolRuntime = None,
     ) -> str:
-        """Capture a web page as a project source after user confirms in chat."""
+        """Stage a web page for later consolidated approval. Does NOT interrupt.
+
+        The retriever calls this to queue web sources. After all retriever
+        branches finish, the supervisor calls approve_collected_literature
+        to present one consolidated approval for all staged sources
+        (both literature and web).
+        """
         cfg = _get_project_config(runtime)
-        api_base_url = cfg.get("api_base_url", "")
         project_id = cfg.get("project_id", "")
         if not project_id:
             return "{}"
 
-        # Interrupt for user confirmation
-        if interrupt is not None:
-            approval = interrupt({
-                "type": "web_source_approval",
-                "url": url,
-                "title": title or url,
-                "message": f"Add web source to project?\n\nURL: {url}\nTitle: {title or '(auto-detect)'}",
-            })
-        else:
-            return _approval_unavailable("stage_web_source")
+        # Store as a literature_candidate_batch so approve_collected_literature
+        # picks it up alongside academic candidates in one consolidated approval.
+        # The actual staging + import happens later in _import_approved_literature_items.
+        store = getattr(runtime, "store", None) if runtime is not None else None
+        if store is None:
+            return json.dumps({"status": "error", "url": url, "error": "Store unavailable for staging"})
 
-        if not isinstance(approval, dict) or not approval.get("approved"):
-            return json.dumps({"status": "rejected", "message": "Web source capture was declined."})
-
-        payload = await _stage_source_ingest_api(
-            api_base_url,
-            project_id,
+        candidate_key = f"web-{hashlib.sha1(url.encode()).hexdigest()[:12]}"
+        namespace = _retrieval_candidate_namespace(project_id, runtime)
+        await store.aput(
+            namespace,
+            candidate_key,
             {
-                "origin": "web",
-                "url": url,
-                "title": title or None,
-                "collectionId": cfg.get("collection_id"),
-                "collectionName": collection_name or None,
+                "type": "literature_candidate_batch",
+                "batchId": candidate_key,
+                "query": f"Web source: {title or url}",
+                "branchLabel": "web",
+                "candidates": [
+                    {
+                        "key": f"web:{url}",
+                        "title": title or url,
+                        "url": url,
+                        "authors": [],
+                        "venue": "",
+                        "year": "",
+                        "abstract": f"Web source: {url}",
+                        "citation_count": 0,
+                        "ingest_item": {
+                            "origin": "web",
+                            "sourceUrl": url,
+                            "url": url,
+                            "title": title or url,
+                            "collectionId": cfg.get("collection_id"),
+                            "collectionName": collection_name or None,
+                        },
+                    }
+                ],
+                "warnings": [],
+                "providerStatus": {},
+                "createdAt": datetime.now(timezone.utc).isoformat(),
             },
         )
-        batch = payload.get("batch") if isinstance(payload, dict) else None
-        batch_id = str((batch or {}).get("id") or "").strip()
-        if not batch_id:
-            logger.error(
-                "stage_web_source: batch_id empty after staging (payload keys=%s, batch=%r)",
-                list(payload.keys()) if isinstance(payload, dict) else None,
-                batch,
-            )
-            return json.dumps({"status": "error", "url": url, "error": "Failed to stage web source batch"})
 
-        approval_payload = await _approve_source_batch_api(api_base_url, project_id, batch_id)
-        approved_batch = approval_payload.get("batch") if isinstance(approval_payload, dict) else None
-        if not isinstance(approved_batch, dict):
-            return json.dumps(
-                {
-                    "status": "error",
-                    "url": url,
-                    "batch_id": batch_id,
-                    "error": "Web source approval failed before import results were returned.",
-                }
-            )
-
-        items_payload = approved_batch.get("items") if isinstance(approved_batch.get("items"), list) else []
-        failed_items = [
-            {
-                "title": _clean_text(item.get("title"), limit=180),
-                "error": _clean_text(item.get("error"), limit=240),
-            }
-            for item in items_payload
-            if isinstance(item, dict) and item.get("status") == "failed"
-        ]
-        completed_items = [item for item in items_payload if isinstance(item, dict) and item.get("status") == "completed"]
-        batch_status = str(approved_batch.get("status") or "").strip()
-        if completed_items:
-            normalized_title = _clean_text(title or url, limit=140)
-            await _persist_project_memory(
-                runtime=runtime,
-                title=f"Web source captured: {normalized_title}",
-                summary=f"Added web source '{normalized_title}' to the project.",
-                content="\n".join(
-                    [
-                        f"Source URL: {url}",
-                        f"Title: {normalized_title}",
-                        f"Batch ID: {batch_id}",
-                        f"Imported items: {len(completed_items)}",
-                    ]
-                ),
-                memory_type="retrieval_finding",
-                metadata={
-                    "kind": "web_source_capture",
-                    "url": url,
-                    "title": normalized_title,
-                    "batchId": batch_id,
-                    "completedCount": len(completed_items),
-                    "failedCount": len(failed_items),
-                },
-                provenance={
-                    "tool": "stage_web_source",
-                    "url": url,
-                    "collectionId": cfg.get("collection_id"),
-                    "collectionName": collection_name or None,
-                    "batchId": batch_id,
-                    "importedItems": [
-                        {
-                            "title": _clean_text(item.get("title"), limit=180),
-                            "documentId": str(item.get("document_id") or item.get("documentId") or "").strip() or None,
-                            "artifactId": str(item.get("artifact_id") or item.get("artifactId") or "").strip() or None,
-                        }
-                        for item in completed_items
-                    ],
-                },
-            )
+        return json.dumps({
+            "status": "staged",
+            "url": url,
+            "title": title or url,
+            "message": "Web source staged for consolidated approval. The supervisor will present approval after all retriever branches finish.",
+        })
         return json.dumps({
             "status": "approved" if batch_status == "completed" and not failed_items else "error",
             "url": url,
@@ -2886,6 +2952,57 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         return json.dumps(_runtime_capabilities_payload(cfg))
 
     @tool
+    async def request_mode_switch(
+        target_mode: str,
+        reason: str = "",
+        runtime: ToolRuntime = None,
+    ) -> str:
+        """Request user approval to shift the current thread into a different workflow state."""
+        normalized_target = _normalize_analysis_mode(target_mode)
+        cfg = _get_project_config(runtime)
+        current_mode = _normalize_analysis_mode(cfg.get("analysis_mode"))
+        if normalized_target == current_mode:
+            return json.dumps(
+                {
+                    "status": "already_active",
+                    "current_mode": current_mode,
+                    "target_mode": normalized_target,
+                }
+            )
+        if interrupt is None:
+            return _approval_unavailable("request_mode_switch")
+        approval = interrupt(
+            {
+                "type": "mode_switch_approval",
+                "current_mode": current_mode,
+                "target_mode": normalized_target,
+                "reason": _clean_text(reason, limit=400)
+                or f"Shift into {normalized_target} workflow to continue this thread.",
+                "message": (
+                    f"The agent needs the {normalized_target} workflow to continue. "
+                    "Approve to update this thread and resume on the same conversation."
+                ),
+            }
+        )
+        if not isinstance(approval, dict) or not approval.get("approved"):
+            return json.dumps(
+                {
+                    "status": "rejected",
+                    "current_mode": current_mode,
+                    "target_mode": normalized_target,
+                    "message": "The requested workflow escalation was declined by the user.",
+                }
+            )
+        return json.dumps(
+            {
+                "status": "approved",
+                "current_mode": current_mode,
+                "target_mode": normalized_target,
+                "message": f"Approved workflow escalation to {normalized_target}.",
+            }
+        )
+
+    @tool
     async def list_canvas_documents(runtime: ToolRuntime = None) -> str:
         """List existing canvas documents for the current project."""
         cfg = _get_project_config(runtime)
@@ -2897,14 +3014,60 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         return json.dumps(documents)
 
     @tool
-    async def save_canvas_markdown(markdown: str, title: str = "Analysis Draft", runtime: ToolRuntime = None) -> str:
-        """Create or update the primary markdown canvas document for the current project."""
+    async def save_canvas_markdown(markdown: str, title: str = "Analysis Draft", document_id: str = "", runtime: ToolRuntime = None) -> str:
+        """Create or replace a markdown canvas document for the current project.
+
+        Args:
+            markdown: The markdown content to save.
+            title: Document title (default "Analysis Draft").
+            document_id: Optional ID of an existing canvas document to update.
+                         If empty, updates the sole existing document or creates a new one.
+
+        Prefer append_canvas_markdown for long reports written section-by-section.
+        """
         cfg = _get_project_config(runtime)
         api_base_url = cfg.get("api_base_url", "")
         project_id = cfg.get("project_id", "")
         if not project_id:
             return "{}"
-        document = await _save_canvas_document_api(api_base_url, project_id, markdown=markdown, title=title)
+        document = await _save_canvas_document_api(
+            api_base_url, project_id, markdown=markdown, title=title,
+            document_id=document_id or None,
+        )
+        return json.dumps(document or {})
+
+    @tool
+    async def append_canvas_markdown(
+        markdown_chunk: str,
+        title: str = "Analysis Draft",
+        document_id: str = "",
+        replace_existing: bool = False,
+        runtime: ToolRuntime = None,
+    ) -> str:
+        """Append a markdown chunk to a canvas document for the current project.
+
+        Use this for long drafts written section-by-section. The server will load the
+        existing document, append the new chunk, and save the combined markdown.
+
+        Args:
+            markdown_chunk: New markdown fragment to append. Keep this focused to one section.
+            title: Document title used when creating or locating the draft.
+            document_id: Optional existing canvas document id.
+            replace_existing: When true, replace the existing markdown with this chunk instead of appending.
+        """
+        cfg = _get_project_config(runtime)
+        api_base_url = cfg.get("api_base_url", "")
+        project_id = cfg.get("project_id", "")
+        if not project_id:
+            return "{}"
+        document = await _append_canvas_document_api(
+            api_base_url,
+            project_id,
+            markdown_chunk=markdown_chunk,
+            title=title,
+            document_id=document_id or None,
+            replace_existing=bool(replace_existing),
+        )
         return json.dumps(document or {})
 
     @tool
@@ -2979,6 +3142,22 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         )
         return json.dumps(entry or {})
 
+    @tool
+    async def web_search(query: str, limit: int = 5, runtime: ToolRuntime = None) -> str:
+        """Search the web for a query and return summary results with source URLs."""
+        from web_tools import get_web_search_provider
+        provider = get_web_search_provider()
+        result = await provider.search(query, limit=limit)
+        return json.dumps(result)
+
+    @tool
+    async def web_fetch(url: str, runtime: ToolRuntime = None) -> str:
+        """Fetch and extract content from a web URL."""
+        from web_tools import get_web_search_provider
+        provider = get_web_search_provider()
+        result = await provider.fetch(url)
+        return json.dumps(result)
+
     # All tools are built here but the supervisor only gets a minimal
     # coordination set.  Heavy-lifting tools live on subagents exclusively
     # so the supervisor is forced to delegate via the task() tool.
@@ -2991,13 +3170,16 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         "search_literature": search_literature,
         "collect_literature_candidates": collect_literature_candidates,
         "approve_collected_literature": approve_collected_literature,
-        "stage_literature_collection": stage_literature_collection,
         "stage_web_source": stage_web_source,
+        "web_search": web_search,
+        "web_fetch": web_fetch,
         "list_active_connectors": list_active_connectors,
         "list_active_skills": list_active_skills,
         "describe_runtime_capabilities": describe_runtime_capabilities,
+        "request_mode_switch": request_mode_switch,
         "list_canvas_documents": list_canvas_documents,
         "save_canvas_markdown": save_canvas_markdown,
+        "append_canvas_markdown": append_canvas_markdown,
         "publish_canvas_document": publish_canvas_document,
         "execute_command": execute_command,
         "capture_artifact": capture_artifact,
@@ -3011,7 +3193,9 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         search_project_memories,    # Recall prior findings
         list_active_skills,         # Answer "what can you do?"
         describe_runtime_capabilities,  # Answer tool/connector questions
+        request_mode_switch,        # Escalate into heavier retrieval or deliverable work with approval
         list_canvas_documents,      # Check current canvas state
+        stage_web_source,           # Recover web-source staging when retrievers return concrete URLs
         approve_collected_literature,  # One consolidated approval after parallel retrieval
         propose_project_memory,     # Persist findings across threads
     ]
@@ -3057,14 +3241,15 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
             "system_prompt": (
                 "You are the retrieval specialist for Open Analyst. Your job is source discovery, candidate collection, and targeted retrieval.\n\n"
                 "Workflow:\n"
-                "1. Use search_literature or collect_literature_candidates to find relevant papers and articles\n"
-                "2. Use search_project_documents to check what already exists in the project\n"
-                "3. Use search_project_memories for relevant prior findings before broad external retrieval\n"
-                "4. If existing memories and project documents answer the request, summarize them and stop instead of re-running retrieval\n"
-                "5. Use read_project_document for promising in-project sources\n"
-                "6. Prefer collect_literature_candidates for academic papers so the supervisor can present one consolidated approval after all retriever branches finish\n"
-                "7. Use stage_web_source for non-paper web pages or when literature search cannot identify the source\n"
-                "8. Do NOT ask the user for literature approval yourself; return candidates and let the supervisor call approve_collected_literature once\n\n"
+                "1. Use search_project_documents and search_project_memories first to check what already exists\n"
+                "2. If existing memories and project documents answer the request, summarize them and stop\n"
+                "3. For academic/scholarly topics: use search_literature or collect_literature_candidates\n"
+                "4. For current events, news, organizations, or non-academic topics: use web_search (Tavily)\n"
+                "5. Use web_fetch to extract full content from a specific URL when needed\n"
+                "6. Use read_project_document for promising in-project sources\n"
+                "7. Prefer collect_literature_candidates for academic papers so the supervisor can present one consolidated approval after all retriever branches finish\n"
+                "8. If the task involves adding web sources to the project, you MUST call stage_web_source for each candidate URL you want considered for import\n"
+                "9. Do NOT ask the user for approval yourself; return candidates and let the supervisor handle it\n\n"
                 "Parallelism guidance:\n"
                 "- Safe to parallelize across independent queries, source sets, or provider slices\n"
                 "- Avoid redundant retries and avoid broad fan-out that is likely to trigger rate limits\n\n"
@@ -3081,6 +3266,8 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["search_literature"],
                 tool_map["collect_literature_candidates"],
                 tool_map["stage_web_source"],
+                tool_map["web_search"],
+                tool_map["web_fetch"],
                 tool_map["search_project_documents"],
                 tool_map["read_project_document"],
                 tool_map["search_project_memories"],
@@ -3157,10 +3344,16 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 "Workflow:\n"
                 "1. Review the evidence and plan provided in the task description\n"
                 "2. Use search_project_documents or read_project_document to retrieve source material if needed\n"
-                "3. Use save_canvas_markdown to create or update drafts\n"
-                "4. Stage the draft for critique or user review in canvas\n"
-                "5. Leave packaging and publishing to the dedicated specialists\n"
-                "6. For ARLIS bulletins, produce the analytic content in canvas only and hand off packaging. Do not attempt document generation, artifact capture, or publication from this role.\n\n"
+                "3. For long drafts, use append_canvas_markdown section-by-section instead of trying to save the full document in one tool call\n"
+                "4. Use save_canvas_markdown only for short drafts or a full replacement pass\n"
+                "5. Stage the draft for critique or user review in canvas\n"
+                "6. Leave packaging and publishing to the dedicated specialists\n"
+                "7. For ARLIS bulletins, produce the analytic content in canvas only and hand off packaging. Do not attempt document generation, artifact capture, or publication from this role.\n\n"
+                "Canvas writing rules:\n"
+                "- For multi-page reports, create or reset the target draft with append_canvas_markdown(replace_existing=true) using only the title block and opening section header\n"
+                "- Then append one major section at a time with append_canvas_markdown\n"
+                "- Keep each appended chunk bounded to a single section or subsection, not the whole report\n"
+                "- When a project already has an outline canvas document, create a separate draft title rather than overwriting the outline unless explicitly told to revise it\n\n"
                 "Follow active skill instructions (SKILL.md) precisely for structured products.\n\n"
                 "IMPORTANT — Context management:\n"
                 "- Return ONLY a brief summary of what you produced (under 200 words)\n"
@@ -3173,6 +3366,7 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["search_project_documents"],
                 tool_map["read_project_document"],
                 tool_map["search_project_memories"],
+                tool_map["append_canvas_markdown"],
                 tool_map["save_canvas_markdown"],
                 tool_map["list_canvas_documents"],
             ],
@@ -3299,6 +3493,8 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["read_project_document"],
                 tool_map["search_project_memories"],
                 tool_map["search_literature"],
+                tool_map["web_search"],
+                tool_map["web_fetch"],
                 tool_map["list_canvas_documents"],
             ],
             "middleware": list(subagent_middleware),
@@ -3398,7 +3594,6 @@ def _build_runtime_middleware() -> list[Any]:
         fallback_models = [_build_chat_model(model_name) for model_name in settings.fallback_chat_models]
         middleware.append(ResilientModelMiddleware(fallback_models=fallback_models))
         middleware.append(SupervisorToolGuard())
-        middleware.append(ModeToolGuard())
     return middleware
 
 
@@ -3409,12 +3604,12 @@ def _build_subagent_middleware() -> list[Any]:
     return [ResilientModelMiddleware(fallback_models=fallback_models)]
 
 
-def make_graph() -> Any:
-    """Entry point for the LangGraph Agent Server (referenced in langgraph.json).
-
-    Returns a compiled deep agent graph. The Agent Server handles
-    checkpointing, store, streaming, thread management, and run lifecycle.
-    """
+def build_runtime_graph(
+    *,
+    checkpointer: Any | None = None,
+    store: Any | None = None,
+) -> Any:
+    """Build the compiled deep agent graph for the standalone runtime."""
     if create_deep_agent is None:
         raise RuntimeError("deepagents is not installed")
 
@@ -3431,6 +3626,8 @@ def make_graph() -> Any:
         subagents=_build_subagents(model, all_tools),
         backend=_build_backend(),
         context_schema=RuntimeProjectContext,
+        checkpointer=checkpointer,
+        store=store,
         interrupt_on={
             "publish_canvas_document": True,
             "publish_workspace_file": True,
@@ -3438,3 +3635,18 @@ def make_graph() -> Any:
         },
     )
     return agent
+
+
+def make_graph(
+    config: RunnableConfig | None = None,
+    runtime: ServerRuntime[RuntimeProjectContext] | None = None,
+) -> Any:
+    """Entry point for the LangGraph Agent Server (referenced in langgraph.json).
+
+    The Agent Server now only passes RunnableConfig and/or ServerRuntime into
+    graph factories. Persistence and store resources are owned by the server,
+    so the factory should consume them from the provided runtime instead of
+    requesting custom keyword parameters.
+    """
+    del config
+    return build_runtime_graph(store=getattr(runtime, "store", None))

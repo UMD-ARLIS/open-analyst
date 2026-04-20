@@ -1,17 +1,14 @@
-import { getProject } from "~/lib/db/queries/projects.server";
-import {
-  buildProjectMcpHeaders,
-  getAnalystMcpServer,
-} from "~/lib/mcp.server";
+import { buildProjectMcpHeaders, getAnalystMcpServer } from '~/lib/mcp.server';
+import { requireProjectApiAccess } from '~/lib/project-access.server';
 
 function copyContentHeaders(source: Headers, target: Headers) {
   for (const key of [
-    "content-type",
-    "content-length",
-    "content-disposition",
-    "cache-control",
-    "etag",
-    "last-modified",
+    'content-type',
+    'content-length',
+    'content-disposition',
+    'cache-control',
+    'etag',
+    'last-modified',
   ]) {
     const value = source.get(key);
     if (value) target.set(key, value);
@@ -25,19 +22,16 @@ export async function loader({
   params: { projectId: string; identifier: string };
   request: Request;
 }) {
-  const project = await getProject(params.projectId);
-  if (!project) {
-    return Response.json({ error: "Project not found" }, { status: 404 });
-  }
+  const { project } = await requireProjectApiAccess(request, params.projectId);
 
-  const server = getAnalystMcpServer();
+  const server = getAnalystMcpServer(project.userId);
   if (!server?.url) {
-    return Response.json({ error: "Analyst MCP is not configured" }, { status: 503 });
+    return Response.json({ error: 'Analyst MCP is not configured' }, { status: 503 });
   }
 
-  const apiKey = String(server.headers?.["x-api-key"] || "").trim();
+  const apiKey = String(server.headers?.['x-api-key'] || '').trim();
   if (!apiKey) {
-    return Response.json({ error: "Analyst MCP API key is missing" }, { status: 503 });
+    return Response.json({ error: 'Analyst MCP API key is missing' }, { status: 503 });
   }
 
   let targetUrl: URL;
@@ -61,7 +55,7 @@ export async function loader({
 
   const response = await fetch(targetUrl, {
     headers: {
-      "x-api-key": apiKey,
+      'x-api-key': apiKey,
       ...buildProjectMcpHeaders(project, incoming.origin),
     },
   });

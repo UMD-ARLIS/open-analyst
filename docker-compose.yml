@@ -1,3 +1,15 @@
+# Local development stack.
+#
+# 1. Copy .env.example to .env and fill in required values.
+# 2. Run: docker compose up -d
+#
+# All services read .env for configuration.  Set DATABASE_URL,
+# LANGGRAPH_RUNTIME_URL, ANALYST_MCP_BASE_URL, and storage paths
+# in .env to match your environment (local, external Postgres, S3, etc.).
+#
+# The postgres service below is optional — omit it if you use an
+# external database and just set DATABASE_URL accordingly.
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -16,6 +28,60 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  webapp:
+    build: .
+    ports:
+      - "5173:5173"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      runtime:
+        condition: service_started
+      analyst-mcp:
+        condition: service_started
+    env_file: .env
+    environment:
+      # Server-side: use Docker service names for inter-container comms
+      LANGGRAPH_RUNTIME_URL: http://runtime:8081
+      ANALYST_MCP_BASE_URL: http://analyst-mcp:8000
+      # Client-side: browser connects via host-mapped ports
+      LANGGRAPH_RUNTIME_PUBLIC_URL: http://localhost:8081
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5173/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  runtime:
+    build:
+      context: .
+      dockerfile: services/langgraph-runtime/Dockerfile
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  analyst-mcp:
+    build: services/analyst-mcp
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
 volumes:
   pgdata:

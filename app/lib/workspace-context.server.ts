@@ -1,8 +1,9 @@
-import { getProjectProfile } from "~/lib/db/queries/workspace.server";
-import { env } from "~/lib/env.server";
-import { getMcpStatus, getMcpTools, listMcpServers } from "~/lib/mcp.server";
-import { listActiveSkills } from "~/lib/skills.server";
-import { listAvailableTools } from "~/lib/tools.server";
+import { getProjectProfile } from '~/lib/db/queries/workspace.server';
+import { env } from '~/lib/env.server';
+import { getMcpStatus, getMcpTools, listMcpServers } from '~/lib/mcp.server';
+import { listRuntimeSkills } from '~/lib/runtime-skills.server';
+import { listAvailableTools } from '~/lib/tools.server';
+import { getSettings } from '~/lib/db/queries/settings.server';
 
 const RUNTIME_URL = env.LANGGRAPH_RUNTIME_URL;
 
@@ -20,7 +21,7 @@ export interface WorkspaceConnectorSummary {
 export interface WorkspaceToolSummary {
   name: string;
   description: string;
-  source: "local" | "mcp";
+  source: 'local' | 'mcp';
   serverId?: string;
   serverName?: string;
   active: boolean;
@@ -46,6 +47,13 @@ export interface WorkspaceContextData {
     memoryProfile: Record<string, unknown>;
     agentPolicies: Record<string, unknown>;
     defaultConnectorIds: string[];
+    defaultSkillIds: string[];
+  };
+  diagnostics: {
+    model: string;
+    runtimeReachable: boolean;
+    activeConnectorCount: number;
+    pinnedSkillCount: number;
   };
   taskContext: Record<string, unknown>;
   memories: {
@@ -66,19 +74,46 @@ export interface WorkspaceContextData {
   };
 }
 
+function extractDefaultSkillIds(agentPolicies: Record<string, unknown> | null | undefined): string[] {
+  const raw =
+    agentPolicies && typeof agentPolicies === 'object'
+      ? (agentPolicies.defaultSkillIds ??
+          (agentPolicies.default_skill_ids as unknown) ??
+          agentPolicies.pinnedSkillIds)
+      : null;
+  return Array.isArray(raw) ? raw.map((value) => String(value)).filter(Boolean) : [];
+}
+
 export async function buildWorkspaceContext(
-  projectId: string
+  projectId: string,
+  userId: string
 ): Promise<WorkspaceContextData> {
+  const checkRuntimeHealth = async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5_000);
+    try {
+      const response = await fetch(`${RUNTIME_URL}/health`, {
+        headers: { Accept: 'application/json' },
+        signal: controller.signal,
+      });
+      return response.ok;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
   const fetchStoreMemories = async () => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10_000);
     try {
       const res = await fetch(`${RUNTIME_URL}/store/items/search`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
         body: JSON.stringify({
-          namespace_prefix: ["open-analyst", "projects", projectId, "memories"],
+          namespace_prefix: ['open-analyst', 'projects', projectId, 'memories'],
           limit: 50,
         }),
       });
@@ -94,37 +129,41 @@ export async function buildWorkspaceContext(
 
   const [
     profile,
+    settings,
     serverConfigs,
     statuses,
     discoveredTools,
     storeMemories,
-    activeSkills,
+    skills,
+    runtimeReachable,
   ] =
     await Promise.all([
       getProjectProfile(projectId),
-      Promise.resolve(listMcpServers()),
-      getMcpStatus(),
-      getMcpTools(),
+      getSettings(userId),
+      Promise.resolve(listMcpServers(userId)),
+      getMcpStatus(userId),
+      getMcpTools(userId),
       fetchStoreMemories(),
-      Promise.resolve(listActiveSkills()),
+      listRuntimeSkills({ userId, projectId }),
+      checkRuntimeHealth(),
     ]);
 
   const allMemories = storeMemories.map((item: Record<string, unknown>) => {
     const value = (item.value ?? {}) as Record<string, unknown>;
     return {
       id: item.key as string,
-      title: String(value.title || ""),
-      summary: String(value.summary || ""),
-      memoryType: String(value.memoryType || value.memory_type || "note"),
-      status: String(value.status || "active"),
+      title: String(value.title || ''),
+      summary: String(value.summary || ''),
+      memoryType: String(value.memoryType || value.memory_type || 'note'),
+      status: String(value.status || 'active'),
     };
   });
-  const activeMemories = allMemories.filter(
-    (m: { status: string }) => m.status === "active"
-  ).slice(0, 12);
-  const proposedMemories = allMemories.filter(
-    (m: { status: string }) => m.status === "proposed"
-  ).slice(0, 12);
+  const activeMemories = allMemories
+    .filter((m: { status: string }) => m.status === 'active')
+    .slice(0, 12);
+  const proposedMemories = allMemories
+    .filter((m: { status: string }) => m.status === 'proposed')
+    .slice(0, 12);
 
   const enabledConnectorIds = serverConfigs
     .filter((server) => server.enabled)
@@ -132,10 +171,7 @@ export async function buildWorkspaceContext(
   const activeConnectorIds = Array.isArray(profile?.defaultConnectorIds)
     ? profile.defaultConnectorIds.map((value) => String(value))
     : enabledConnectorIds;
-  const enabledSkillIds = activeSkills
-    .filter((skill) => skill.enabled)
-    .map((skill) => String(skill.id));
-  const pinnedSkillIds = enabledSkillIds;
+  const pinnedSkillIds = extractDefaultSkillIds(profile?.agentPolicies);
   const activeConnectorSet = new Set(activeConnectorIds);
   const pinnedSkillSet = new Set(pinnedSkillIds);
   const statusById = new Map(statuses.map((status) => [status.id, status]));
@@ -158,13 +194,13 @@ export async function buildWorkspaceContext(
     ...listAvailableTools().map((tool) => ({
       name: tool.name,
       description: tool.description,
-      source: "local" as const,
+      source: 'local' as const,
       active: true,
     })),
     ...discoveredTools.map((tool) => ({
       name: tool.name,
       description: tool.description,
-      source: "mcp" as const,
+      source: 'mcp' as const,
       serverId: tool.serverId,
       serverName: tool.serverName,
       active: activeConnectorSet.has(tool.serverId),
@@ -176,8 +212,8 @@ export async function buildWorkspaceContext(
     pinnedSkillIds,
     connectors,
     tools,
-    skills: activeSkills
-      .filter((skill) => skill.id !== "repo-skill-skill-creator")
+    skills: skills
+      .filter((skill) => skill.id !== 'repo-skill-skill-creator')
       .map((skill) => ({
         id: skill.id,
         name: skill.name,
@@ -188,39 +224,62 @@ export async function buildWorkspaceContext(
         sourceKind: skill.source?.kind,
       })),
     profile: {
-      brief: String(profile?.brief || ""),
+      brief: String(profile?.brief || ''),
       retrievalPolicy:
-        profile?.retrievalPolicy && typeof profile.retrievalPolicy === "object"
+        profile?.retrievalPolicy && typeof profile.retrievalPolicy === 'object'
           ? (profile.retrievalPolicy as Record<string, unknown>)
           : {},
       memoryProfile:
-        profile?.memoryProfile && typeof profile.memoryProfile === "object"
+        profile?.memoryProfile && typeof profile.memoryProfile === 'object'
           ? (profile.memoryProfile as Record<string, unknown>)
           : {},
       agentPolicies:
-        profile?.agentPolicies && typeof profile.agentPolicies === "object"
+        profile?.agentPolicies && typeof profile.agentPolicies === 'object'
           ? (profile.agentPolicies as Record<string, unknown>)
           : {},
       defaultConnectorIds: Array.isArray(profile?.defaultConnectorIds)
         ? profile.defaultConnectorIds.map((value) => String(value))
         : [],
+      defaultSkillIds: pinnedSkillIds,
+    },
+    diagnostics: {
+      model: settings.model || '',
+      runtimeReachable,
+      activeConnectorCount: connectors.filter((connector) => connector.active).length,
+      pinnedSkillCount: pinnedSkillIds.length,
     },
     taskContext: {},
     memories: {
-      active: activeMemories.map((memory: { id: string; title: string; summary: string; memoryType: string; status: string }) => ({
-        id: memory.id,
-        title: memory.title,
-        summary: memory.summary,
-        memoryType: memory.memoryType,
-        status: memory.status,
-      })),
-      proposed: proposedMemories.map((memory: { id: string; title: string; summary: string; memoryType: string; status: string }) => ({
-        id: memory.id,
-        title: memory.title,
-        summary: memory.summary,
-        memoryType: memory.memoryType,
-        status: memory.status,
-      })),
+      active: activeMemories.map(
+        (memory: {
+          id: string;
+          title: string;
+          summary: string;
+          memoryType: string;
+          status: string;
+        }) => ({
+          id: memory.id,
+          title: memory.title,
+          summary: memory.summary,
+          memoryType: memory.memoryType,
+          status: memory.status,
+        })
+      ),
+      proposed: proposedMemories.map(
+        (memory: {
+          id: string;
+          title: string;
+          summary: string;
+          memoryType: string;
+          status: string;
+        }) => ({
+          id: memory.id,
+          title: memory.title,
+          summary: memory.summary,
+          memoryType: memory.memoryType,
+          status: memory.status,
+        })
+      ),
     },
   };
 }

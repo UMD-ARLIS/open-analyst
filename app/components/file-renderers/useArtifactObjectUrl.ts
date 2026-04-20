@@ -1,16 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState } from 'react';
 
 export function useArtifactObjectUrl(url: string, enabled = true) {
-  const [objectUrl, setObjectUrl] = useState<string>("");
+  const [objectUrl, setObjectUrl] = useState<string>('');
 
   useEffect(() => {
     if (!enabled || !url) {
-      setObjectUrl("");
+      setObjectUrl('');
       return;
     }
 
     let revoked = false;
-    let currentObjectUrl = "";
+    let currentObjectUrl = '';
 
     async function load() {
       try {
@@ -26,7 +26,7 @@ export function useArtifactObjectUrl(url: string, enabled = true) {
         setObjectUrl(currentObjectUrl);
       } catch {
         if (!revoked) {
-          setObjectUrl("");
+          setObjectUrl('');
         }
       }
     }

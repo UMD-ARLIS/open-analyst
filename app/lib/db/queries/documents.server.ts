@@ -1,14 +1,14 @@
-import { queryRow, queryRows } from "../index.server";
-import { type Collection, type Document } from "../schema";
+import { queryRow, queryRows } from '../index.server';
+import { type Collection, type Document } from '../schema';
 import {
   buildKnowledgeEmbeddingText,
   embedKnowledgeTexts,
   isKnowledgeEmbeddingConfigured,
-} from "~/lib/knowledge-embedding.server";
-import { normalizeUuid } from "~/lib/uuid";
+} from '~/lib/knowledge-embedding.server';
+import { normalizeUuid } from '~/lib/uuid';
 
 function jsonParam(value: unknown, fallback: unknown): string {
-  return JSON.stringify(value && typeof value === "object" ? value : fallback);
+  return JSON.stringify(value && typeof value === 'object' ? value : fallback);
 }
 
 // --- Collections ---
@@ -21,7 +21,7 @@ export async function listCollections(projectId: string): Promise<Collection[]> 
       WHERE project_id = $1
       ORDER BY updated_at DESC
     `,
-    [projectId],
+    [projectId]
   );
 }
 
@@ -37,11 +37,11 @@ export async function createCollection(
     `,
     [
       projectId,
-      String(input.name || "Untitled Collection").trim(),
-      String(input.description || "").trim(),
-    ],
+      String(input.name || 'Untitled Collection').trim(),
+      String(input.description || '').trim(),
+    ]
   );
-  if (!collection) throw new Error("Collection insert failed");
+  if (!collection) throw new Error('Collection insert failed');
   return collection;
 }
 
@@ -56,17 +56,17 @@ export async function getCollection(
       WHERE project_id = $1 AND id = $2
       LIMIT 1
     `,
-    [projectId, collectionId],
+    [projectId, collectionId]
   );
 }
 
 export async function ensureCollection(
   projectId: string,
   name: string,
-  description = ""
+  description = ''
 ): Promise<Collection> {
-  const trimmed = String(name || "").trim();
-  if (!trimmed) throw new Error("Collection name is required");
+  const trimmed = String(name || '').trim();
+  if (!trimmed) throw new Error('Collection name is required');
 
   const existing = await queryRow<Collection>(
     `
@@ -75,7 +75,7 @@ export async function ensureCollection(
       WHERE project_id = $1 AND lower(name) = lower($2)
       LIMIT 1
     `,
-    [projectId, trimmed],
+    [projectId, trimmed]
   );
   if (existing) return existing;
 
@@ -86,9 +86,9 @@ export async function ensureCollection(
         VALUES ($1, $2, $3)
         RETURNING *
       `,
-      [projectId, trimmed, String(description || "").trim()],
+      [projectId, trimmed, String(description || '').trim()]
     );
-    if (!collection) throw new Error("Collection insert failed");
+    if (!collection) throw new Error('Collection insert failed');
     return collection;
   } catch (error) {
     const raced = await queryRow<Collection>(
@@ -98,14 +98,16 @@ export async function ensureCollection(
         WHERE project_id = $1 AND lower(name) = lower($2)
         LIMIT 1
       `,
-      [projectId, trimmed],
+      [projectId, trimmed]
     );
     if (raced) return raced;
     throw error;
   }
 }
 
-export async function getCollectionDocumentCounts(projectId: string): Promise<Record<string, number>> {
+export async function getCollectionDocumentCounts(
+  projectId: string
+): Promise<Record<string, number>> {
   const rows = await queryRows<{ collectionId: string | null; count: number }>(
     `
       SELECT collection_id, count(*)::int AS count
@@ -113,7 +115,7 @@ export async function getCollectionDocumentCounts(projectId: string): Promise<Re
       WHERE project_id = $1
       GROUP BY collection_id
     `,
-    [projectId],
+    [projectId]
   );
   const counts: Record<string, number> = {};
   for (const row of rows) {
@@ -134,11 +136,14 @@ export async function listDocuments(projectId: string, collectionId?: string): P
         AND ($2::uuid IS NULL OR collection_id = $2::uuid)
       ORDER BY updated_at DESC
     `,
-    [projectId, normalizedCollectionId ?? null],
+    [projectId, normalizedCollectionId ?? null]
   );
 }
 
-export async function getDocument(projectId: string, documentId: string): Promise<Document | undefined> {
+export async function getDocument(
+  projectId: string,
+  documentId: string
+): Promise<Document | undefined> {
   return queryRow<Document>(
     `
       SELECT *
@@ -146,16 +151,16 @@ export async function getDocument(projectId: string, documentId: string): Promis
       WHERE project_id = $1 AND id = $2
       LIMIT 1
     `,
-    [projectId, documentId],
+    [projectId, documentId]
   );
 }
 
 export async function getDocumentBySourceUri(
   projectId: string,
   sourceUri: string,
-  sourceType?: string | null,
+  sourceType?: string | null
 ): Promise<Document | undefined> {
-  const trimmed = String(sourceUri || "").trim();
+  const trimmed = String(sourceUri || '').trim();
   if (!trimmed) return undefined;
   return queryRow<Document>(
     `
@@ -166,8 +171,40 @@ export async function getDocumentBySourceUri(
         AND ($3::text IS NULL OR source_type = $3::text)
       LIMIT 1
     `,
-    [projectId, trimmed, String(sourceType || "").trim() || null],
+    [projectId, trimmed, String(sourceType || '').trim() || null]
   );
+}
+
+export async function findExistingDocument(
+  projectId: string,
+  input: {
+    sourceUri?: string;
+    sourceType?: string;
+    title?: string;
+    collectionId?: string | null;
+  }
+): Promise<Document | undefined> {
+  const uri = String(input.sourceUri || '').trim();
+  if (uri) {
+    const byUri = await getDocumentBySourceUri(projectId, uri, input.sourceType);
+    if (byUri) return byUri;
+  }
+  const title = String(input.title || '').trim();
+  const normalizedCollectionId = normalizeUuid(input.collectionId);
+  if (title && normalizedCollectionId) {
+    return queryRow<Document>(
+      `
+        SELECT *
+        FROM documents
+        WHERE project_id = $1
+          AND collection_id = $2
+          AND LOWER(title) = LOWER($3)
+        LIMIT 1
+      `,
+      [projectId, normalizedCollectionId, title]
+    );
+  }
+  return undefined;
 }
 
 export async function createDocument(
@@ -201,15 +238,15 @@ export async function createDocument(
     [
       projectId,
       normalizedCollectionId,
-      String(input.title || "Untitled Source").trim(),
-      String(input.sourceType || "manual"),
-      String(input.sourceUri || ""),
+      String(input.title || 'Untitled Source').trim(),
+      String(input.sourceType || 'manual'),
+      String(input.sourceUri || ''),
       input.storageUri || null,
-      String(input.content || ""),
+      String(input.content || ''),
       jsonParam(input.metadata, {}),
-    ],
+    ]
   );
-  if (!doc) throw new Error("Document insert failed");
+  if (!doc) throw new Error('Document insert failed');
   return doc;
 }
 
@@ -226,22 +263,22 @@ export async function updateDocument(
     metadata?: Record<string, unknown>;
   }
 ): Promise<Document> {
-  const clauses: string[] = ["updated_at = NOW()"];
+  const clauses: string[] = ['updated_at = NOW()'];
   const params: unknown[] = [];
   if (input.collectionId !== undefined) {
     params.push(normalizeUuid(input.collectionId));
     clauses.push(`collection_id = $${params.length}`);
   }
   if (input.title !== undefined) {
-    params.push(String(input.title || "Untitled Source").trim());
+    params.push(String(input.title || 'Untitled Source').trim());
     clauses.push(`title = $${params.length}`);
   }
   if (input.sourceType !== undefined) {
-    params.push(String(input.sourceType || "manual"));
+    params.push(String(input.sourceType || 'manual'));
     clauses.push(`source_type = $${params.length}`);
   }
   if (input.sourceUri !== undefined) {
-    params.push(String(input.sourceUri || ""));
+    params.push(String(input.sourceUri || ''));
     clauses.push(`source_uri = $${params.length}`);
   }
   if (input.storageUri !== undefined) {
@@ -249,7 +286,7 @@ export async function updateDocument(
     clauses.push(`storage_uri = $${params.length}`);
   }
   if (input.content !== undefined) {
-    params.push(String(input.content || ""));
+    params.push(String(input.content || ''));
     clauses.push(`content = $${params.length}`);
   }
   if (input.metadata !== undefined) {
@@ -260,11 +297,11 @@ export async function updateDocument(
   const doc = await queryRow<Document>(
     `
       UPDATE documents
-      SET ${clauses.join(", ")}
+      SET ${clauses.join(', ')}
       WHERE project_id = $${params.length - 1} AND id = $${params.length}
       RETURNING *
     `,
-    params,
+    params
   );
   if (!doc) throw new Error(`Document not found: ${documentId}`);
   return doc;
@@ -282,7 +319,7 @@ export async function updateDocumentMetadata(
       WHERE project_id = $2 AND id = $3
       RETURNING *
     `,
-    [jsonParam(metadata, {}), projectId, documentId],
+    [jsonParam(metadata, {}), projectId, documentId]
   );
   if (!doc) throw new Error(`Document not found: ${documentId}`);
   return doc;
@@ -304,7 +341,7 @@ export async function updateDocumentEmbedding(
       WHERE project_id = $3 AND id = $4
       RETURNING *
     `,
-    [JSON.stringify(embedding), vectorLiteral, projectId, documentId],
+    [JSON.stringify(embedding), vectorLiteral, projectId, documentId]
   );
   if (!doc) throw new Error(`Document not found: ${documentId}`);
   return doc;
@@ -325,20 +362,23 @@ export async function updateDocumentEmbeddingVector(
       WHERE project_id = $2 AND id = $3
       RETURNING *
     `,
-    [vectorLiteral, projectId, documentId],
+    [vectorLiteral, projectId, documentId]
   );
   if (!doc) throw new Error(`Document not found: ${documentId}`);
   return doc;
 }
 
-export async function deleteDocument(projectId: string, documentId: string): Promise<Document | undefined> {
+export async function deleteDocument(
+  projectId: string,
+  documentId: string
+): Promise<Document | undefined> {
   return queryRow<Document>(
     `
       DELETE FROM documents
       WHERE project_id = $1 AND id = $2
       RETURNING *
     `,
-    [projectId, documentId],
+    [projectId, documentId]
   );
 }
 
@@ -358,42 +398,76 @@ export interface RagQueryResult {
   queryVariants: string[];
   totalCandidates: number;
   results: RagResult[];
-  status?: "ok" | "degraded" | "error";
+  status?: 'ok' | 'degraded' | 'error';
   error?: string | null;
 }
 
 const STOPWORDS = new Set([
-  "the", "a", "an", "and", "or", "for", "to", "of", "in", "on", "at", "by",
-  "with", "from", "is", "are", "was", "were", "be", "been", "being", "that",
-  "this", "it", "as", "about", "what", "which", "who", "when", "where", "why",
-  "how",
+  'the',
+  'a',
+  'an',
+  'and',
+  'or',
+  'for',
+  'to',
+  'of',
+  'in',
+  'on',
+  'at',
+  'by',
+  'with',
+  'from',
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'being',
+  'that',
+  'this',
+  'it',
+  'as',
+  'about',
+  'what',
+  'which',
+  'who',
+  'when',
+  'where',
+  'why',
+  'how',
 ]);
 
 function tokenize(value: string): string[] {
-  return String(value || "")
+  return String(value || '')
     .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
     .filter(Boolean);
 }
 
 function normalizeToken(token: string): string {
-  let t = String(token || "").trim().toLowerCase();
-  if (t.length > 4 && t.endsWith("ing")) t = t.slice(0, -3);
-  if (t.length > 3 && t.endsWith("ed")) t = t.slice(0, -2);
-  if (t.length > 3 && t.endsWith("es")) t = t.slice(0, -2);
-  if (t.length > 2 && t.endsWith("s")) t = t.slice(0, -1);
+  let t = String(token || '')
+    .trim()
+    .toLowerCase();
+  if (t.length > 4 && t.endsWith('ing')) t = t.slice(0, -3);
+  if (t.length > 3 && t.endsWith('ed')) t = t.slice(0, -2);
+  if (t.length > 3 && t.endsWith('es')) t = t.slice(0, -2);
+  if (t.length > 2 && t.endsWith('s')) t = t.slice(0, -1);
   return t;
 }
 
 function buildQueryVariants(query: string): string[] {
-  const raw = String(query || "").trim();
+  const raw = String(query || '').trim();
   if (!raw) return [];
   const variants = new Set([raw]);
   const splitters = /\b(?:and|or|then|vs|versus)\b|[,;]+/gi;
-  const parts = raw.split(splitters).map((p) => p.trim()).filter(Boolean);
+  const parts = raw
+    .split(splitters)
+    .map((p) => p.trim())
+    .filter(Boolean);
   for (const part of parts) variants.add(part);
-  if (parts.length > 1) variants.add(parts.join(" "));
+  if (parts.length > 1) variants.add(parts.join(' '));
   return Array.from(variants).slice(0, 6);
 }
 
@@ -405,8 +479,8 @@ function tokenizeQuery(query: string): string[] {
 }
 
 function extractSnippet(content: string, queryTokens: string[]): string {
-  const text = String(content || "");
-  if (!text) return "";
+  const text = String(content || '');
+  if (!text) return '';
   const lower = text.toLowerCase();
   for (const token of queryTokens) {
     const idx = lower.indexOf(token);
@@ -443,8 +517,8 @@ export async function queryDocuments(
           queryVariants: variants,
           totalCandidates,
           results: [],
-          status: "error",
-          error: "Embedding service returned no query vector.",
+          status: 'error',
+          error: 'Embedding service returned no query vector.',
         };
       }
       const vectorRows = await queryDocumentsByVector(projectId, queryEmbedding, {
@@ -460,10 +534,10 @@ export async function queryDocuments(
           title: row.title,
           sourceUri: row.sourceUri,
           score: Number(row.score.toFixed(3)),
-          snippet: extractSnippet(row.content || "", tokenizeQuery(query)),
+          snippet: extractSnippet(row.content || '', tokenizeQuery(query)),
           metadata: row.metadata || {},
         })),
-        status: "ok",
+        status: 'ok',
         error: null,
       };
     } catch (error) {
@@ -472,7 +546,7 @@ export async function queryDocuments(
         queryVariants: variants,
         totalCandidates,
         results: [],
-        status: "error",
+        status: 'error',
         error: error instanceof Error ? error.message : String(error),
       };
     }
@@ -492,10 +566,10 @@ export async function queryDocuments(
       title: row.title,
       sourceUri: row.sourceUri,
       score: Number(row.score.toFixed(3)),
-      snippet: extractSnippet(row.content || "", tokenizeQuery(query)),
+      snippet: extractSnippet(row.content || '', tokenizeQuery(query)),
       metadata: row.metadata || {},
     })),
-    status: "degraded",
+    status: 'degraded',
     error: null,
   };
 }
@@ -504,14 +578,16 @@ async function queryDocumentsByVector(
   projectId: string,
   embedding: number[],
   options: { limit?: number; collectionId?: string } = {}
-): Promise<Array<{
-  id: string;
-  title: string | null;
-  sourceUri: string | null;
-  content: string;
-  metadata: unknown;
-  score: number;
-}>> {
+): Promise<
+  Array<{
+    id: string;
+    title: string | null;
+    sourceUri: string | null;
+    content: string;
+    metadata: unknown;
+    score: number;
+  }>
+> {
   const normalizedCollectionId = normalizeUuid(options.collectionId);
   const normalized = normalizeEmbedding(embedding);
   if (!normalized.length) return [];
@@ -540,7 +616,7 @@ async function queryDocumentsByVector(
       ORDER BY embedding_vector <=> $2::vector
       LIMIT $4
     `,
-    [projectId, vectorLiteral, normalizedCollectionId, limit],
+    [projectId, vectorLiteral, normalizedCollectionId, limit]
   );
   return rows.filter((row) => Number.isFinite(row.score) && row.score > 0);
 }
@@ -548,18 +624,23 @@ async function queryDocumentsByVector(
 async function queryDocumentsByTextFallback(
   projectId: string,
   variants: string[],
-  options: { limit?: number; collectionId?: string } = {},
-): Promise<Array<{
-  id: string;
-  title: string | null;
-  sourceUri: string | null;
-  content: string;
-  metadata: unknown;
-  score: number;
-}>> {
+  options: { limit?: number; collectionId?: string } = {}
+): Promise<
+  Array<{
+    id: string;
+    title: string | null;
+    sourceUri: string | null;
+    content: string;
+    metadata: unknown;
+    score: number;
+  }>
+> {
   const normalizedCollectionId = normalizeUuid(options.collectionId);
   const limit = Math.min(50, Math.max(1, Number(options.limit || 8)));
-  const terms = variants.map((variant) => variant.trim()).filter(Boolean).slice(0, 6);
+  const terms = variants
+    .map((variant) => variant.trim())
+    .filter(Boolean)
+    .slice(0, 6);
   if (!terms.length) return [];
 
   const params: unknown[] = [projectId, normalizedCollectionId];
@@ -589,24 +670,27 @@ async function queryDocumentsByTextFallback(
       FROM documents
       WHERE project_id = $1
         AND ($2::uuid IS NULL OR collection_id = $2::uuid)
-        AND (${searchPredicates.join(" OR ")})
+        AND (${searchPredicates.join(' OR ')})
       ORDER BY updated_at DESC
       LIMIT $${params.length}
     `,
-    params,
+    params
   );
 
   return rows
     .map((row) => {
-      const lowered = `${row.title || ""} ${row.content || ""}`.toLowerCase();
+      const lowered = `${row.title || ''} ${row.content || ''}`.toLowerCase();
       const score = terms.reduce((current, term) => {
         const normalized = term.toLowerCase();
         if (!normalized) return current;
         if (lowered.includes(normalized)) return current + 2.5;
         const tokens = tokenizeQuery(normalized);
-        return current + tokens.reduce(
-          (tokenScore, token) => (lowered.includes(token) ? tokenScore + 0.35 : tokenScore),
-          0,
+        return (
+          current +
+          tokens.reduce(
+            (tokenScore, token) => (lowered.includes(token) ? tokenScore + 0.35 : tokenScore),
+            0
+          )
         );
       }, 0);
       return { ...row, score };
@@ -625,17 +709,15 @@ async function countDocuments(projectId: string, collectionId?: string): Promise
       WHERE project_id = $1
         AND ($2::uuid IS NULL OR collection_id = $2::uuid)
     `,
-    [projectId, normalizedCollectionId],
+    [projectId, normalizedCollectionId]
   );
   return Number(row?.count || 0);
 }
 
 function normalizeEmbedding(values: number[]): number[] {
-  return values
-    .map((value) => Number(value))
-    .filter((value) => Number.isFinite(value));
+  return values.map((value) => Number(value)).filter((value) => Number.isFinite(value));
 }
 
 function toVectorLiteral(values: number[]): string {
-  return `[${normalizeEmbedding(values).join(",")}]`;
+  return `[${normalizeEmbedding(values).join(',')}]`;
 }

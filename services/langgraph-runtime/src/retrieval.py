@@ -233,28 +233,38 @@ class RuntimeRetrievalService:
         headers = {"Content-Type": "application/json"}
         if settings.litellm_api_key:
             headers["Authorization"] = f"Bearer {settings.litellm_api_key}"
-        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-            response = await client.post(
-                f"{settings.litellm_base_url.rstrip('/')}/embeddings",
-                headers=headers,
-                json={
-                    "model": settings.litellm_embedding_model,
-                    "input": [query[:12000]],
-                },
+        try:
+            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+                response = await client.post(
+                    f"{settings.litellm_base_url.rstrip('/')}/embeddings",
+                    headers=headers,
+                    json={
+                        "model": settings.litellm_embedding_model,
+                        "input": [query[:12000]],
+                    },
+                )
+                response.raise_for_status()
+                payload = response.json()
+            data = payload.get("data") if isinstance(payload, dict) else None
+            if not isinstance(data, list) or not data:
+                return []
+            embedding = data[0].get("embedding") if isinstance(data[0], dict) else None
+            return [float(item) for item in embedding] if isinstance(embedding, list) else []
+        except Exception as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            logger.warning(
+                "Embedding query failed (query=%.100s): %s%s",
+                query,
+                exc,
+                f" [HTTP {status}]" if status else "",
             )
-            response.raise_for_status()
-            payload = response.json()
-        data = payload.get("data") if isinstance(payload, dict) else None
-        if not isinstance(data, list) or not data:
             return []
-        embedding = data[0].get("embedding") if isinstance(data[0], dict) else None
-        return [float(item) for item in embedding] if isinstance(embedding, list) else []
 
     async def _fetch(self, query: str, params: Any) -> list[dict[str, Any]]:
         if not settings.database_url_psycopg:
             raise RuntimeRetrievalError("Runtime retrieval database is not configured.")
         try:
-            pool = self._get_pool()
+            pool = await self._get_pool()
             async with pool.connection() as conn:
                 async with conn.cursor() as cursor:
                     await cursor.execute(query, params)
@@ -332,15 +342,16 @@ class RuntimeRetrievalService:
     def _memory_namespace(self, project_id: str) -> tuple[str, ...]:
         return ("open-analyst", "projects", project_id, "memories")
 
-    def _get_pool(self) -> AsyncConnectionPool:
+    async def _get_pool(self) -> AsyncConnectionPool:
         if self._pool is None:
             self._pool = AsyncConnectionPool(
                 conninfo=settings.database_url_psycopg,
                 kwargs={"row_factory": dict_row},
                 min_size=1,
                 max_size=10,
-                open=True,
+                open=False,
             )
+            await self._pool.open()
         return self._pool
 
 

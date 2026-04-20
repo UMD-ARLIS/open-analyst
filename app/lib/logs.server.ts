@@ -1,26 +1,24 @@
-import fs from "fs";
-import path from "path";
-import { getConfigDir } from "./helpers.server";
-import { getSettings, upsertSettings } from "./db/queries/settings.server";
+import fs from 'fs';
+import path from 'path';
+import { getUserConfigDir } from './helpers.server';
+import { getSettings, upsertSettings } from './db/queries/settings.server';
 
-const LOGS_DIRNAME = "logs";
-const HEADLESS_LOG_FILENAME = "headless.log";
+const LOGS_DIRNAME = 'logs';
+const HEADLESS_LOG_FILENAME = 'headless.log';
 
-function getLogsDir(configDir?: string): string {
-  return path.join(configDir ?? getConfigDir(), LOGS_DIRNAME);
+function getLogsDir(userId: string, configDir?: string): string {
+  return path.join(configDir ?? getUserConfigDir(userId), LOGS_DIRNAME);
 }
 
-function ensureLogsDir(configDir?: string): string {
-  const dir = getLogsDir(configDir);
+function ensureLogsDir(userId: string, configDir?: string): string {
+  const dir = getLogsDir(userId, configDir);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
   return dir;
 }
 
-export function listLogs(
-  configDir?: string
-): {
+export function listLogs(userId: string, configDir?: string): {
   files: Array<{
     name: string;
     path: string;
@@ -29,7 +27,7 @@ export function listLogs(
   }>;
   directory: string;
 } {
-  const dir = ensureLogsDir(configDir);
+  const dir = ensureLogsDir(userId, configDir);
   const files = fs
     .readdirSync(dir)
     .map((name) => path.join(dir, name))
@@ -47,22 +45,21 @@ export function listLogs(
   return { files, directory: dir };
 }
 
-export async function isLogsEnabled(): Promise<boolean> {
-  const settings = await getSettings();
+export async function isLogsEnabled(userId: string): Promise<boolean> {
+  const settings = await getSettings(userId);
   return settings.devLogsEnabled !== false;
 }
 
 export async function setLogsEnabled(
   enabled: boolean,
+  userId: string
 ): Promise<{ success: boolean; enabled: boolean }> {
-  await upsertSettings({ devLogsEnabled: enabled });
+  await upsertSettings({ devLogsEnabled: enabled }, userId);
   return { success: true, enabled };
 }
 
-export function exportLogs(
-  configDir?: string
-): { success: boolean; path: string } {
-  const dir = ensureLogsDir(configDir);
+export function exportLogs(userId: string, configDir?: string): { success: boolean; path: string } {
+  const dir = ensureLogsDir(userId, configDir);
   const exportPath = path.join(dir, `open-analyst-logs-${Date.now()}.txt`);
   const files = fs
     .readdirSync(dir)
@@ -71,18 +68,19 @@ export function exportLogs(
   const bodyText = files
     .map((filePath) => {
       const name = path.basename(filePath);
-      const text = fs.readFileSync(filePath, "utf8");
+      const text = fs.readFileSync(filePath, 'utf8');
       return `\n===== ${name} =====\n${text}`;
     })
-    .join("\n");
-  fs.writeFileSync(exportPath, bodyText || "No logs available.", "utf8");
+    .join('\n');
+  fs.writeFileSync(exportPath, bodyText || 'No logs available.', 'utf8');
   return { success: true, path: exportPath };
 }
 
 export function clearLogs(
+  userId: string,
   configDir?: string
 ): { success: boolean; deletedCount: number } {
-  const dir = ensureLogsDir(configDir);
+  const dir = ensureLogsDir(userId, configDir);
   const files = fs
     .readdirSync(dir)
     .map((name) => path.join(dir, name))
@@ -99,19 +97,21 @@ export async function appendLog(
   level: string,
   message: string,
   metadata: Record<string, unknown> = {},
+  userId?: string
 ): Promise<void> {
   try {
-    const settings = await getSettings();
+    const resolvedUserId = userId ?? 'dev-user';
+    const settings = await getSettings(resolvedUserId);
     if (settings.devLogsEnabled === false) return;
-    const dir = ensureLogsDir();
+    const dir = ensureLogsDir(resolvedUserId);
     const logPath = path.join(dir, HEADLESS_LOG_FILENAME);
     const line = JSON.stringify({
       ts: new Date().toISOString(),
       level,
-      message: String(message || ""),
-      metadata: metadata && typeof metadata === "object" ? metadata : {},
+      message: String(message || ''),
+      metadata: metadata && typeof metadata === 'object' ? metadata : {},
     });
-    fs.appendFileSync(logPath, `${line}\n`, "utf8");
+    fs.appendFileSync(logPath, `${line}\n`, 'utf8');
   } catch {
     // Best effort logging
   }

@@ -1,0 +1,12 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analyst-mcp
+  namespace: open-analyst
+spec:
+  template:
+    spec:
+      containers:
+        - name: analyst-mcp
+          image: open-analyst-analyst-mcp:local
+          imagePullPolicy: IfNotPresent

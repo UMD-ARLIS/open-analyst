@@ -11,6 +11,7 @@ endpoints — no custom routes are needed.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 from uuid import UUID
 
@@ -20,6 +21,8 @@ from fastapi.requests import Request
 
 from config import settings
 from runtime_context import derive_api_base_url, runtime_context_service
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="open-analyst-custom-routes")
 app.add_middleware(
@@ -167,16 +170,16 @@ def build_runtime_system_prompt(runtime_context: dict[str, Any], analysis_mode: 
     if mode == "chat":
         lines.extend(
             [
-                "Chat mode is active.",
-                "Stay conversational and lightweight.",
-                "You may inspect existing project context read-only, but do not create visible plans, delegate to subagents, stage retrieval workflows, or publish artifacts in this mode.",
-                "If the user asks for structured evidence gathering or deliverable production, recommend switching to Research or Product mode.",
+                "Lightweight conversation is active.",
+                "Stay concise when the request is simple, but do not treat chat as a hard wall.",
+                "You may delegate, retrieve evidence, and build a visible plan when the task actually requires it.",
+                "If the work needs heavier retrieval or deliverable production, call request_mode_switch to ask for approval before escalating the workflow state on this same thread.",
             ]
         )
     elif mode == "research":
         lines.extend(
             [
-                "Research mode is active.",
+                "Research workflow is active.",
                 "Use structured retrieval and synthesis.",
                 "For multi-step work, create a visible plan, gather grounded evidence, and synthesize only after retrieval has produced enough support.",
             ]
@@ -184,10 +187,10 @@ def build_runtime_system_prompt(runtime_context: dict[str, Any], analysis_mode: 
     elif mode == "product":
         lines.extend(
             [
-                "Product mode is active.",
-                "Treat this as deliverable-oriented work.",
+                "Deliverable workflow is active.",
+                "Treat this as output-oriented work.",
                 "Use structured planning, drafting, critique, packaging, and publication behavior.",
-                "If key framing is missing for a product request, ask concise clarifying questions before substantial drafting.",
+                "If key framing is missing for a deliverable request, ask concise clarifying questions before substantial drafting.",
             ]
         )
     return " ".join(lines)
@@ -238,14 +241,16 @@ async def _load_thread_metadata(thread_id: str) -> dict[str, Any]:
     try:
         from langgraph_api.api.runs import Threads
         from langgraph_runtime.database import connect
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to import Agent Server internals for thread %s: %s", thread_id, exc)
         return {}
 
     try:
         async with connect() as conn:
             thread_iter = await Threads.get(conn, thread_id)
             row = await anext(thread_iter)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to load metadata for thread %s: %s", thread_id, exc)
         return {}
 
     metadata = row.get("metadata") if isinstance(row, dict) else None

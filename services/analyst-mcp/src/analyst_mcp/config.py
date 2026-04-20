@@ -44,12 +44,8 @@ class Settings(BaseSettings):
     raw_root: Path = Path("data/raw")
     mcp_path: str = "/mcp"
 
-    neo4j_uri: str | None = None
-    neo4j_user: str = "neo4j"
-    neo4j_password: SecretStr | None = None
     postgres_dsn: str | None = Field(default_factory=lambda: os.getenv("DATABASE_URL"))
     postgres_schema: str = "analyst_mcp"
-    redis_url: str | None = None
 
     minio_endpoint: str | None = None
     s3_bucket: str | None = None
@@ -57,12 +53,8 @@ class Settings(BaseSettings):
     aws_access_key_id: str | None = None
     aws_secret_access_key: SecretStr | None = None
 
-    litellm_base_url: str | None = None
-    litellm_api_key: SecretStr | None = None
-    litellm_chat_model: str | None = None
-    litellm_embedding_model: str | None = None
-
     semantic_scholar_api_key: SecretStr | None = None
+    tavily_api_key: SecretStr | None = Field(default_factory=lambda: SecretStr(os.getenv("TAVILY_API_KEY", "")) if os.getenv("TAVILY_API_KEY") else None)
 
     arxiv_base_url: str = "https://export.arxiv.org/api/query"
     openalex_base_url: str = "https://api.openalex.org"
@@ -72,22 +64,6 @@ class Settings(BaseSettings):
     request_timeout_seconds: float = 30.0
     provider_search_timeout_seconds: float = 45.0
     default_result_limit: int = 10
-    chunk_size: int = 1400
-    chunk_overlap: int = 200
-    embedding_batch_size: int = Field(default=8, ge=1, le=64)
-    embedding_batch_char_limit: int = Field(default=12000, ge=1000, le=200000)
-    embedding_dimensions: int = Field(default=384, ge=8)
-    rag_min_score: float = Field(default=0.2, ge=0.0, le=1.0)
-    rag_max_matches: int = Field(default=24, ge=1, le=200)
-    rag_diversity_per_paper: int = Field(default=2, ge=1, le=10)
-    scheduler_interval_seconds: int = Field(default=86_400, ge=60)
-    daily_sync_lookback_days: int = Field(default=2, ge=1)
-    daily_sync_result_limit: int = Field(default=1000, ge=1, le=10000)
-    bootstrap_disk_multiplier: float = Field(default=1.5, ge=1.0)
-    bootstrap_memory_floor_gb: int = Field(default=32, ge=1)
-    arxiv_bucket: str = "arxiv"
-    allow_embedding_fallback: bool = False
-    allow_llm_fallback: bool = False
 
     def ensure_directories(self) -> None:
         for path in {self.data_dir, self.storage_root, self.index_root, self.raw_root}:

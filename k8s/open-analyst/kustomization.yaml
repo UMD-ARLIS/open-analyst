@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - webapp.yaml
+  - webapp-hpa.yaml
+  - runtime.yaml
+  - runtime-hpa.yaml
+  - analyst-mcp.yaml
+  - analyst-mcp-hpa.yaml
+  - keycloak.yaml
+  - ingress.yaml

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -176,6 +177,16 @@ def get_config_dir() -> Path:
     return Path.home() / ".config" / "open-analyst"
 
 
+def _sanitize_user_id(value: Any) -> str:
+    trimmed = _trimmed(value)
+    sanitized = re.sub(r"[^a-zA-Z0-9._-]+", "-", trimmed).strip("-")
+    return sanitized or "anonymous"
+
+
+def get_user_config_dir(user_id: Any) -> Path:
+    return get_config_dir() / "users" / _sanitize_user_id(user_id)
+
+
 def _load_json_array(path: Path, fallback: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not path.exists():
         return [dict(item) for item in fallback]
@@ -318,7 +329,17 @@ def _merge_skill(skill: dict[str, Any], stored_by_id: dict[str, dict[str, Any]])
 
 
 def _discover_repository_skills(stored_by_id: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    skills_root = Path(__file__).resolve().parents[3] / "skills"
+    # In the repo layout the skills directory is three levels up from this file
+    # (services/langgraph-runtime/src/runtime_context.py → repo/skills/).
+    # In Docker the path is shorter (/app/src/runtime_context.py), so fall
+    # back to an env var or silently skip when the directory doesn't exist.
+    configured_skills_dir = _trimmed_or_none(os.environ.get("SKILLS_DIR"))
+    skills_root = Path(configured_skills_dir) if configured_skills_dir else None
+    if skills_root is None or not skills_root.is_dir():
+        try:
+            skills_root = Path(__file__).resolve().parents[3] / "skills"
+        except IndexError:
+            return []
     if not skills_root.exists():
         return []
     discovered: list[dict[str, Any]] = []
@@ -348,8 +369,20 @@ def _discover_repository_skills(stored_by_id: dict[str, dict[str, Any]]) -> list
     return discovered
 
 
-def _list_skills_catalog() -> list[dict[str, Any]]:
-    stored = _load_json_array(get_config_dir() / "skills.json", DEFAULT_SKILL_RECORDS)
+def _extract_default_skill_ids(agent_policies: Any) -> list[str]:
+    if not isinstance(agent_policies, dict):
+        return []
+    raw = (
+        agent_policies.get("defaultSkillIds")
+        or agent_policies.get("default_skill_ids")
+        or agent_policies.get("pinnedSkillIds")
+    )
+    return _string_list(raw)
+
+
+def _list_skills_catalog(user_id: str | None = None) -> list[dict[str, Any]]:
+    config_root = get_user_config_dir(user_id) if user_id else get_config_dir()
+    stored = _load_json_array(config_root / "skills.json", DEFAULT_SKILL_RECORDS)
     stored_by_id = {str(item.get("id") or ""): item for item in stored}
     builtin = [_merge_skill(dict(item), stored_by_id) for item in DEFAULT_SKILL_RECORDS]
     repository = _discover_repository_skills(stored_by_id)
@@ -425,8 +458,8 @@ def _match_relevant_repository_skills(
     return [item[2] for item in scored[:4]]
 
 
-def list_active_skills() -> list[dict[str, Any]]:
-    skills = _list_skills_catalog()
+def list_active_skills(user_id: str | None = None) -> list[dict[str, Any]]:
+    skills = _list_skills_catalog(user_id)
     active: list[dict[str, Any]] = []
     for skill in skills:
         if not skill.get("enabled"):
@@ -435,8 +468,17 @@ def list_active_skills() -> list[dict[str, Any]]:
     return active
 
 
-def list_mcp_servers() -> list[dict[str, Any]]:
-    servers = _load_json_array(get_config_dir() / "mcp-servers.json", DEFAULT_MCP_SERVERS)
+def list_skills_catalog(user_id: str | None = None) -> list[dict[str, Any]]:
+    return [
+        _skill_runtime_summary(skill)
+        for skill in _list_skills_catalog(user_id)
+        if _trimmed(skill.get("id")) != "repo-skill-skill-creator"
+    ]
+
+
+def list_mcp_servers(user_id: str | None = None) -> list[dict[str, Any]]:
+    config_root = get_user_config_dir(user_id) if user_id else get_config_dir()
+    servers = _load_json_array(config_root / "mcp-servers.json", DEFAULT_MCP_SERVERS)
     normalized: list[dict[str, Any]] = []
     for server in servers:
         normalized.append(
@@ -451,10 +493,18 @@ def list_mcp_servers() -> list[dict[str, Any]]:
 
 
 def derive_api_base_url(*, origin: str | None = None, fallback_host: str | None = None) -> str:
-    if _trimmed(origin):
-        return _trimmed(origin).rstrip("/")
+    """Derive the webapp API base URL for server-to-server calls.
+
+    Prefers OPEN_ANALYST_WEB_INTERNAL_URL over OPEN_ANALYST_WEB_URL and the
+    browser origin to avoid TLS/hostname issues when the public URL differs
+    from the in-cluster service address.
+    """
+    if _trimmed(settings.open_analyst_web_internal_url):
+        return _trimmed(settings.open_analyst_web_internal_url).rstrip("/")
     if _trimmed(settings.open_analyst_web_url):
         return _trimmed(settings.open_analyst_web_url).rstrip("/")
+    if _trimmed(origin):
+        return _trimmed(origin).rstrip("/")
     host = _trimmed_or_none(fallback_host)
     if not host:
         return ""
@@ -487,16 +537,25 @@ class RuntimeContextService:
         if not project:
             raise ValueError(f"Project not found: {project_id}")
         profile = await self._load_project_profile(project_id)
-        server_configs = list_mcp_servers()
+        user_id = _trimmed(project.get("user_id"))
+        server_configs = list_mcp_servers(user_id)
         raw_skills = [
             skill
-            for skill in _list_skills_catalog()
+            for skill in _list_skills_catalog(user_id)
             if _trimmed(skill.get("id")) != "repo-skill-skill-creator"
         ]
         all_skills = [_skill_runtime_summary(skill) for skill in raw_skills]
         active_skills = [skill for skill in all_skills if skill.get("enabled")]
         matched_skills = _match_relevant_repository_skills(raw_skills, prompt=prompt, messages=messages)
-        pinned_skill_ids = [skill["id"] for skill in active_skills]
+        configured_default_skill_ids = _extract_default_skill_ids(profile.get("agent_policies"))
+        enabled_skill_ids = {
+            _trimmed(skill.get("id"))
+            for skill in active_skills
+            if _trimmed(skill.get("id"))
+        }
+        pinned_skill_ids = [
+            skill_id for skill_id in configured_default_skill_ids if skill_id in enabled_skill_ids
+        ]
         matched_skill_ids = [
             _trimmed(skill.get("id"))
             for skill in matched_skills
@@ -555,6 +614,7 @@ class RuntimeContextService:
             SELECT
                 id,
                 name,
+                user_id,
                 workspace_slug,
                 workspace_local_root,
                 artifact_backend,
@@ -592,22 +652,23 @@ class RuntimeContextService:
     async def _fetch(self, query: str, params: list[Any]) -> list[dict[str, Any]]:
         if not settings.database_url_psycopg:
             raise RuntimeError("Runtime database is not configured.")
-        pool = self._get_pool()
+        pool = await self._get_pool()
         async with pool.connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute(query, params)
                 rows = await cursor.fetchall()
         return list(rows)
 
-    def _get_pool(self) -> AsyncConnectionPool:
+    async def _get_pool(self) -> AsyncConnectionPool:
         if self._pool is None:
             self._pool = AsyncConnectionPool(
                 conninfo=settings.database_url_psycopg,
                 kwargs={"row_factory": dict_row},
                 min_size=1,
                 max_size=5,
-                open=True,
+                open=False,
             )
+            await self._pool.open()
         return self._pool
 
 

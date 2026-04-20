@@ -1,235 +1,231 @@
-import type { ToolDefinition } from "./types";
+import type { ToolDefinition } from './types';
 
 const TOOL_DEFS: Array<{
   type: string;
   function: { name: string; description: string; parameters: unknown };
 }> = [
   {
-    type: "function",
+    type: 'function',
     function: {
-      name: "list_directory",
-      description: "List directory contents",
+      name: 'list_directory',
+      description: 'List directory contents',
       parameters: {
-        type: "object",
-        properties: { path: { type: "string" } },
-        required: ["path"],
+        type: 'object',
+        properties: { path: { type: 'string' } },
+        required: ['path'],
       },
     },
   },
   {
-    type: "function",
+    type: 'function',
     function: {
-      name: "read_file",
-      description: "Read a UTF-8 text file",
+      name: 'read_file',
+      description: 'Read a UTF-8 text file',
       parameters: {
-        type: "object",
-        properties: { path: { type: "string" } },
-        required: ["path"],
+        type: 'object',
+        properties: { path: { type: 'string' } },
+        required: ['path'],
       },
     },
   },
   {
-    type: "function",
+    type: 'function',
     function: {
-      name: "write_file",
-      description: "Write a UTF-8 text file",
+      name: 'write_file',
+      description: 'Write a UTF-8 text file',
       parameters: {
-        type: "object",
+        type: 'object',
         properties: {
-          path: { type: "string" },
-          content: { type: "string" },
+          path: { type: 'string' },
+          content: { type: 'string' },
         },
-        required: ["path", "content"],
+        required: ['path', 'content'],
       },
     },
   },
   {
-    type: "function",
+    type: 'function',
     function: {
-      name: "edit_file",
+      name: 'edit_file',
+      description: 'Replace first occurrence of old_string with new_string in a file',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string' },
+          old_string: { type: 'string' },
+          new_string: { type: 'string' },
+        },
+        required: ['path', 'old_string', 'new_string'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'glob',
+      description: 'Find files with a glob pattern',
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string' },
+          path: { type: 'string' },
+        },
+        required: ['pattern', 'path'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'grep',
+      description: 'Search file contents by regex',
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string' },
+          path: { type: 'string' },
+        },
+        required: ['pattern', 'path'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'web_fetch',
       description:
-        "Replace first occurrence of old_string with new_string in a file",
+        'Fetch URL content from the web with binary-safe handling and automatic source capture',
       parameters: {
-        type: "object",
+        type: 'object',
         properties: {
-          path: { type: "string" },
-          old_string: { type: "string" },
-          new_string: { type: "string" },
+          url: { type: 'string' },
+          collectionName: { type: 'string' },
         },
-        required: ["path", "old_string", "new_string"],
+        required: ['url'],
       },
     },
   },
   {
-    type: "function",
+    type: 'function',
     function: {
-      name: "glob",
-      description: "Find files with a glob pattern",
+      name: 'web_search',
+      description: 'Search the web for a query and return summary results',
       parameters: {
-        type: "object",
+        type: 'object',
         properties: {
-          pattern: { type: "string" },
-          path: { type: "string" },
+          query: { type: 'string' },
         },
-        required: ["pattern", "path"],
+        required: ['query'],
       },
     },
   },
   {
-    type: "function",
+    type: 'function',
     function: {
-      name: "grep",
-      description: "Search file contents by regex",
+      name: 'hf_daily_papers',
+      description: 'Fetch Hugging Face daily papers for a date (YYYY-MM-DD) and capture them',
       parameters: {
-        type: "object",
+        type: 'object',
         properties: {
-          pattern: { type: "string" },
-          path: { type: "string" },
-        },
-        required: ["pattern", "path"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "web_fetch",
-      description:
-        "Fetch URL content from the web with binary-safe handling and automatic source capture",
-      parameters: {
-        type: "object",
-        properties: {
-          url: { type: "string" },
-          collectionName: { type: "string" },
-        },
-        required: ["url"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "web_search",
-      description:
-        "Search the web for a query and return summary results",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string" },
-        },
-        required: ["query"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "hf_daily_papers",
-      description:
-        "Fetch Hugging Face daily papers for a date (YYYY-MM-DD) and capture them",
-      parameters: {
-        type: "object",
-        properties: {
-          date: { type: "string" },
-          collectionName: { type: "string" },
+          date: { type: 'string' },
+          collectionName: { type: 'string' },
         },
         required: [],
       },
     },
   },
   {
-    type: "function",
+    type: 'function',
     function: {
-      name: "hf_paper",
-      description:
-        "Fetch a Hugging Face paper by arXiv id and capture it",
+      name: 'hf_paper',
+      description: 'Fetch a Hugging Face paper by arXiv id and capture it',
       parameters: {
-        type: "object",
+        type: 'object',
         properties: {
-          arxiv_id: { type: "string" },
-          collectionName: { type: "string" },
+          arxiv_id: { type: 'string' },
+          collectionName: { type: 'string' },
         },
-        required: ["arxiv_id"],
+        required: ['arxiv_id'],
       },
     },
   },
   {
-    type: "function",
+    type: 'function',
     function: {
-      name: "collection_overview",
+      name: 'collection_overview',
       description:
-        "List what is in the active collection (or project) and summarize source contents.",
+        'List what is in the active collection (or project) and summarize source contents.',
       parameters: {
-        type: "object",
+        type: 'object',
         properties: {
-          collectionId: { type: "string" },
+          collectionId: { type: 'string' },
         },
         required: [],
       },
     },
   },
   {
-    type: "function",
+    type: 'function',
     function: {
-      name: "collection_artifact_metadata",
+      name: 'collection_artifact_metadata',
       description:
-        "List stored artifact metadata for the active collection or project, including storage URIs and artifact links.",
+        'List stored artifact metadata for the active collection or project, including storage URIs and artifact links.',
       parameters: {
-        type: "object",
+        type: 'object',
         properties: {
-          collectionId: { type: "string" },
+          collectionId: { type: 'string' },
         },
         required: [],
       },
     },
   },
   {
-    type: "function",
+    type: 'function',
     function: {
-      name: "capture_artifact",
+      name: 'capture_artifact',
       description:
-        "Capture a generated workspace file into the project store and artifact backend.",
+        'Capture a generated workspace file into the project store and artifact backend.',
       parameters: {
-        type: "object",
+        type: 'object',
         properties: {
-          relativePath: { type: "string" },
-          title: { type: "string" },
-          collectionId: { type: "string" },
-          collectionName: { type: "string" },
+          relativePath: { type: 'string' },
+          title: { type: 'string' },
+          collectionId: { type: 'string' },
+          collectionName: { type: 'string' },
         },
-        required: ["relativePath"],
+        required: ['relativePath'],
       },
     },
   },
   {
-    type: "function",
+    type: 'function',
     function: {
-      name: "generate_file",
+      name: 'generate_file',
       description:
-        "Generate a binary or structured file by running Python code with an OUTPUT_PATH target",
+        'Generate a binary or structured file by running Python code with an OUTPUT_PATH target',
       parameters: {
-        type: "object",
+        type: 'object',
         properties: {
-          path: { type: "string" },
-          python_code: { type: "string" },
+          path: { type: 'string' },
+          python_code: { type: 'string' },
         },
-        required: ["path", "python_code"],
+        required: ['path', 'python_code'],
       },
     },
   },
   {
-    type: "function",
+    type: 'function',
     function: {
-      name: "execute_command",
+      name: 'execute_command',
       description:
-        "Run a shell command in the working directory. Use the cwd argument instead of prefixing commands with cd.",
+        'Run a shell command in the working directory. Use the cwd argument instead of prefixing commands with cd.',
       parameters: {
-        type: "object",
+        type: 'object',
         properties: {
-          command: { type: "string" },
-          cwd: { type: "string" },
+          command: { type: 'string' },
+          cwd: { type: 'string' },
         },
-        required: ["command", "cwd"],
+        required: ['command', 'cwd'],
       },
     },
   },

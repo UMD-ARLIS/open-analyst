@@ -1,10 +1,18 @@
 import { create } from 'zustand';
-import type { ArtifactMeta, PermissionRequest, UserQuestionRequest, Settings, AppConfig, SandboxSetupProgress, SandboxSyncStatus } from '~/lib/types';
+import type {
+  ArtifactMeta,
+  PermissionRequest,
+  UserQuestionRequest,
+  Settings,
+  AppConfig,
+} from '~/lib/types';
 
 interface ProjectSummary {
   id: string;
   name: string;
   description?: string | null;
+  accessRole?: 'owner' | 'editor' | 'viewer';
+  isOwner?: boolean;
   workspaceSlug?: string | null;
   workspaceLocalRoot?: string | null;
   artifactBackend?: string | null;
@@ -45,13 +53,6 @@ interface AppState {
   activeProjectId: string | null;
   activeCollectionByProject: Record<string, string>;
 
-  // Sandbox setup
-  sandboxSetupProgress: SandboxSetupProgress | null;
-  isSandboxSetupComplete: boolean;
-
-  // Sandbox sync (per-session)
-  sandboxSyncStatus: SandboxSyncStatus | null;
-
   // File viewer
   fileViewerArtifact: ArtifactMeta | null;
 
@@ -79,13 +80,6 @@ interface AppState {
   removeProject: (projectId: string) => void;
   setActiveProjectId: (projectId: string | null) => void;
   setProjectActiveCollection: (projectId: string, collectionId: string) => void;
-
-  // Sandbox setup actions
-  setSandboxSetupProgress: (progress: SandboxSetupProgress | null) => void;
-  setSandboxSetupComplete: (complete: boolean) => void;
-
-  // Sandbox sync actions
-  setSandboxSyncStatus: (status: SandboxSyncStatus | null) => void;
 
   // File viewer actions
   openFileViewer: (artifact: ArtifactMeta) => void;
@@ -135,15 +129,13 @@ export const useAppStore = create<AppState>((set) => ({
   projects: [],
   activeProjectId: null,
   activeCollectionByProject: {},
-  sandboxSetupProgress: null,
-  isSandboxSetupComplete: false,
-  sandboxSyncStatus: null,
   fileViewerArtifact: null,
 
   // UI actions
   setLoading: (loading) => set({ isLoading: loading }),
   toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
-  toggleContextPanel: () => set((state) => ({ contextPanelCollapsed: !state.contextPanelCollapsed })),
+  toggleContextPanel: () =>
+    set((state) => ({ contextPanelCollapsed: !state.contextPanelCollapsed })),
 
   // Permission actions
   setPendingPermission: (permission) => set({ pendingPermission: permission }),
@@ -188,7 +180,8 @@ export const useAppStore = create<AppState>((set) => ({
   removeProject: (projectId) =>
     set((state) => {
       const projects = state.projects.filter((project) => project.id !== projectId);
-      const activeProjectId = state.activeProjectId === projectId ? projects[0]?.id || null : state.activeProjectId;
+      const activeProjectId =
+        state.activeProjectId === projectId ? projects[0]?.id || null : state.activeProjectId;
       return { projects, activeProjectId };
     }),
 
@@ -198,13 +191,6 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => ({
       activeCollectionByProject: { ...state.activeCollectionByProject, [projectId]: collectionId },
     })),
-
-  // Sandbox setup actions
-  setSandboxSetupProgress: (progress) => set({ sandboxSetupProgress: progress }),
-  setSandboxSetupComplete: (complete) => set({ isSandboxSetupComplete: complete }),
-
-  // Sandbox sync actions
-  setSandboxSyncStatus: (status) => set({ sandboxSyncStatus: status }),
 
   // File viewer actions
   openFileViewer: (artifact) => set({ fileViewerArtifact: artifact }),

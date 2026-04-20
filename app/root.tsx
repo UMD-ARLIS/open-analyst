@@ -1,12 +1,6 @@
-import {
-  Links,
-  Meta,
-  Outlet,
-  Scripts,
-  ScrollRestoration,
-} from "react-router";
-import { ThemeScript } from "~/components/ThemeScript";
-import "./styles/globals.css";
+import { Links, Meta, Outlet, Scripts, ScrollRestoration } from 'react-router';
+import { ThemeScript } from '~/components/ThemeScript';
+import './styles/globals.css';
 
 export function Layout({ children }: { children: React.ReactNode }) {
   return (

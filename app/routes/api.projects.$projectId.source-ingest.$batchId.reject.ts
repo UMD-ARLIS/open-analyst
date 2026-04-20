@@ -1,4 +1,5 @@
-import { rejectSourceIngestBatch } from "~/lib/source-ingest.server";
+import { rejectSourceIngestBatch } from '~/lib/source-ingest.server';
+import { requireProjectApiAccess } from '~/lib/project-access.server';
 
 export async function action({
   params,
@@ -7,9 +8,10 @@ export async function action({
   params: { projectId: string; batchId: string };
   request: Request;
 }) {
-  if (request.method !== "POST") {
-    return Response.json({ error: "Method not allowed" }, { status: 405 });
+  if (request.method !== 'POST') {
+    return Response.json({ error: 'Method not allowed' }, { status: 405 });
   }
+  await requireProjectApiAccess(request, params.projectId);
   const batch = await rejectSourceIngestBatch(params.projectId, params.batchId);
   return Response.json({ batch });
 }

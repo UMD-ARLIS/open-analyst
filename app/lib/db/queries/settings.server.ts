@@ -1,5 +1,5 @@
-import { DEV_USER_ID, queryRow } from "../index.server";
-import { type Settings } from "../schema";
+import { queryRow } from '../index.server';
+import { type Settings } from '../schema';
 
 export interface SettingsData {
   activeProjectId: string | null;
@@ -13,11 +13,11 @@ export interface SettingsData {
 
 const DEFAULTS: SettingsData = {
   activeProjectId: null,
-  model: "",
+  model: '',
   workingDir: null,
-  workingDirType: "local",
+  workingDirType: 'local',
   s3Uri: null,
-  agentBackend: "langgraph",
+  agentBackend: 'langgraph',
   devLogsEnabled: false,
 };
 
@@ -33,7 +33,7 @@ function toSettingsData(row: Settings): SettingsData {
   };
 }
 
-export async function getSettings(userId: string = DEV_USER_ID): Promise<SettingsData> {
+export async function getSettings(userId: string): Promise<SettingsData> {
   const row = await queryRow<Settings>(
     `
       SELECT *
@@ -41,7 +41,7 @@ export async function getSettings(userId: string = DEV_USER_ID): Promise<Setting
       WHERE user_id = $1
       LIMIT 1
     `,
-    [userId],
+    [userId]
   );
   if (!row) return { ...DEFAULTS };
   return toSettingsData(row);
@@ -49,7 +49,7 @@ export async function getSettings(userId: string = DEV_USER_ID): Promise<Setting
 
 export async function upsertSettings(
   updates: Partial<SettingsData>,
-  userId: string = DEV_USER_ID
+  userId: string
 ): Promise<SettingsData> {
   const row = await queryRow<Settings>(
     `
@@ -80,21 +80,21 @@ export async function upsertSettings(
     [
       userId,
       updates.activeProjectId !== undefined ? updates.activeProjectId : null,
-      typeof updates.model === "string" ? updates.model : null,
+      typeof updates.model === 'string' ? updates.model : null,
       updates.workingDir !== undefined ? updates.workingDir : null,
-      typeof updates.workingDirType === "string" ? updates.workingDirType : null,
+      typeof updates.workingDirType === 'string' ? updates.workingDirType : null,
       updates.s3Uri !== undefined ? updates.s3Uri : null,
-      typeof updates.agentBackend === "string" ? updates.agentBackend : null,
-      typeof updates.devLogsEnabled === "boolean" ? updates.devLogsEnabled : null,
+      typeof updates.agentBackend === 'string' ? updates.agentBackend : null,
+      typeof updates.devLogsEnabled === 'boolean' ? updates.devLogsEnabled : null,
       updates.activeProjectId !== undefined,
-      typeof updates.model === "string",
+      typeof updates.model === 'string',
       updates.workingDir !== undefined,
-      typeof updates.workingDirType === "string",
+      typeof updates.workingDirType === 'string',
       updates.s3Uri !== undefined,
-      typeof updates.agentBackend === "string",
-      typeof updates.devLogsEnabled === "boolean",
-    ],
+      typeof updates.agentBackend === 'string',
+      typeof updates.devLogsEnabled === 'boolean',
+    ]
   );
-  if (!row) throw new Error("Settings upsert failed");
+  if (!row) throw new Error('Settings upsert failed');
   return toSettingsData(row);
 }

@@ -14,6 +14,12 @@ The product is a single project workspace with three coordinated surfaces:
 - center chat thread for the active conversation
 - right dock for `Sources`, `Canvas`, and artifact preview
 
+Projects can be shared with collaborators using three roles:
+
+- `owner`
+- `editor`
+- `viewer`
+
 There are three explicit runtime modes:
 
 - `Chat`: lightweight conversation with read-only project context
@@ -59,11 +65,13 @@ Copy [`.env.example`](/home/ubuntu/code/ARLIS/open-analyst/.env.example) to [`.e
 - `LITELLM_CHAT_MODEL`
 - `LITELLM_EMBEDDING_MODEL`
 - `ANALYST_MCP_API_KEY`
+- `OPEN_ANALYST_INTERNAL_API_KEY`
 
 Common local defaults:
 
 - `LANGGRAPH_RUNTIME_URL=http://localhost:8081`
 - `ANALYST_MCP_BASE_URL=http://localhost:8000`
+- `AUTH_ENABLED=false` unless you are also running Keycloak locally
 - blank `ARTIFACT_STORAGE_BACKEND` for local file storage
 - `ARTIFACT_STORAGE_BACKEND=s3` for S3-backed storage
 
@@ -120,8 +128,11 @@ curl -H "x-api-key: $ANALYST_MCP_API_KEY" http://localhost:8000/api/capabilities
 ## Documentation
 
 - [Architecture](/home/ubuntu/code/ARLIS/open-analyst/docs/ARCHITECTURE.md)
+- [Collaboration](/home/ubuntu/code/ARLIS/open-analyst/docs/COLLABORATION.md)
 - [Agent Architecture](/home/ubuntu/code/ARLIS/open-analyst/docs/AGENT_ARCHITECTURE.md)
 - [Deployment](/home/ubuntu/code/ARLIS/open-analyst/docs/DEPLOYMENT.md)
+- [Workspace Settings](/home/ubuntu/code/ARLIS/open-analyst/docs/WORKSPACE_SETTINGS.md)
+- [Persistence Map](/home/ubuntu/code/ARLIS/open-analyst/docs/PERSISTENCE.md)
 - [Repository Map](/home/ubuntu/code/ARLIS/open-analyst/docs/REPOSITORY_MAP.md)
 - [Analyst MCP README](/home/ubuntu/code/ARLIS/open-analyst/services/analyst-mcp/README.md)
 

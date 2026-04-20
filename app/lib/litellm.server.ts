@@ -1,5 +1,5 @@
-import { env } from "~/lib/env.server";
-import { supportsToolCalling } from "~/lib/model-capabilities";
+import { env } from '~/lib/env.server';
+import { supportsToolCalling } from '~/lib/model-capabilities';
 
 export interface LitellmModel {
   id: string;
@@ -29,7 +29,7 @@ export async function fetchModels(): Promise<LitellmModel[]> {
   if (!res.ok) {
     // Return stale cache rather than failing hard
     if (cachedModels) return cachedModels;
-    const body = await res.text().catch(() => "");
+    const body = await res.text().catch(() => '');
     throw new Error(`LiteLLM gateway error: ${res.status} ${body}`);
   }
 

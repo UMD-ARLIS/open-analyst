@@ -1,27 +1,40 @@
 import type { AppConfig } from '~/lib/types';
 
+export const REQUEST_TIMEOUT_MS = 30_000;
+
 export function getHeadlessApiBase(): string {
   return '';
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${getHeadlessApiBase()}/api${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers || {}),
-    },
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const message = (body && (body.error || body.message)) || `HTTP ${res.status}`;
-    throw new Error(message);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${getHeadlessApiBase()}/api${path}`, {
+      ...init,
+      signal: init?.signal ?? controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init?.headers || {}),
+      },
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const message = (body && (body.error || body.message)) || `HTTP ${res.status}`;
+      throw new Error(message);
+    }
+    return body as T;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  return body as T;
 }
 
-export async function headlessGetModels(): Promise<Array<{ id: string; name: string; supportsTools: boolean }>> {
-  const result = await requestJson<{ models?: Array<{ id: string; name: string; supportsTools?: boolean }> }>('/models');
+export async function headlessGetModels(): Promise<
+  Array<{ id: string; name: string; supportsTools: boolean }>
+> {
+  const result = await requestJson<{
+    models?: Array<{ id: string; name: string; supportsTools?: boolean }>;
+  }>('/models');
   return Array.isArray(result.models) ? result.models : [];
 }
 
@@ -36,6 +49,8 @@ export interface HeadlessProject {
   id: string;
   name: string;
   description: string;
+  accessRole?: 'owner' | 'editor' | 'viewer';
+  isOwner?: boolean;
   workspaceSlug?: string | null;
   workspaceLocalRoot?: string | null;
   artifactBackend?: string | null;
@@ -46,6 +61,19 @@ export interface HeadlessProject {
   artifactS3Prefix?: string | null;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface HeadlessProjectMember {
+  projectId: string;
+  userId: string;
+  role: 'owner' | 'editor' | 'viewer';
+  email?: string | null;
+  name?: string | null;
+  username?: string | null;
+  createdAt?: number | string | Date | null;
+  updatedAt?: number | string | Date | null;
+  lastSeenAt?: number | string | Date | null;
+  isOwner: boolean;
 }
 
 export interface HeadlessCollection {
@@ -130,10 +158,7 @@ export async function headlessCreateCollection(
   return response.collection;
 }
 
-export async function headlessDeleteDocument(
-  projectId: string,
-  documentId: string
-): Promise<void> {
+export async function headlessDeleteDocument(projectId: string, documentId: string): Promise<void> {
   await requestJson(
     `/projects/${encodeURIComponent(projectId)}/documents/${encodeURIComponent(documentId)}`,
     { method: 'DELETE' }
@@ -204,8 +229,8 @@ export async function headlessRagQuery(
     method: 'POST',
     body: JSON.stringify({ query, collectionId, limit }),
   });
-  if (response.status === "error") {
-    throw new Error(response.error || "Project retrieval failed.");
+  if (response.status === 'error') {
+    throw new Error(response.error || 'Project retrieval failed.');
   }
   return {
     query: response.query || query,
@@ -225,7 +250,7 @@ export async function headlessGetArtifacts(projectId: string): Promise<{
   return {
     artifacts: Array.isArray(response.artifacts) ? response.artifacts : [],
     versionsByArtifactId:
-      response.versionsByArtifactId && typeof response.versionsByArtifactId === "object"
+      response.versionsByArtifactId && typeof response.versionsByArtifactId === 'object'
         ? response.versionsByArtifactId
         : {},
   };
@@ -244,14 +269,16 @@ export async function headlessCreateCanvasDocument(
   const response = await requestJson<{ document: HeadlessCanvasDocument }>(
     `/projects/${encodeURIComponent(projectId)}/canvas-documents`,
     {
-      method: "POST",
+      method: 'POST',
       body: JSON.stringify(payload),
     }
   );
   return response.document;
 }
 
-export async function headlessGetCanvasDocuments(projectId: string): Promise<HeadlessCanvasDocument[]> {
+export async function headlessGetCanvasDocuments(
+  projectId: string
+): Promise<HeadlessCanvasDocument[]> {
   const response = await requestJson<{ documents?: HeadlessCanvasDocument[] }>(
     `/projects/${encodeURIComponent(projectId)}/canvas-documents`
   );

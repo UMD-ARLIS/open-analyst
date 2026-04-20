@@ -5,22 +5,14 @@
  *   const body = await parseJsonBody(request);
  *   if (body instanceof Response) return body;
  */
-export async function parseJsonBody(
-  request: Request
-): Promise<Record<string, unknown> | Response> {
+export async function parseJsonBody(request: Request): Promise<Record<string, unknown> | Response> {
   try {
     const body = await request.json();
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      return Response.json(
-        { error: "Request body must be a JSON object" },
-        { status: 400 }
-      );
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+      return Response.json({ error: 'Request body must be a JSON object' }, { status: 400 });
     }
     return body as Record<string, unknown>;
   } catch {
-    return Response.json(
-      { error: "Invalid JSON in request body" },
-      { status: 400 }
-    );
+    return Response.json({ error: 'Invalid JSON in request body' }, { status: 400 });
   }
 }

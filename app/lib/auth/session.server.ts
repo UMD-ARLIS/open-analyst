@@ -1,0 +1,81 @@
+import { createCookieSessionStorage } from 'react-router';
+
+const SESSION_SECRET = (() => {
+  const configured = String(process.env.SESSION_SECRET || '').trim();
+  if (configured) return configured;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('SESSION_SECRET must be set in production');
+  }
+  return 'dev-secret-change-in-production';
+})();
+
+export const sessionStorage = createCookieSessionStorage({
+  cookie: {
+    name: '__oa_session',
+    httpOnly: true,
+    maxAge: 60 * 60 * 24, // 24 hours
+    path: '/',
+    sameSite: 'lax',
+    secrets: [SESSION_SECRET],
+    secure: process.env.NODE_ENV === 'production',
+  },
+});
+
+export interface SessionUser {
+  userId: string;
+  email: string;
+  name: string;
+  accessToken: string;
+  refreshToken: string;
+  idToken: string;
+  expiresAt: number;
+}
+
+/** Minimal data stored in the cookie; tokens live server-side */
+export interface SessionCookieUser {
+  userId: string;
+  email: string;
+  name: string;
+}
+
+export async function getSession(request: Request) {
+  return sessionStorage.getSession(request.headers.get('Cookie'));
+}
+
+export async function getSessionUser(request: Request): Promise<SessionUser | null> {
+  const { getTokens } = await import('./token-store.server');
+  const session = await getSession(request);
+  const cookieUser = session.get('user') as SessionCookieUser | SessionUser | undefined;
+  if (!cookieUser?.userId) return null;
+
+  // Hydrate tokens from server-side store
+  const tokens = await getTokens(cookieUser.userId);
+  const legacyCookieUser = cookieUser as SessionUser;
+  const hasLegacyCookieTokens =
+    typeof legacyCookieUser.accessToken === 'string' &&
+    legacyCookieUser.accessToken.length > 0 &&
+    typeof legacyCookieUser.refreshToken === 'string' &&
+    legacyCookieUser.refreshToken.length > 0;
+
+  if (!tokens && !hasLegacyCookieTokens) {
+    return null;
+  }
+
+  return {
+    userId: cookieUser.userId,
+    email: cookieUser.email,
+    name: cookieUser.name,
+    accessToken: tokens?.accessToken || legacyCookieUser.accessToken || '',
+    refreshToken: tokens?.refreshToken || legacyCookieUser.refreshToken || '',
+    idToken: tokens?.idToken || legacyCookieUser.idToken || '',
+    expiresAt: tokens?.expiresAt || legacyCookieUser.expiresAt || 0,
+  };
+}
+
+export async function commitSession(session: Awaited<ReturnType<typeof getSession>>) {
+  return sessionStorage.commitSession(session);
+}
+
+export async function destroySession(session: Awaited<ReturnType<typeof getSession>>) {
+  return sessionStorage.destroySession(session);
+}

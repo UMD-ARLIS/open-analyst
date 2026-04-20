@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import tempfile
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -50,29 +49,6 @@ class LocalPaperStore:
             if payload.get("source_id") == identifier and (provider is None or payload.get("provider") == provider):
                 return PaperRecord.model_validate(payload)
         return None
-
-    async def all_papers(self) -> list[PaperRecord]:
-        return [PaperRecord.model_validate(payload) for payload in self._load_manifest().values()]
-
-    async def list_papers(self, query: str | None = None, provider: str | None = None, limit: int = 20) -> list[PaperRecord]:
-        papers = await self.all_papers()
-        if provider:
-            papers = [paper for paper in papers if paper.provider == provider]
-        if query:
-            needle = query.lower()
-            papers = [
-                paper
-                for paper in papers
-                if needle in paper.title.lower()
-                or needle in (paper.abstract or "").lower()
-                or needle in paper.source_id.lower()
-                or needle in (paper.doi or "").lower()
-            ]
-        papers.sort(
-            key=lambda paper: paper.published_at or paper.updated_at or datetime.min.replace(tzinfo=UTC),
-            reverse=True,
-        )
-        return papers[:limit]
 
     def _load_manifest(self) -> dict[str, Any]:
         return json.loads(self.path.read_text() or "{}")
@@ -207,32 +183,6 @@ class PostgresPaperStore:
             row = await cursor.fetchone()
         return self._row_to_paper(row) if row else None
 
-    async def all_papers(self) -> list[PaperRecord]:
-        async with await self._connect() as conn:
-            cursor = await conn.execute(f"SELECT * FROM {self.table_ref}")
-            rows = await cursor.fetchall()
-        return [self._row_to_paper(row) for row in rows]
-
-    async def list_papers(self, query: str | None = None, provider: str | None = None, limit: int = 20) -> list[PaperRecord]:
-        clauses: list[str] = []
-        params: list[Any] = []
-        if provider:
-            clauses.append("provider = %s")
-            params.append(provider)
-        if query:
-            clauses.append("(title ILIKE %s OR abstract ILIKE %s OR source_id ILIKE %s OR doi ILIKE %s)")
-            pattern = f"%{query}%"
-            params.extend([pattern, pattern, pattern, pattern])
-        statement = f"SELECT * FROM {self.table_ref}"
-        if clauses:
-            statement += " WHERE " + " AND ".join(clauses)
-        statement += " ORDER BY COALESCE(published_at, updated_at, updated_row_at) DESC NULLS LAST LIMIT %s"
-        params.append(limit)
-        async with await self._connect() as conn:
-            cursor = await conn.execute(statement, tuple(params))
-            rows = await cursor.fetchall()
-        return [self._row_to_paper(row) for row in rows]
-
     def _row_to_paper(self, row: dict[str, Any]) -> PaperRecord:
         return PaperRecord(
             canonical_id=row["canonical_id"],
@@ -254,19 +204,21 @@ class PostgresPaperStore:
             raw=row["raw"] or {},
         )
 
-    def _get_pool(self) -> AsyncConnectionPool:
+    async def _get_pool(self) -> AsyncConnectionPool:
         if self._pool is None:
             self._pool = AsyncConnectionPool(
                 conninfo=self.settings.psycopg_postgres_dsn,
                 kwargs={"autocommit": True, "row_factory": dict_row},
                 min_size=1,
                 max_size=10,
-                open=True,
+                open=False,
             )
+            await self._pool.open()
         return self._pool
 
     async def _connect(self):
-        return self._get_pool().connection()
+        pool = await self._get_pool()
+        return pool.connection()
 
     async def _create_index(self, conn: psycopg.AsyncConnection, statement: str) -> None:
         try:

@@ -4,35 +4,51 @@ import type { McpServerConfig } from './types';
 
 const CORE_TOOL_NAMES = ['collection_overview', 'collection_artifact_metadata', 'capture_artifact'];
 
-export function isToolCatalogQuestion(input: { prompt?: string; messages?: Array<{ role?: string; content?: unknown }> }): boolean {
-  const prompt = String(input.prompt || '').trim().toLowerCase();
+export function isToolCatalogQuestion(input: {
+  prompt?: string;
+  messages?: Array<{ role?: string; content?: unknown }>;
+}): boolean {
+  const prompt = String(input.prompt || '')
+    .trim()
+    .toLowerCase();
   const latestUserText = Array.isArray(input.messages)
     ? [...input.messages]
         .reverse()
         .find((message) => message?.role === 'user' && String(message?.content || '').trim())
     : null;
-  const fullText = prompt || String(latestUserText?.content || '').trim().toLowerCase();
+  const fullText =
+    prompt ||
+    String(latestUserText?.content || '')
+      .trim()
+      .toLowerCase();
   return (
-    (fullText.includes('what tools') || fullText.includes('which tools') || fullText.includes('available tools')) ||
+    fullText.includes('what tools') ||
+    fullText.includes('which tools') ||
+    fullText.includes('available tools') ||
     ((fullText.includes('tool') || fullText.includes('connector') || fullText.includes('mcp')) &&
-      (fullText.includes('available') || fullText.includes('have') || fullText.includes('can use') || fullText.includes('list')))
+      (fullText.includes('available') ||
+        fullText.includes('have') ||
+        fullText.includes('can use') ||
+        fullText.includes('list')))
   );
 }
 
 export async function buildToolCatalogText(input: {
   activeToolNames?: string[];
   mcpServers?: McpServerConfig[];
+  userId?: string;
 }): Promise<string> {
-  const activeToolNames = new Set(
-    [...CORE_TOOL_NAMES, ...((input.activeToolNames || []).map((name) => String(name).trim()).filter(Boolean))]
-  );
+  const activeToolNames = new Set([
+    ...CORE_TOOL_NAMES,
+    ...(input.activeToolNames || []).map((name) => String(name).trim()).filter(Boolean),
+  ]);
   const localTools = listAvailableTools()
     .filter((tool) => activeToolNames.has(tool.name))
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const selectedServers = input.mcpServers || [];
   const selectedServerIds = new Set(selectedServers.map((server) => server.id));
-  const allMcpTools = await getMcpTools();
+  const allMcpTools = input.userId ? await getMcpTools(input.userId) : [];
   const mcpTools =
     selectedServerIds.size > 0
       ? allMcpTools.filter((tool) => selectedServerIds.has(tool.serverId))
@@ -42,7 +58,9 @@ export async function buildToolCatalogText(input: {
 
   if (localTools.length) {
     sections.push(
-      ['Local tools:', ...localTools.map((tool) => `- ${tool.name}: ${tool.description}`)].join('\n')
+      ['Local tools:', ...localTools.map((tool) => `- ${tool.name}: ${tool.description}`)].join(
+        '\n'
+      )
     );
   }
 
@@ -52,7 +70,9 @@ export async function buildToolCatalogText(input: {
     sections.push(
       [
         'MCP tools:',
-        ...selectedServers.map((server) => `- ${server.name}: connected, but no tools were discovered for this turn`),
+        ...selectedServers.map(
+          (server) => `- ${server.name}: connected, but no tools were discovered for this turn`
+        ),
       ].join('\n')
     );
   }
@@ -91,6 +111,10 @@ function buildMcpSection(tools: McpDiscoveredTool[]): string {
 
 function toInvocableMcpToolName(tool: McpDiscoveredTool): string {
   const rawPrefix = tool.serverAlias || tool.serverName || tool.serverId || 'server';
-  const slug = rawPrefix.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'server';
+  const slug =
+    rawPrefix
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'server';
   return `mcp__${slug}__${tool.name}`;
 }
